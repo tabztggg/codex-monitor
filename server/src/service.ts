@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import { deriveThreadRuntimeStatus, type ActiveSession, type ArmAutomationRequest, type ArmGlobalAutomationRequest, type CodexUsageSnapshot, type HistoryJobListResponse, type HistoryThreadListResponse, type MonitorSnapshot, type RunSnapshot, type ServerConnectionState } from "../../shared/monitor";
 import { ActiveSessionTracker } from "./active-sessions";
 import { CodexAppServerClient } from "./codex-client";
@@ -37,7 +38,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
 
   public constructor(
     client = new CodexAppServerClient(),
-    historyJobReader = new HistoryJobReader()
+    historyJobReader = new HistoryJobReader(undefined, path.resolve('.cache/quota-attribution.json'))
   ) {
     super();
     this.client = client;
@@ -204,8 +205,10 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     limitName: string;
     windowLabel: string;
   } | null {
-    const limit = this.codexUsage.primaryLimit;
-    const window = limit?.primary;
+    const limit = this.codexUsage.limits.find(entry => entry.id === 'codex') ??
+      (this.codexUsage.primaryLimit?.id === 'codex' ? this.codexUsage.primaryLimit : null);
+    const window = [limit?.primary, limit?.secondary].find(entry => entry?.windowDurationMins === 10080) ??
+      limit?.primary ?? limit?.secondary;
     if (
       window?.usedPercent === null ||
       window?.usedPercent === undefined ||
@@ -319,6 +322,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
           message.params,
           this.codexUsage
         );
+        this.observeQuotaUsage();
       }
       this.store.applyRpcNotification(message);
       this.automation.evaluateAll();
@@ -463,11 +467,23 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       );
     }
 
-    if (JSON.stringify(nextUsage) === JSON.stringify(this.codexUsage)) {
+    const unchanged = JSON.stringify(nextUsage) === JSON.stringify(this.codexUsage);
+    this.codexUsage = nextUsage;
+    this.observeQuotaUsage();
+    if (unchanged) {
       return;
     }
 
-    this.codexUsage = nextUsage;
     this.emitSnapshot();
+  }
+
+  private observeQuotaUsage(): void {
+    const usageWindow = this.getPrimaryUsageWindow();
+    if (!usageWindow || Date.parse(usageWindow.resetsAt) <= Date.now()) return;
+    try {
+      this.historyJobReader.listJobs({ usageWindow, observeUsage: true });
+    } catch (error) {
+      console.error('Could not record quota attribution:', error);
+    }
   }
 }

@@ -14,6 +14,7 @@ import {
 } from "../../shared/monitor";
 import { asRecord, asString, cloneValue, toIsoDate } from "./utils";
 import { userPreview } from "../../shared/session-preview";
+import { QuotaAttribution } from "./quota-attribution";
 
 type SessionFile = {
   path: string;
@@ -90,8 +91,11 @@ const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
+  private readonly attribution: QuotaAttribution;
 
-  public constructor(private readonly sessionsRoot = resolveCodexSessionsRoot()) {}
+  public constructor(private readonly sessionsRoot = resolveCodexSessionsRoot(), ledgerFile?: string) {
+    this.attribution = new QuotaAttribution(ledgerFile);
+  }
 
   public listJobs(args: {
     cursor?: string | null;
@@ -103,6 +107,7 @@ export class HistoryJobReader {
     metadataById?: Map<string, HistoryJobMetadata> | null;
     nowMs?: number;
     usageWindow?: UsageWindow | null;
+    observeUsage?: boolean;
   }): HistoryJobListResponse {
     const nowMs = args.nowMs ?? Date.now();
     const indexedNames = readSessionNames(path.join(this.sessionsRoot, "..", "session_index.jsonl"));
@@ -130,10 +135,19 @@ export class HistoryJobReader {
         this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null)
       )
       .filter((job): job is ParsedHistoryJob => Boolean(job));
-    const allJobs = allocateUsageSinceReset(
-      consolidateSubagentUsage(mergeJobsByTask(parsedJobs)),
-      args.usageWindow ?? null
-    );
+    const consolidated = consolidateSubagentUsage(mergeJobsByTask(parsedJobs));
+    const window = args.usageWindow;
+    const key = window ? JSON.stringify([window.limitName, window.windowLabel, window.startedAtMs, window.resetsAt]) : '';
+    if (window && args.observeUsage) {
+      this.attribution.observe(key, window.usedPercent, consolidated.map(job => ({
+        id: job.id, cost: job.sinceResetEstimatedCostUsd ?? 0,
+        tokens: job.sinceResetUsage?.totalTokens ?? 0, unpriced: job.sinceResetUnpricedTokens ?? 0
+      })), nowMs);
+    }
+    const ledger = this.attribution.read(key);
+    const allJobs = consolidated.map(job => ({ ...job,
+      estimatedUsagePercentSinceReset: ledger ? ledger.attributed[job.id] ?? 0 : null
+    }));
     const jobs = allJobs
       .map((job) => applyMetadata({ ...job, name: indexedNames.get(job.id) ?? job.name }, args.metadataById?.get(job.id)))
       .filter((job) => !sourceKindSet || sourceKindSet.has(job.sourceKind))
@@ -146,7 +160,12 @@ export class HistoryJobReader {
       data: jobs.slice(offset, offset + limit),
       total: jobs.length,
       nextCursor: offset + limit < jobs.length ? String(offset + limit) : null,
-      usageAllocation: usageAllocationSummary(args.usageWindow ?? null, allJobs)
+      usageAllocation: {
+        ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
+        status: ledger ? 'available' : 'unavailable',
+        observedSince: ledger?.observedAt ?? null,
+        unattributedPercent: ledger?.unattributed ?? window?.usedPercent ?? null
+      }
     };
   }
 
@@ -278,7 +297,8 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
         existing.sinceResetEstimatedCostUsd,
         job.sinceResetEstimatedCostUsd
       ),
-      estimatedUsagePercentSinceReset: null
+      estimatedUsagePercentSinceReset: null,
+      sinceResetUnpricedTokens: (existing.sinceResetUnpricedTokens ?? 0) + (job.sinceResetUnpricedTokens ?? 0)
     });
   }
 
@@ -333,6 +353,7 @@ function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] 
       target.sinceResetUsage,
       job.sinceResetUsage
     );
+    target.sinceResetUnpricedTokens = (target.sinceResetUnpricedTokens ?? 0) + (job.sinceResetUnpricedTokens ?? 0);
     consolidatedIds.add(job.id);
   }
 
@@ -369,38 +390,6 @@ function findPrincipalAncestor(
 
 function isSubagentSource(sourceKind: SourceKind | "unknown"): boolean {
   return sourceKind.startsWith("subAgent");
-}
-
-function allocateUsageSinceReset(
-  jobs: HistoryJob[],
-  window: UsageWindow | null
-): HistoryJob[] {
-  if (!window) {
-    return jobs.map((job) => ({
-      ...job,
-      estimatedUsagePercentSinceReset: null
-    }));
-  }
-
-  const basis = usageAllocationBasis(jobs);
-  if (!basis) {
-    return jobs.map((job) => ({
-      ...job,
-      estimatedUsagePercentSinceReset: null
-    }));
-  }
-  const totalWeight = jobs.reduce(
-    (total, job) => total + usageAllocationWeight(job, basis),
-    0
-  );
-
-  return jobs.map((job) => ({
-    ...job,
-    estimatedUsagePercentSinceReset:
-      totalWeight > 0
-        ? (window.usedPercent * usageAllocationWeight(job, basis)) / totalWeight
-        : null
-  }));
 }
 
 function usageAllocationSummary(
@@ -442,13 +431,6 @@ function usageAllocationBasis(
     jobsWithUsage.some((job) => (job.sinceResetEstimatedCostUsd ?? 0) > 0)
     ? "apiEquivalentCost"
     : null;
-}
-
-function usageAllocationWeight(
-  job: HistoryJob,
-  basis: "apiEquivalentCost"
-): number {
-  return job.sinceResetEstimatedCostUsd ?? 0;
 }
 
 function applyMetadata(
@@ -503,6 +485,7 @@ export function parseHistorySessionFile(args: {
   let last24HoursCostIsComplete = true;
   let sinceResetUsage: TokenUsage | null = null;
   let sinceResetEstimatedCostUsd = 0;
+  let sinceResetUnpricedTokens = 0;
   let hasPricedSinceResetUsage = false;
   let latestTurnId: string | null = null;
   const turns = new Map<string, ParsedTurn>();
@@ -658,7 +641,7 @@ export function parseHistorySessionFile(args: {
         if (estimatedCost !== null) {
           sinceResetEstimatedCostUsd += estimatedCost;
           hasPricedSinceResetUsage = true;
-        }
+        } else sinceResetUnpricedTokens += increment.totalTokens;
       }
     }
   }
@@ -716,6 +699,7 @@ export function parseHistorySessionFile(args: {
         ? last24HoursEstimatedCostUsd
         : null,
     sinceResetUsage,
+    sinceResetUnpricedTokens,
     sinceResetEstimatedCostUsd:
       sinceResetUsage && hasPricedSinceResetUsage
         ? sinceResetEstimatedCostUsd

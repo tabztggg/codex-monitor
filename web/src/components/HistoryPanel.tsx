@@ -42,6 +42,9 @@ export function HistoryPanel({ snapshot, nowMs }: { snapshot: MonitorSnapshot; n
         <select aria-label="Sort tasks" value={sort} onChange={event => setSort(event.target.value)}><option value="usage">Highest usage</option><option value="activity">Last activity</option></select>
       </div>
       {error && <p className="history-error" role="alert">Could not refresh tasks: {error}</p>}
+      {allocation?.observedSince && <p className="history-refresh" title="Consumption before observation and increments without sufficient recorded usage remain unattributed. Filters do not change attribution.">
+        Attribution observed since {formatDateTime(allocation.observedSince)} · Unattributed quota: {formatUsagePercent(allocation.unattributedPercent ?? null)}
+      </p>}
       <div className="task-table-scroll">
         <table className="task-table">
           <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col" className="numeric">Approx. usage %<small>Since reset</small></th><th scope="col" className="numeric">Estimated total cost<small>Task lifetime · USD</small></th><th scope="col" className="numeric">Total tokens<small>Task lifetime</small></th><th scope="col" className="numeric">Activity</th></tr></thead>
@@ -165,7 +168,7 @@ function formatUsageAllocationTitle(
       ? "the API-equivalent cost of priceable recorded usage"
       : "available local activity";
 
-  return `Approximate share of the observed ${limit}${window} quota usage from ${formatDateTime(allocation.windowStartedAt)} until the reset at ${formatDateTime(allocation.resetsAt)}. Allocated across locally recorded tasks in proportion to ${basis}; unpriced activity is excluded from the weighting. It is not an OpenAI per-task quota measurement or a token-to-quota conversion.`;
+  return `Estimated percentage of the total ${limit}${window} quota consumed by this task since reset. Each observed quota increase is allocated using ${basis} recorded since the previous increase, then accumulated. Previous allocations are preserved. Consumption before observation and increments with missing or unpriced usage remain unattributed. This is an estimate, not an OpenAI per-task measurement. Resets at ${formatDateTime(allocation.resetsAt)}.`;
 }
 
 function formatDateTime(isoValue: string): string {

@@ -127,16 +127,26 @@ output, and long-context multipliers. A `+` marks a partial lower bound when
 some model usage cannot be priced. These are not plan charges and exclude
 tool-call fees.
 
-Quota shares are allocated in proportion to API-equivalent costs since reset.
-A task with recorded usage but no priceable activity in that period can make
-allocation unavailable for every task. Unavailable values display `--`.
+Only observed quota increases are allocated, proportional to each task's
+API-equivalent cost recorded since the preceding increase. Unchanged rounded
+quota readings keep the pending usage until the next increase. Assigned values
+accumulate and never get redistributed to newer tasks. The first reading is a
+baseline: prior consumption stays unattributed. Increments without weights or
+with unpriced activity also stay unattributed. The table shows observation start
+and unattributed quota; zero means no attributed consumption during observation,
+not proof of zero historical consumption. Unavailable values display `--`.
+The ledger is atomically persisted in `.cache/quota-attribution.json` relative to
+the working directory and survives restarts. A changed quota window or a lower
+usage reading starts a fresh baseline (including an early reset). Quota polling
+and notifications record observations without requiring an open dashboard.
 Nested subagent usage is consolidated into its principal task when the parent
 chain is available; legacy sessions without parent metadata cannot be attributed.
 
 The header explicitly selects the overall `codex` bucket, preferring its weekly
 window; Spark is never a fallback. Its pace message compares quota used with
 time elapsed in percentage points, rather than projecting future consumption.
-The per-task allocation continues to use the backend's primary quota window.
+Per-task allocation uses the same overall quota window as the header, preferring
+weekly and excluding Spark.
 Missing or expired header data is labeled instead of presented as current.
 
 Task history refreshes 30 seconds after each completed attempt. Global quota is

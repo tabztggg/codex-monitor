@@ -515,11 +515,16 @@ describe("MonitorService history jobs", () => {
       totalUsage: { totalTokens: 650 },
       last24HoursUsage: { totalTokens: 650 },
       sinceResetUsage: { totalTokens: 650 },
-      estimatedUsagePercentSinceReset: 20
+      estimatedUsagePercentSinceReset: null
     });
   });
 
   it("allocates observed usage percent across tasks since the current reset", () => {
+    const reader = new HistoryJobReader(sessionsRoot);
+    reader.listJobs({ observeUsage: true, usageWindow: {
+      usedPercent: 16, startedAtMs: Date.parse("2026-05-12T08:00:00.000Z"),
+      resetsAt: "2026-05-19T08:00:00.000Z", limitName: "Overall Codex", windowLabel: "Weekly"
+    }});
     writeSessionFile(
       sessionsRoot,
       "019e1b12-0000-7000-8000-000000000041",
@@ -537,18 +542,17 @@ describe("MonitorService history jobs", () => {
       { totalTokens: 300 }
     );
 
-    const history = new HistoryJobReader(sessionsRoot).listJobs({
+    const history = reader.listJobs({
+      observeUsage: true,
       nowMs: Date.parse("2026-05-12T12:00:00.000Z"),
       usageWindow: {
-        usedPercent: 20,
-        startedAtMs: Date.parse("2026-05-12T08:00:00.000Z"),
-        resetsAt: "2026-05-19T08:00:00.000Z",
-        limitName: "Overall Codex",
-        windowLabel: "Weekly"
+        usedPercent: 20, startedAtMs: Date.parse("2026-05-12T08:00:00.000Z"),
+        resetsAt: "2026-05-19T08:00:00.000Z", limitName: "Overall Codex", windowLabel: "Weekly"
       }
     });
 
     expect(history.usageAllocation).toMatchObject({
+      unattributedPercent: 16,
       status: "available",
       usedPercent: 20,
       limitName: "Overall Codex",
@@ -558,11 +562,35 @@ describe("MonitorService history jobs", () => {
     expect(
       history.data.find((job) => job.id.endsWith("41"))
         ?.estimatedUsagePercentSinceReset
-    ).toBeCloseTo(5.8333333333, 8);
+    ).toBeCloseTo(1.1666666667, 8);
     expect(
       history.data.find((job) => job.id.endsWith("42"))
         ?.estimatedUsagePercentSinceReset
-    ).toBeCloseTo(14.1666666667, 8);
+    ).toBeCloseTo(2.8333333333, 8);
+  });
+
+  it('records weekly quota notifications without dashboard reads and ignores Spark', async () => {
+    const client = new FakeCodexClient();
+    const reader = new HistoryJobReader(sessionsRoot);
+    const service = new MonitorService(client as never, reader);
+    const now = Date.now();
+    const reset = Math.floor(now / 1000) + 86400;
+    const notify = (usedPercent: number, limitId = 'codex') => client.emit('notification', {
+      method: 'account/rateLimits/updated', params: { rateLimits: {
+        limitId,
+        primary: { usedPercent: 50, windowDurationMins: 300, resetsAt: reset },
+        secondary: { usedPercent, windowDurationMins: 10080, resetsAt: reset }
+      }}
+    });
+    notify(20);
+    writeSessionFile(sessionsRoot, '019e1b12-0000-7000-8000-000000000090', new Date(now).toISOString(), 'cli', 'new activity', { totalTokens: 100 });
+    notify(22);
+    notify(80, 'codex_bengalfox');
+    const history = await service.listHistoryJobs({});
+    expect(history.usageAllocation).toMatchObject({ usedPercent: 22, unattributedPercent: 20, windowLabel: 'Weekly' });
+    expect(history.data[0].estimatedUsagePercentSinceReset).toBe(2);
+    // Reading or filtering history must never reallocate quota.
+    expect((await service.listHistoryJobs({})).data[0].estimatedUsagePercentSinceReset).toBe(2);
   });
 });
 

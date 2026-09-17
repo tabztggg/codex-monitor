@@ -45,7 +45,13 @@ For background launch, desktop shortcuts, and Windows options, see the
 | Total tokens | Entire task, including attributable subagents |
 | Approx. usage % | Since the primary quota reset |
 
-Quota shares use the existing allocation based on API-equivalent costs.
+Each observed quota increase is divided in proportion to the API-equivalent
+cost recorded by each task since the previous increase, then accumulated since
+reset. Earlier allocations do not shrink when another task works. Consumption
+before the first observation and increments without sufficient priced usage
+remain unattributed, shown above the table. Attribution persists across monitor
+restarts in `.cache/quota-attribution.json`; observation runs with quota polling
+even when the dashboard is closed.
 A `+` marks a partial cost estimate; `--` means unavailable. The header reports
 Codex's overall quota, while task shares are estimates. See
 [metric details](docs/setup-and-reference.md#metric-details) for the calculation

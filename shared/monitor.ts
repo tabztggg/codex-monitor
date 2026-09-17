@@ -285,10 +285,13 @@ export interface HistoryJob {
   last24HoursEstimatedCostUsd: number | null;
   sinceResetUsage: TokenUsage | null;
   sinceResetEstimatedCostUsd: number | null;
+  sinceResetUnpricedTokens?: number;
   estimatedUsagePercentSinceReset: number | null;
 }
 
 export interface HistoryUsageAllocation {
+  observedSince?: string | null;
+  unattributedPercent?: number | null;
   status: "available" | "unavailable";
   usedPercent: number | null;
   windowStartedAt: string | null;

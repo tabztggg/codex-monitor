@@ -4,6 +4,9 @@
 
 [English](README.md) | 简体中文
 
+**最新版本：[v0.2.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.2.0)** ·
+修复任务漏统计，优化增量刷新 · [更新日志与升级说明](CHANGELOG.md#简体中文)
+
 一个在本地运行的 Codex 用量仪表盘，集中查看账号额度、Token、估算费用和任务活动。
 本版本基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor)
 扩展，增加中英文界面、归档统计、项目汇总和用量分析功能。

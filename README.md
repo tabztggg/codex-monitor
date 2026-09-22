@@ -4,6 +4,9 @@
 
 English | [简体中文](README.zh-CN.md)
 
+**Latest: [v0.2.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.2.0)** ·
+Missing-task fixes and incremental refresh · [Changelog and upgrade notes](CHANGELOG.md#english)
+
 A local dashboard for account quota, recorded tokens, estimated costs, and live
 activity. This customized version builds on
 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) with bilingual

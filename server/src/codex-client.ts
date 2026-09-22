@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import { version } from "../../package.json";
 
 type RequestId = string | number;
 
@@ -140,7 +141,7 @@ export class CodexAppServerClient extends EventEmitter<{
         clientInfo: {
           name: "codex-monitor",
           title: "Codex Monitor",
-          version: "0.1.0"
+          version
         },
         capabilities: {
           experimentalApi: true

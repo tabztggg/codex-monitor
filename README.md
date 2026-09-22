@@ -10,6 +10,32 @@ activity. This customized version builds on
 controls, archived-task statistics, project summaries, and usage analysis.
 It is an unofficial community project, not an OpenAI product or billing system.
 
+## Screenshots
+
+Real application UI with fictional sample projects and usage. No private account
+or conversation data is shown. The Activity column is hidden using View options.
+
+### Dashboard at a glance
+
+Track account quota, compare task usage, and see cross-account 20x equivalents
+alongside estimated cost and tokens.
+
+![Codex Monitor English dashboard showing account quota, task statistics and 20x equivalent usage](assets/screenshots/overview-en.jpg)
+
+### Project totals
+
+Turn on project grouping to compare quota, 20x equivalents, cost, and tokens.
+Expand a project to see its tasks; collapsed projects keep their totals visible.
+
+![Project groups with aggregate quota percentages, estimated costs and total tokens](assets/screenshots/projects-en.jpg)
+
+### Daily trends and project ranking
+
+Open the analysis panel to explore daily usage and compare the busiest projects.
+Switch the metric between estimated cost, tokens, and 20x equivalents.
+
+![Daily cost trend and project usage ranking in Codex Monitor](assets/screenshots/trends-en.jpg)
+
 ## Features
 
 | Feature | What you can do |

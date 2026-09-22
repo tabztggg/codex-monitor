@@ -183,6 +183,8 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     searchTerm?: string | null;
     sortKey?: string | null;
     sortDirection?: string | null;
+    archiveMode?: 'recent' | 'all';
+    period?: 'quota' | 'today' | '7d' | 'lifetime';
   }): Promise<HistoryJobListResponse> {
     let metadataById: Map<string, HistoryJobMetadata> | null = null;
     try {

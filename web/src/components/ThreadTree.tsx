@@ -1,4 +1,5 @@
 import type { ThreadNode } from "../../../shared/monitor";
+import { useI18n } from '../LanguageContext';
 
 export function ThreadTree({
   rootThreadId,
@@ -12,13 +13,14 @@ export function ThreadTree({
   onSelect: (threadId: string) => void;
 }) {
   const root = threads[rootThreadId];
+  const { t } = useI18n();
 
   return (
     <section className="panel thread-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Thread tree</p>
-          <h3>Root plus spawned agents</h3>
+          <p className="eyebrow">{t('Thread tree')}</p>
+          <h3>{t('Root plus spawned agents')}</h3>
         </div>
       </div>
 
@@ -33,7 +35,7 @@ export function ThreadTree({
           />
         </div>
       ) : (
-        <div className="empty-state">Waiting for thread data…</div>
+        <div className="empty-state">{t('Waiting for thread data…')}</div>
       )}
     </section>
   );
@@ -52,6 +54,7 @@ function TreeBranch({
   depth: number;
   onSelect: (threadId: string) => void;
 }) {
+  const { t, label } = useI18n();
   return (
     <div className="thread-branch">
       <button
@@ -62,12 +65,12 @@ function TreeBranch({
       >
         <div className="thread-card-top">
           <span className={`status-pill ${toneFromBucket(thread.runtimeStatus.bucket)}`}>
-            {thread.runtimeStatus.bucket}
+            {label(thread.runtimeStatus.bucket)}
           </span>
-          <span className="panel-meta">{thread.sourceKind}</span>
+          <span className="panel-meta">{label(thread.sourceKind)}</span>
         </div>
         <strong>{thread.name ?? thread.id}</strong>
-        <span>{thread.latestMessagePreview ?? thread.lastCommandSummary ?? "No recent preview yet."}</span>
+        <span>{thread.latestMessagePreview ?? thread.lastCommandSummary ?? t('No recent preview yet.')}</span>
       </button>
 
       {thread.childIds.map((childId) => {

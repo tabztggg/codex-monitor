@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import {
   HISTORY_JOB_SORT_KEYS,
   SOURCE_KINDS,
@@ -8,6 +9,10 @@ import {
   type HistoryJobListResponse,
   type HistoryJobSortKey,
   type HistoryUsageAllocation,
+  type HistoryArchiveMode,
+  type HistoryPeriod,
+  type HistoryUsageDay,
+  type HistoryPeriodMetrics,
   type SourceKind,
   type SortDirection,
   type TokenUsage
@@ -15,6 +20,10 @@ import {
 import { asRecord, asString, cloneValue, toIsoDate } from "./utils";
 import { userPreview } from "../../shared/session-preview";
 import { QuotaAttribution } from "./quota-attribution";
+import { calibrate20x, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
+import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
+import { readProjectResolver } from './project-metadata';
+import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
 
 type SessionFile = {
   path: string;
@@ -31,6 +40,11 @@ type CachedHistoryJob = {
 };
 
 type ParsedHistoryJob = HistoryJob & {
+  dailyUsage?: HistoryUsageDay[];
+  quotaDailyUsage?: HistoryUsageDay[];
+  untimedTokens?: number;
+  totalUnpricedTokens?: number;
+  quotaCalibrationEvents?: QuotaCalibrationEvent[];
   parentThreadId: string | null;
   isSubagent: boolean;
 };
@@ -92,9 +106,18 @@ const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
   private readonly attribution: QuotaAttribution;
+  private readonly archiveCacheFile: string | undefined;
+  private archiveCacheDirty = false;
+  private readonly identities = new Map<string, ArchiveMetadata>();
 
-  public constructor(private readonly sessionsRoot = resolveCodexSessionsRoot(), ledgerFile?: string) {
+  public constructor(
+    private readonly sessionsRoot = resolveCodexSessionsRoot(),
+    ledgerFile?: string,
+    private readonly archivedRoot = path.join(sessionsRoot, '..', 'archived_sessions')
+  ) {
     this.attribution = new QuotaAttribution(ledgerFile);
+    this.archiveCacheFile = ledgerFile ? path.join(path.dirname(ledgerFile), 'archived-history.json') : undefined;
+    this.loadArchiveCache();
   }
 
   public listJobs(args: {
@@ -108,15 +131,30 @@ export class HistoryJobReader {
     nowMs?: number;
     usageWindow?: UsageWindow | null;
     observeUsage?: boolean;
+    archiveMode?: HistoryArchiveMode;
+    period?: HistoryPeriod;
   }): HistoryJobListResponse {
     const nowMs = args.nowMs ?? Date.now();
+    const period = args.period ?? 'quota';
     const indexedNames = readSessionNames(path.join(this.sessionsRoot, "..", "session_index.jsonl"));
-    const sessionFiles = listSessionFiles(this.sessionsRoot);
-    const activePaths = new Set(sessionFiles.map((file) => file.path));
+    const archiveMetadata = readArchiveMetadata(path.join(this.sessionsRoot, '..'));
+    const archiveMode = args.archiveMode === 'all' ? 'all' : 'recent';
+    const projectFor = readProjectResolver(path.join(this.sessionsRoot, '..'));
+    const activeFiles = listSessionFiles(this.sessionsRoot);
+    // During an archive move both copies may briefly exist. Count that rollout once.
+    const activeNames = new Set(activeFiles.map(file => path.basename(file.path)));
+    const archiveFiles = listSessionFiles(this.archivedRoot)
+      .filter(file => !activeNames.has(path.basename(file.path)));
+    const archivedPaths = new Set(archiveFiles.map(file => file.path));
+    const selection = this.selectArchives(activeFiles, archiveFiles, archiveMetadata, archiveMode);
+    const sessionFiles = [...activeFiles, ...selection.files];
+    // A narrower request must not evict cached summaries for the full-history view.
+    const activePaths = new Set([...activeFiles, ...archiveFiles].map((file) => file.path));
 
     for (const cachedPath of this.cache.keys()) {
       if (!activePaths.has(cachedPath)) {
         this.cache.delete(cachedPath);
+        this.archiveCacheDirty = true;
       }
     }
 
@@ -131,25 +169,65 @@ export class HistoryJobReader {
     const sortDirection = normalizeSortDirection(args.sortDirection);
 
     const parsedJobs = sessionFiles
-      .map((file) =>
-        this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null)
-      )
+      .map((file) => {
+        const previous = this.cache.get(file.path);
+        const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null);
+        const archived = archivedPaths.has(file.path);
+        if (archived && previous !== this.cache.get(file.path)) this.archiveCacheDirty = true;
+        return job ? { ...job, archived } : null;
+      })
       .filter((job): job is ParsedHistoryJob => Boolean(job));
+    this.saveArchiveCache(archivedPaths);
     const consolidated = consolidateSubagentUsage(mergeJobsByTask(parsedJobs));
     const window = args.usageWindow;
+    const weekEnd = Date.parse(window?.resetsAt ?? '');
+    const weekly = window && weekEnd > nowMs && weekEnd - window.startedAtMs === 604800000;
+    const calibration = weekly
+      ? calibrate20x(parsedJobs.flatMap(job => job.quotaCalibrationEvents ?? []), window.startedAtMs, Math.min(weekEnd, nowMs + 1))
+      : { costPerPercent: null, quotaPercent: 0 };
     const key = window ? JSON.stringify([window.limitName, window.windowLabel, window.startedAtMs, window.resetsAt]) : '';
     if (window && args.observeUsage) {
       this.attribution.observe(key, window.usedPercent, consolidated.map(job => ({
         id: job.id, cost: job.sinceResetEstimatedCostUsd ?? 0,
-        tokens: job.sinceResetUsage?.totalTokens ?? 0, unpriced: job.sinceResetUnpricedTokens ?? 0
+        tokens: job.sinceResetUsage?.totalTokens ?? 0, unpriced: job.sinceResetUnpricedTokens ?? 0,
+        historical: job.archived
       })), nowMs);
     }
     const ledger = this.attribution.read(key);
-    const allJobs = consolidated.map(job => ({ ...job,
-      estimatedUsagePercentSinceReset: ledger ? ledger.attributed[job.id] ?? 0 : null
-    }));
+    const selectedDays = new Map<string, HistoryUsageDay[]>();
+    const selectedStart = periodStart(period, nowMs, window?.startedAtMs ?? null);
+    const allJobs = consolidated.map(({ quotaCalibrationEvents: _events, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
+      const days = (period === 'quota' ? quotaDailyUsage ?? [] : dailyUsage ?? [])
+        .filter(day => (!selectedStart || day.date >= localDay(selectedStart)) && day.date <= localDay(nowMs));
+      selectedDays.set(job.id, days);
+      const usage = period === 'lifetime' ? job.totalUsage : period === 'quota' ? job.sinceResetUsage
+        : days.reduce<TokenUsage | null>((sum, day) => addUsage(sum, day.usage), null);
+      const priced = days.filter(day => day.costUsd !== null);
+      const cost = period === 'lifetime' ? job.totalEstimatedCostUsd : period === 'quota' ? job.sinceResetEstimatedCostUsd
+        : priced.length ? priced.reduce((sum, day) => sum + day.costUsd!, 0) : null;
+      const unpriced = period === 'lifetime' ? totalUnpricedTokens : period === 'quota' ? job.sinceResetUnpricedTokens ?? 0 : days.reduce((sum, day) => sum + day.unpricedTokens, 0);
+      const available = period !== 'quota' || Boolean(window && weekEnd > nowMs);
+      const emptyKnown = available && Boolean(job.totalUsage) && !usage && untimedTokens === 0;
+      const periodMetrics: HistoryPeriodMetrics = {
+        tokensComplete: available && Boolean(usage || emptyKnown) && (period === 'lifetime' || untimedTokens === 0),
+        usage: available ? usage ?? (emptyKnown ? { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 } : null) : null,
+        costUsd: available ? cost ?? (emptyKnown ? 0 : null) : null,
+        costComplete: period === 'lifetime' ? job.totalEstimatedCostIsComplete : available && unpriced === 0 && untimedTokens === 0,
+        unpricedTokens: unpriced, untimedTokens
+      };
+      const attributed = ledger?.attributed[job.id] ?? 0;
+      return { ...job,
+        periodMetrics,
+        estimated20xPercent: available && periodMetrics.usage ? equivalent20x({ ...job, sinceResetUsage: periodMetrics.usage, sinceResetEstimatedCostUsd: periodMetrics.costUsd }, calibration.costPerPercent) : null,
+        estimated20xIsComplete: periodMetrics.costComplete,
+        estimatedUsagePercentSinceReset: !ledger ? null : attributed > 0 ? attributed :
+          job.sinceResetUsage || !job.totalUsage ? null : 0
+      };
+    });
     const jobs = allJobs
-      .map((job) => applyMetadata({ ...job, name: indexedNames.get(job.id) ?? job.name }, args.metadataById?.get(job.id)))
+      .map((job) => applyMetadata({ ...job, archivedAt: job.archived ? archiveMetadata.get(job.id)?.archivedAt ?? null : null,
+        name: indexedNames.get(job.id) ?? job.name }, args.metadataById?.get(job.id)))
+      .map(job => ({ ...job, project: projectFor(job) }))
       .filter((job) => !sourceKindSet || sourceKindSet.has(job.sourceKind))
       .filter((job) => matchesSearch(job, searchTerm))
       .sort((left, right) =>
@@ -157,10 +235,19 @@ export class HistoryJobReader {
       );
 
     return {
+      analysis: {
+        period, startedAt: selectedStart === null ? null : new Date(selectedStart).toISOString(),
+        endedAt: new Date(nowMs).toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        days: mergeDays(...jobs.map(job => selectedDays.get(job.id))),
+        unpricedTokens: jobs.reduce((sum, job) => sum + (job.periodMetrics?.unpricedTokens ?? 0), 0),
+        untimedTokens: jobs.reduce((sum, job) => sum + (job.periodMetrics?.untimedTokens ?? 0), 0)
+      },
       data: jobs.slice(offset, offset + limit),
       total: jobs.length,
       nextCursor: offset + limit < jobs.length ? String(offset + limit) : null,
+      archives: { mode: archiveMode, total: selection.total, included: allJobs.filter(job => job.archived).length },
       usageAllocation: {
+        equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent },
         ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
         status: ledger ? 'available' : 'unavailable',
         observedSince: ledger?.observedAt ?? null,
@@ -179,18 +266,38 @@ export class HistoryJobReader {
       cached &&
       cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size &&
-      cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
-      (isRollingUsageStable(cached.job, nowMs) ||
+      (cached.job?.dailyUsage !== undefined || !cached.job) &&
+      (cached.job?.quotaCalibrationEvents !== undefined || !cached.job ||
+        usageWindowStartedAtMs === null || Date.parse(cached.job.updatedAt) < usageWindowStartedAtMs) &&
+      (cached.usageWindowStartedAtMs === usageWindowStartedAtMs || usageWindowStartedAtMs === null ||
+        // Keep lifetime summaries when the requested period follows all recorded activity.
+        (cached.job && Date.parse(cached.job.updatedAt) < usageWindowStartedAtMs)) &&
+      (isRollingUsageStable(cached.job, cached.parsedAtMs) ||
         nowMs - cached.parsedAtMs < 60_000) &&
       !hasRecentOpenTurn(cached.job, nowMs)
     ) {
-      return cloneValue(cached.job);
+      const job = cloneValue(cached.job);
+      if (job && cached.usageWindowStartedAtMs !== usageWindowStartedAtMs) {
+        job.sinceResetUsage = null;
+        job.sinceResetEstimatedCostUsd = null;
+        job.sinceResetUnpricedTokens = 0;
+        job.quotaCalibrationEvents = [];
+        job.quotaDailyUsage = [];
+      }
+      return job;
     }
 
-    let fileContent = "";
+    let job: ParsedHistoryJob | null;
     try {
-      fileContent = readFileSync(file.path, "utf8");
-    } catch {
+      job = parseHistorySessionFile({
+        sessionId: extractSessionId(file.path),
+        fileContent: readSessionLines(file.path),
+        updatedAt: new Date(file.mtimeMs).toISOString(),
+        nowMs,
+        usageWindowStartedAtMs
+      });
+    } catch (error) {
+      console.error(`Could not read Codex session ${file.path}:`, error instanceof Error ? error.message : String(error));
       this.cache.set(file.path, {
         mtimeMs: file.mtimeMs,
         size: file.size,
@@ -201,14 +308,6 @@ export class HistoryJobReader {
       return null;
     }
 
-    const job = parseHistorySessionFile({
-      sessionId: extractSessionId(file.path),
-      fileContent,
-      updatedAt: new Date(file.mtimeMs).toISOString(),
-      nowMs,
-      usageWindowStartedAtMs
-    });
-
     this.cache.set(file.path, {
       mtimeMs: file.mtimeMs,
       size: file.size,
@@ -218,9 +317,131 @@ export class HistoryJobReader {
     });
     return cloneValue(job);
   }
+
+  private selectArchives(activeFiles: SessionFile[], archiveFiles: SessionFile[], metadata: Map<string, ArchiveMetadata>, mode: HistoryArchiveMode) {
+    const identity = (file: SessionFile): ArchiveMetadata => {
+      const fileId = extractSessionId(file.path);
+      const indexed = fileId ? metadata.get(fileId) : undefined;
+      if (indexed) return indexed;
+      const cached = this.cache.get(file.path)?.job;
+      if (cached) return { id: cached.id, parentThreadId: cached.parentThreadId, isSubagent: cached.isSubagent, archivedAt: null };
+      const known = this.identities.get(file.path);
+      if (known) return known;
+      // Fallback for older Codex versions: inspect at most 64 KiB, never scan an
+      // unselected archive's transcript merely to identify its parent.
+      let header: Record<string, unknown> | null = null;
+      let descriptor: number | undefined;
+      try {
+        descriptor = openSync(file.path, 'r');
+        const buffer = Buffer.alloc(64 * 1024);
+        const bytes = readSync(descriptor, buffer, 0, buffer.length, 0);
+        header = asRecord(asRecord(JSON.parse(buffer.subarray(0, bytes).toString('utf8').split('\n')[0]))?.payload);
+      } catch { /* File-name identity remains usable when the optional header is absent. */ }
+      finally { if (descriptor !== undefined) closeSync(descriptor); }
+      const subagent = asRecord(header?.source)?.subagent;
+      const parent = header?.parent_thread_id ?? header?.parentThreadId ?? asRecord(asRecord(subagent)?.thread_spawn)?.parent_thread_id;
+      const result = { id: typeof header?.id === 'string' ? header.id : fileId ?? file.path, archivedAt: null,
+        parentThreadId: typeof parent === 'string' ? parent : null,
+        isSubagent: Boolean(subagent) || (typeof header?.source === 'string' && /^subagent/i.test(header.source)) };
+      this.identities.set(file.path, result);
+      return result;
+    };
+    const activeIds = new Set(activeFiles.map(file => identity(file).id));
+    const roots = new Map<string, { time: number; id: string }>();
+    const identities = new Map<string, ArchiveMetadata>();
+    for (const file of [...activeFiles, ...archiveFiles]) {
+      const info = identity(file);
+      identities.set(info.id, info);
+      if (activeIds.has(info.id) || info.isSubagent) continue;
+      const time = info.archivedAt ? Date.parse(info.archivedAt) : file.mtimeMs;
+      const previous = roots.get(info.id);
+      if (!previous || time > previous.time) roots.set(info.id, { id: info.id, time });
+    }
+    const recentRoots = [...roots.values()].sort((a, b) => b.time - a.time || a.id.localeCompare(b.id));
+    const selectedIds = new Set([...activeIds, ...(mode === 'all' ? recentRoots : recentRoots.slice(0, 30)).map(entry => entry.id)]);
+    const files = archiveFiles.filter(file => {
+      let info = identity(file);
+      const visited = new Set<string>();
+      while (info.isSubagent && info.parentThreadId && !visited.has(info.id)) {
+        visited.add(info.id);
+        const parent = identities.get(info.parentThreadId);
+        if (!parent) return false;
+        info = parent;
+      }
+      return !info.isSubagent && selectedIds.has(info.id);
+    });
+    return { files, total: roots.size };
+  }
+
+  private loadArchiveCache(): void {
+    if (!this.archiveCacheFile || !existsSync(this.archiveCacheFile)) return;
+    try {
+      const stored = JSON.parse(readFileSync(this.archiveCacheFile, 'utf8'));
+      // Bump the version whenever the parser or model pricing changes.
+      if (stored.version !== 1 || stored.root !== path.resolve(this.archivedRoot) || !Array.isArray(stored.entries)) return;
+      const entries = stored.entries as [string, CachedHistoryJob][];
+      for (const [file, cached] of entries) {
+        const relative = path.relative(this.archivedRoot, file);
+        if (relative.startsWith('..') || path.isAbsolute(relative) ||
+          !Number.isFinite(cached.mtimeMs) || !Number.isFinite(cached.size) || !Number.isFinite(cached.parsedAtMs) ||
+          !(cached.usageWindowStartedAtMs === null || Number.isFinite(cached.usageWindowStartedAtMs)) ||
+          !cached.job || typeof cached.job.id !== 'string' || !Number.isFinite(Date.parse(cached.job.updatedAt))) {
+          throw new Error('Invalid archived history cache entry');
+        }
+      }
+      for (const [file, cached] of entries) this.cache.set(file, cached);
+    } catch (error) {
+      console.warn('Could not load archived history cache; rebuilding from session logs:', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private saveArchiveCache(archivedPaths: Set<string>): void {
+    if (!this.archiveCacheFile || !this.archiveCacheDirty) return;
+    try {
+      const entries = [...this.cache].filter(([file, cached]) => archivedPaths.has(file) && cached.job);
+      mkdirSync(path.dirname(this.archiveCacheFile), { recursive: true });
+      const temporary = `${this.archiveCacheFile}.${process.pid}.tmp`;
+      writeFileSync(temporary, JSON.stringify({ version: 1, root: path.resolve(this.archivedRoot), entries }), { mode: 0o600 });
+      renameSync(temporary, this.archiveCacheFile);
+      this.archiveCacheDirty = false;
+    } catch (error) {
+      console.warn('Could not save archived history cache:', error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 
 // The desktop index also names tasks omitted by thread/list, such as archived tasks.
+// Avoid V8's single-string size limit on long-lived, multi-hundred-MB sessions.
+export function* readSessionLines(filePath: string, chunkSize = 64 * 1024): Generator<string> {
+  const descriptor = openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(chunkSize);
+    const decoder = new StringDecoder('utf8');
+    let pending: string[] = [];
+    let bytes: number;
+    while ((bytes = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
+      const text = decoder.write(buffer.subarray(0, bytes));
+      let start = 0;
+      let end: number;
+      while ((end = text.indexOf('\n', start)) !== -1) {
+        const fragment = text.slice(start, end);
+        let line = fragment;
+        if (pending.length) {
+          pending.push(fragment);
+          line = pending.join('');
+          pending = [];
+        }
+        yield line.replace(/\r$/, '');
+        start = end + 1;
+      }
+      if (start < text.length) pending.push(text.slice(start));
+    }
+    const tail = decoder.end();
+    if (tail) pending.push(tail);
+    if (pending.length) yield pending.join('').replace(/\r$/, '');
+  } finally { closeSync(descriptor); }
+}
+
 function readSessionNames(indexPath: string): Map<string, string> {
   const names = new Map<string, string>();
   try {
@@ -260,6 +481,11 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
         job.last24HoursEstimatedCostUsd === null);
     merged.set(job.id, {
       ...newer,
+      dailyUsage: mergeDays(existing.dailyUsage, job.dailyUsage),
+      quotaDailyUsage: mergeDays(existing.quotaDailyUsage, job.quotaDailyUsage),
+      untimedTokens: (existing.untimedTokens ?? 0) + (job.untimedTokens ?? 0),
+      totalUnpricedTokens: (existing.totalUnpricedTokens ?? 0) + (job.totalUnpricedTokens ?? 0),
+      archived: existing.archived && job.archived,
       parentThreadId: newer.parentThreadId ?? older.parentThreadId,
       isSubagent: newer.isSubagent || older.isSubagent,
       name: newer.name ?? older.name,
@@ -327,6 +553,10 @@ function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] 
     }
 
     target.updatedAt = latestIso(target.updatedAt, job.updatedAt);
+    target.dailyUsage = mergeDays(target.dailyUsage, job.dailyUsage);
+    target.quotaDailyUsage = mergeDays(target.quotaDailyUsage, job.quotaDailyUsage);
+    target.untimedTokens = (target.untimedTokens ?? 0) + (job.untimedTokens ?? 0);
+    target.totalUnpricedTokens = (target.totalUnpricedTokens ?? 0) + (job.totalUnpricedTokens ?? 0);
     target.totalEstimatedCostUsd = addNullableNumbers(
       target.totalEstimatedCostUsd,
       job.totalEstimatedCostUsd
@@ -455,7 +685,7 @@ function applyMetadata(
 
 export function parseHistorySessionFile(args: {
   sessionId: string | null;
-  fileContent: string;
+  fileContent: string | Iterable<string>;
   updatedAt: string;
   nowMs: number;
   usageWindowStartedAtMs?: number | null;
@@ -475,6 +705,7 @@ export function parseHistorySessionFile(args: {
   let cwd: string | null = null;
   let modelProvider: string | null = null;
   let lastRunUsage: TokenUsage | null = null;
+  let previousTokenUsageKey: string | null = null;
   let totalUsage: TokenUsage | null = null;
   let totalEstimatedCostUsd = 0;
   let totalCostIsComplete = true;
@@ -488,9 +719,15 @@ export function parseHistorySessionFile(args: {
   let sinceResetUnpricedTokens = 0;
   let hasPricedSinceResetUsage = false;
   let latestTurnId: string | null = null;
+  const quotaCalibrationEvents: QuotaCalibrationEvent[] = [];
+  const dailyUsage = new Map<string, HistoryUsageDay>();
+  const quotaDailyUsage = new Map<string, HistoryUsageDay>();
+  let untimedTokens = 0;
+  let totalUnpricedTokens = 0;
   const turns = new Map<string, ParsedTurn>();
 
-  for (const rawLine of args.fileContent.split(/\r?\n/)) {
+  const lines = typeof args.fileContent === 'string' ? args.fileContent.split(/\r?\n/) : args.fileContent;
+  for (const rawLine of lines) {
     if (!rawLine.trim()) {
       continue;
     }
@@ -602,12 +839,37 @@ export function parseHistorySessionFile(args: {
     if (payloadType === "token_count") {
       const info = asRecord(payload?.info);
       const increment = normalizeTokenUsage(info?.last_token_usage);
+      const cumulative = normalizeTokenUsage(info?.total_token_usage);
+      const cumulativeKey = cumulative ? JSON.stringify(cumulative) : null;
+      const duplicate = Boolean(increment && cumulativeKey && cumulativeKey === previousTokenUsageKey);
+      if (recordTimestampMs !== null && args.usageWindowStartedAtMs != null &&
+          recordTimestampMs >= args.usageWindowStartedAtMs && recordTimestampMs <= args.nowMs) {
+        quotaCalibrationEvents.push({ at: recordTimestampMs,
+          cost: duplicate || !increment ? 0 : estimateApiEquivalentCost(increment, activeModel),
+          limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
+      }
+      // Rate-limit refreshes can repeat the previous response's token usage.
+      // Only deduplicate when unchanged cumulative counters prove no new usage.
+      if (duplicate) {
+        continue;
+      }
+      if (increment) previousTokenUsageKey = cumulativeKey;
       lastRunUsage = increment ?? lastRunUsage;
 
       if (increment) {
         totalUsage = addTokenUsage(totalUsage, increment);
         const estimatedCost = estimateApiEquivalentCost(increment, activeModel);
+        if (recordTimestampMs === null) untimedTokens += increment.totalTokens;
+        else if (recordTimestampMs <= args.nowMs) {
+          const date = localDay(recordTimestampMs);
+          const next = { date, usage: increment, costUsd: estimatedCost, unpricedTokens: estimatedCost === null ? increment.totalTokens : 0 };
+          dailyUsage.set(date, mergeDays(dailyUsage.has(date) ? [dailyUsage.get(date)!] : [], [next])[0]);
+          if (args.usageWindowStartedAtMs != null && recordTimestampMs >= args.usageWindowStartedAtMs) {
+            quotaDailyUsage.set(date, mergeDays(quotaDailyUsage.has(date) ? [quotaDailyUsage.get(date)!] : [], [next])[0]);
+          }
+        }
         if (estimatedCost === null) {
+          totalUnpricedTokens += increment.totalTokens;
           totalCostIsComplete = false;
         } else {
           totalEstimatedCostUsd += estimatedCost;
@@ -666,6 +928,9 @@ export function parseHistorySessionFile(args: {
 
   return {
     id: sessionId,
+    quotaCalibrationEvents,
+    dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
+    archived: false,
     parentThreadId,
     isSubagent,
     name,

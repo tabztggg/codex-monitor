@@ -1,75 +1,165 @@
 # Codex Monitor
 
-See how much Codex quota remains, when it resets, and which tasks use the most.
-A local dashboard with live activity, compact task rows, and expandable details.
+**Understand where your Codex usage goes — by task, project, and time range.**
 
-![Codex Monitor dashboard showing weekly quota and per-task metrics, with task titles blurred for privacy](assets/codex-monitor-dashboard-redacted.png)
+English | [简体中文](README.zh-CN.md)
+
+A local dashboard for account quota, recorded tokens, estimated costs, and live
+activity. This customized version builds on
+[manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) with bilingual
+controls, archived-task statistics, project summaries, and usage analysis.
+It is an unofficial community project, not an OpenAI product or billing system.
+
+## Features
+
+| Feature | What you can do |
+| --- | --- |
+| Account overview | See remaining overall Codex quota, reset countdown, and usage compared with elapsed time. Spark is excluded. |
+| Task statistics | Compare recorded tokens, API-equivalent USD estimates, and approximate current-account quota attribution. |
+| 20x equivalents | Estimate locally recorded usage across accounts against one Pro 20x weekly allowance. Totals can exceed 100%. |
+| Project summaries | Optionally group tasks by saved Codex project and see quota, 20x, cost, and token totals. Grouping starts off. |
+| Archive support | Actually read only the 30 most recently archived root tasks by default, plus unarchived tasks. Load all archives explicitly. |
+| Time ranges | Select Today, Last 7 days, Current quota period, or Task lifetime. |
+| Trends and rankings | Explore daily usage and the top five projects by cost, tokens, or 20x equivalents. |
+| Table controls | Search, filter, sort every column, hide columns, and choose comfortable or compact density. Headers and task names stay visible while scrolling. |
+| Refresh controls | Refresh immediately or every 30 seconds, 1, 2, 5, or 10 minutes, with a countdown and connection status. |
+| Chinese / English | Switch in the top-right corner. New visitors start in English; the last choice is remembered. |
+| Task details | Expand previews, paths, and token breakdowns; open tasks in Codex or inspect tracked live runs. |
+
+Language, refresh interval, column visibility, and density are saved in the
+current browser. Grouping and archive scope return to their defaults on reload.
+Task names, project names, and authored messages are not translated.
 
 ## Quick start
 
-Use Node.js 22 or newer and an authenticated Codex installation that supports
-`codex app-server`. Run from the repository root:
+You need Node.js and npm, plus an authenticated Codex installation that supports
+`codex app-server`. This version has been exercised locally on Windows with
+Node.js 24; the repository CI configuration targets Node.js 22. See
+[requirements and platform limits](docs/setup-and-reference.md#requirements).
+
+Download or clone this repository, then run from its root:
 
 ```bash
 npm ci
 npm run build
+```
+
+Start on Windows PowerShell:
+
+```powershell
+$env:CODEX_MONITOR_HOST = '127.0.0.1'
+$env:CODEX_MONITOR_DRY_RUN = '1'
 npm start
 ```
 
-Open [Codex Monitor](http://127.0.0.1:4201). Keep the terminal running; use
-`Ctrl+C` to stop the monitor. On macOS, a signed-in Codex or ChatGPT desktop app
-with the bundled Codex executable is sufficient.
+Start on macOS or Linux:
 
-For background launch, desktop shortcuts, and Windows options, see the
-[launcher guide](docs/setup-and-reference.md#on-demand-launchers).
+```bash
+CODEX_MONITOR_HOST=127.0.0.1 CODEX_MONITOR_DRY_RUN=1 npm start
+```
 
-## At a glance
+Open **[http://127.0.0.1:4201](http://127.0.0.1:4201)**. Keep the terminal running;
+press `Ctrl+C` to stop the foreground server. These commands explicitly keep
+shutdown actions in simulation mode.
 
-- **Quota and pace:** remaining overall Codex quota, one reset countdown, and
-  consumption compared with elapsed time. Spark is excluded.
-- **Task usage:** estimated total cost, total tokens, and approximate quota share
-  stay visible in every row. Figures refresh automatically while you work.
-- **Find your work:** search, filter by Active / Today / All, and sort by usage or
-  last activity.
-- **Expand a task:** click its row or use Tab and Enter/Space on its title.
-  Details include the preview, path, token breakdown, and a separate
-  **Open in Codex** link. Tracked runs also provide live transcripts.
-- **Optional auto shutdown:** controls stay in the footer. Real shutdown is
-  Windows-only; macOS/Linux use dry-run mode by default.
+If Codex cannot be found, set `CODEX_MONITOR_CODEX_PATH` to its executable.
+No separate API key is required by the dashboard; live account data comes through
+your authenticated local Codex installation.
 
-## Reading the numbers
+The Windows `.cmd` launcher also defaults to loopback and starts the monitor
+in the background. LAN settings can be supplied locally without committing
+them. See [Windows launchers](docs/setup-and-reference.md#windows-launchers).
 
-| Metric | Period |
-| --- | --- |
-| Estimated total cost | Entire task · API-equivalent USD, not a plan charge |
-| Total tokens | Entire task, including attributable subagents |
-| Approx. usage % | Since the primary quota reset |
+## Understand the numbers
 
-Each observed quota increase is divided in proportion to the API-equivalent
-cost recorded by each task since the previous increase, then accumulated since
-reset. Earlier allocations do not shrink when another task works. Consumption
-before the first observation and increments without sufficient priced usage
-remain unattributed, shown above the table. Attribution persists across monitor
-restarts in `.cache/quota-attribution.json`; observation runs with quota polling
-even when the dashboard is closed.
-A `+` marks a partial cost estimate; `--` means unavailable. The header reports
-Codex's overall quota, while task shares are estimates. See
-[metric details](docs/setup-and-reference.md#metric-details) for the calculation
-and refresh periods.
+| Metric | Meaning | Scope |
+| --- | --- | --- |
+| Account quota | Overall limit reported by Codex for the currently signed-in account. | Whole account, independent of task filters and the archive limit. |
+| Approx. quota % | Observed quota increases allocated to local tasks using their recorded costs. | Current account and quota period only; other selected ranges show `--`. |
+| 20x equivalent usage | Selected-period estimated cost divided by locally calibrated cost per 1% of a Pro 20x week. | All included local records, including records from previously used accounts. |
+| Estimated cost | API-equivalent USD value of recorded tokens using the built-in model price table. | Selected time range; not a subscription charge or official invoice. |
+| Total tokens | Recorded task tokens, including attributable subagents. | Selected time range. |
 
-Activity follows session events and expires after 15 minutes without an update.
-Internal subagents are excluded from the task list; their attributable usage is
-included in the parent task. Titles also use the local desktop title index, then
-fall back to user requests with injected setup
-removed. Missing token records or unknown model prices remain unavailable.
+**One Pro 20x weekly allowance is always the 100% reference.** For example, 250%
+means an estimated 2.5 such weekly allowances over the selected range. It does
+not mean the currently signed-in account has used 250% of its own quota.
 
-## More information
+The estimator assumes recorded Pro accounts are **20x**. Logs identify Pro but
+do not reliably distinguish 5x from 20x. There is no tier selector or automatic
+account-tier verification. Mixed tiers, missing logs, usage on other devices,
+unpriced models, and tool fees can affect accuracy. The monitor does not sign
+into old accounts or retrieve their missing history.
 
-The monitor binds to loopback and reads your local Codex history. Task details
-can contain private text; keep it local. Only task titles are blurred in the
-screenshot above.
+- `--` means unavailable or not yet attributable, not zero usage.
+- `+` marks a partial estimate or total.
+- Prices are a local table, not a live pricing feed.
+- Calibration needs at least five percentage points of usable weekly quota
+  observations. A new setup may initially show `--`.
 
-- [Setup, configuration, and troubleshooting](docs/setup-and-reference.md)
-- [Shutdown behavior](docs/setup-and-reference.md#shutdown-automation)
-- [Development and checks](docs/setup-and-reference.md#run-in-development)
-- [Platform verification](docs/setup-and-reference.md#platform-verification)
+See [metric details](docs/setup-and-reference.md#metric-details) for the calculation
+and its limits.
+
+## Time ranges and archives
+
+The current quota period is selected by default. Today and Last 7 days follow
+calendar days on the **monitor computer**, whose timezone is shown in the
+estimation panel. Last 7 days includes today and the previous six days. Task
+lifetime uses all available history **within the selected archive scope**.
+
+Cost, tokens, 20x equivalents, project totals, trends, and rankings follow the
+selected time range. Previous results keep their original label while the next
+range loads. Daily charts show dates with recorded usage; a missing date is not
+proof of zero consumption.
+
+The default scope includes all unarchived root tasks and the **30 most recently
+archived root tasks**, plus attributable children. Older archive logs are not
+fully parsed merely to hide them later. **Calculate all archives** explicitly
+expands the scope and can take longer on large histories.
+
+**Hide archived tasks**, search, row filters, and collapsed groups affect only
+the displayed rows. Scope totals, project totals, and rankings still include
+all tasks in the selected archive scope. Task lifetime does not automatically
+read every archive.
+
+## Local data and network access
+
+The backend defaults to loopback and reads local Codex logs and metadata.
+It stores its own caches under `.cache/` without rewriting Codex session logs.
+The dashboard does not upload history to an analytics service. Its Codex
+app-server connection can use the network through the installed Codex client.
+
+Task details can contain prompts, paths, commands, and other private content.
+The server has **no built-in login or TLS**. Origin checks are not authentication
+and do not secure a public tunnel. LAN or remote deployment needs separate
+access controls; see [network access](docs/setup-and-reference.md#network-access).
+
+Optional shutdown controls are inherited from upstream. The quick start above
+and this version's Windows launcher use dry-run mode. Real shutdown uses Windows
+`shutdown.exe`; see [shutdown behavior](docs/setup-and-reference.md#shutdown-automation).
+
+## Development
+
+```bash
+npm run dev
+npm test
+npx tsc --noEmit
+npm run build
+```
+
+The development backend uses port 4201; Vite normally uses 5173. Stop a running
+monitor before starting another backend on the same port.
+
+Built with TypeScript, React, Vite, Express, and WebSocket. See the
+[setup and architecture reference](docs/setup-and-reference.md) for configuration,
+launchers, troubleshooting, and source layout.
+
+## Credits and license status
+
+Based on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor).
+Upstream authors retain credit for the original application. This version adds
+the usage-analysis and interface enhancements described above.
+
+No project `LICENSE` file is present in this checkout. This README does not
+assign a license to upstream code or claim MIT/Apache licensing. Confirm and
+retain the applicable upstream permissions and notices before publishing a
+redistributable release.

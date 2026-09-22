@@ -263,8 +263,18 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
-export interface HistoryJob {
+export interface HistoryProject {
   id: string;
+  name: string;
+  missing?: boolean;
+}
+
+export interface HistoryJob {
+  periodMetrics?: HistoryPeriodMetrics;
+  id: string;
+  archived: boolean;
+  archivedAt?: string | null;
+  project?: HistoryProject | null;
   name: string | null;
   preview: string | null;
   sourceKind: SourceKind | "unknown";
@@ -287,9 +297,15 @@ export interface HistoryJob {
   sinceResetEstimatedCostUsd: number | null;
   sinceResetUnpricedTokens?: number;
   estimatedUsagePercentSinceReset: number | null;
+  estimated20xPercent?: number | null;
+  estimated20xIsComplete?: boolean;
 }
 
 export interface HistoryUsageAllocation {
+  equivalent20x?: {
+    costPerPercentUsd: number | null;
+    calibrationQuotaPercent: number;
+  };
   observedSince?: string | null;
   unattributedPercent?: number | null;
   status: "available" | "unavailable";
@@ -301,11 +317,44 @@ export interface HistoryUsageAllocation {
   basis: "apiEquivalentCost" | null;
 }
 
+export type HistoryArchiveMode = 'recent' | 'all';
+export type HistoryPeriod = 'quota' | 'today' | '7d' | 'lifetime';
+export interface HistoryUsageDay {
+  date: string;
+  usage: TokenUsage;
+  costUsd: number | null;
+  unpricedTokens: number;
+}
+export interface HistoryPeriodMetrics {
+  tokensComplete: boolean;
+  usage: TokenUsage | null;
+  costUsd: number | null;
+  costComplete: boolean;
+  unpricedTokens: number;
+  untimedTokens: number;
+}
+export interface HistoryAnalysis {
+  period: HistoryPeriod;
+  startedAt: string | null;
+  endedAt: string;
+  timeZone: string;
+  days: HistoryUsageDay[];
+  unpricedTokens: number;
+  untimedTokens: number;
+}
+export interface HistoryArchiveScope {
+  mode: HistoryArchiveMode;
+  total: number;
+  included: number;
+}
+
 export interface HistoryJobListResponse {
+  analysis?: HistoryAnalysis;
   data: HistoryJob[];
   total: number;
   nextCursor: string | null;
   usageAllocation: HistoryUsageAllocation;
+  archives: HistoryArchiveScope;
 }
 
 export interface MonitorSnapshot {

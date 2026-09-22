@@ -1,6 +1,9 @@
 const LOOPBACK_HOSTS = new Set(["localhost", "[::1]", "::1"]);
 
-export function isAllowedBrowserOrigin(origin: string | undefined): boolean {
+export function isAllowedBrowserOrigin(
+  origin: string | undefined,
+  serverOrigin?: string
+): boolean {
   if (!origin) {
     return true;
   }
@@ -16,7 +19,7 @@ export function isAllowedBrowserOrigin(origin: string | undefined): boolean {
     return false;
   }
 
-  return isLoopbackHost(parsed.hostname);
+  return isLoopbackHost(parsed.hostname) || origin === serverOrigin;
 }
 
 function isLoopbackHost(hostname: string): boolean {

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { HistoryJobReader, parseHistorySessionFile } from "../history-jobs";
+import { HistoryJobReader, parseHistorySessionFile, readSessionLines } from "../history-jobs";
 import { MonitorService } from "../service";
 
 it("recovers desktop titles absent from thread/list and tolerates a partial index line", () => {
@@ -14,6 +14,22 @@ it("recovers desktop titles absent from thread/list and tolerates a partial inde
     writeFileSync(path.join(sessions, `rollout-${id}.jsonl`), JSON.stringify({ type: "session_meta", payload: { id } }));
     writeFileSync(path.join(root, "session_index.jsonl"), [JSON.stringify({ id, thread_name: "Old title" }), JSON.stringify({ id, thread_name: "Actual desktop title" }), '{"id":'].join("\n"));
     expect(new HistoryJobReader(sessions).listJobs({}).data[0].name).toBe("Actual desktop title");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+it('reads streamed session lines across UTF-8 and newline boundaries without requiring a whole-file string', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'monitor-lines-'));
+  try {
+    const file = path.join(root, 'rollout.jsonl');
+    writeFileSync(file, '中文🙂\r\nsecond\n最后一行');
+    expect([...readSessionLines(file, 3)]).toEqual(['中文🙂', 'second', '最后一行']);
+    // Early iterator termination must close the file descriptor as well.
+    const lines = readSessionLines(file, 3);
+    expect(lines.next().value).toBe('中文🙂');
+    lines.return(undefined);
+    writeFileSync(file, JSON.stringify({ type: 'session_meta', payload: { id: 'streamed-session' } }));
+    expect(parseHistorySessionFile({ sessionId: null, fileContent: readSessionLines(file, 3),
+      updatedAt: '2026-09-22T00:00:00Z', nowMs: Date.parse('2026-09-22T00:00:00Z') })?.id).toBe('streamed-session');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -43,6 +59,77 @@ class FakeCodexClient extends EventEmitter {
 }
 
 describe("parseHistorySessionFile", () => {
+  it("does not count repeated cumulative usage or its cost twice", () => {
+    const event = tokenCountEvent("2026-05-12T09:00:00Z", 110, 100, 20, 10);
+    const job = parseHistorySessionFile({
+      sessionId: "duplicate-usage",
+      updatedAt: "2026-05-12T10:00:00Z",
+      nowMs: Date.parse("2026-05-12T12:00:00Z"),
+      usageWindowStartedAtMs: Date.parse("2026-05-12T00:00:00Z"),
+      fileContent: lines([
+        { type: "turn_context", payload: { model: "gpt-6-astra" } },
+        event,
+        { timestamp: "2026-05-12T09:01:00Z", type: "event_msg", payload: { type: "token_count", info: null } },
+        { ...event, timestamp: "2026-05-12T10:00:00Z" }
+      ])
+    });
+    expect(job?.totalUsage?.totalTokens).toBe(110);
+    expect(job?.last24HoursUsage?.totalTokens).toBe(110);
+    expect(job?.sinceResetUsage?.totalTokens).toBe(110);
+    expect(job?.totalEstimatedCostUsd).toBeCloseTo(0.00132, 8);
+    expect(job?.last24HoursEstimatedCostUsd).toBeCloseTo(0.00132, 8);
+    expect(job?.sinceResetEstimatedCostUsd).toBeCloseTo(0.00132, 8);
+  });
+
+  it("does not move old usage into a new quota window when counters repeat", () => {
+    const event = tokenCountEvent("2026-05-10T09:00:00Z", 110, 100, 20, 10);
+    const job = parseHistorySessionFile({
+      sessionId: "duplicate-outside-window",
+      updatedAt: "2026-05-12T10:00:00Z",
+      nowMs: Date.parse("2026-05-12T12:00:00Z"),
+      usageWindowStartedAtMs: Date.parse("2026-05-12T00:00:00Z"),
+      fileContent: lines([
+        { type: "turn_context", payload: { model: "gpt-6-astra" } },
+        event,
+        { ...event, timestamp: "2026-05-12T10:00:00Z" }
+      ])
+    });
+    expect(job?.totalUsage?.totalTokens).toBe(110);
+    expect(job?.last24HoursUsage).toBeNull();
+    expect(job?.sinceResetUsage).toBeNull();
+  });
+
+  it("keeps equal response sizes when cumulative usage advances or resets", () => {
+    const event = tokenCountEvent("2026-05-12T09:00:00Z", 110, 100, 20, 10);
+    const next = structuredClone(event);
+    next.payload.info.total_token_usage = {
+      input_tokens: 200, cached_input_tokens: 40, output_tokens: 20,
+      reasoning_output_tokens: 0, total_tokens: 220
+    };
+    const job = parseHistorySessionFile({
+      sessionId: "equal-size-responses",
+      updatedAt: event.timestamp,
+      nowMs: Date.parse(event.timestamp),
+      fileContent: lines([event, next, event])
+    });
+    expect(job?.totalUsage?.totalTokens).toBe(330);
+  });
+
+  it("keeps response usage when cumulative counters are absent", () => {
+    const event = {
+      type: "event_msg", payload: { type: "token_count", info: {
+        last_token_usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 }
+      } }
+    };
+    const job = parseHistorySessionFile({
+      sessionId: "no-cumulative-counters",
+      updatedAt: "2026-05-12T09:00:00Z",
+      nowMs: Date.parse("2026-05-12T09:00:00Z"),
+      fileContent: lines([event, event])
+    });
+    expect(job?.totalUsage?.totalTokens).toBe(220);
+  });
+
   it("uses task_complete duration_ms and token_count usage", () => {
     const job = parseHistorySessionFile({
       sessionId: "019e1b12-3784-79c3-86e7-5469e67f114b",
@@ -569,22 +656,38 @@ describe("MonitorService history jobs", () => {
     ).toBeCloseTo(2.8333333333, 8);
   });
 
-  it('records weekly quota notifications without dashboard reads and ignores Spark', async () => {
+  it('keeps existing token activity without quota attribution unknown instead of zero', () => {
+    const id = '019e1b12-0000-7000-8000-000000000089';
+    writeSessionFile(sessionsRoot, id, '2026-05-12T10:00:00Z', 'cli', 'existing activity', { totalTokens: 100 });
+    const reader = new HistoryJobReader(sessionsRoot);
+    const window = { usedPercent: 10, startedAtMs: Date.parse('2026-05-12T08:00:00Z'),
+      resetsAt: '2026-05-19T08:00:00Z', limitName: 'Overall Codex', windowLabel: 'Weekly' };
+    const history = reader.listJobs({ observeUsage: true, usageWindow: window });
+    expect(history.data[0].sinceResetUsage?.totalTokens).toBe(100);
+    expect(history.data[0].estimatedUsagePercentSinceReset).toBeNull();
+    expect(history.usageAllocation.unattributedPercent).toBe(10);
+    const next = reader.listJobs({ observeUsage: true, usageWindow: { ...window,
+      usedPercent: 0, startedAtMs: Date.parse('2026-05-19T08:00:00Z'), resetsAt: '2026-05-26T08:00:00Z' } });
+    expect(next.data[0].estimatedUsagePercentSinceReset).toBe(0);
+  });
+
+  it('records weekly quota notifications without dashboard reads and ignores Spark and timestamp jitter', async () => {
     const client = new FakeCodexClient();
     const reader = new HistoryJobReader(sessionsRoot);
     const service = new MonitorService(client as never, reader);
     const now = Date.now();
     const reset = Math.floor(now / 1000) + 86400;
-    const notify = (usedPercent: number, limitId = 'codex') => client.emit('notification', {
+    const notify = (usedPercent: number, limitId = 'codex', offset = 0) => client.emit('notification', {
       method: 'account/rateLimits/updated', params: { rateLimits: {
         limitId,
         primary: { usedPercent: 50, windowDurationMins: 300, resetsAt: reset },
-        secondary: { usedPercent, windowDurationMins: 10080, resetsAt: reset }
+        secondary: { usedPercent, windowDurationMins: 10080, resetsAt: reset + offset }
       }}
     });
     notify(20);
     writeSessionFile(sessionsRoot, '019e1b12-0000-7000-8000-000000000090', new Date(now).toISOString(), 'cli', 'new activity', { totalTokens: 100 });
     notify(22);
+    notify(22, 'codex', -1);
     notify(80, 'codex_bengalfox');
     const history = await service.listHistoryJobs({});
     expect(history.usageAllocation).toMatchObject({ usedPercent: 22, unattributedPercent: 20, windowLabel: 'Weekly' });

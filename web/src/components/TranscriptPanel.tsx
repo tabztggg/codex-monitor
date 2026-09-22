@@ -1,4 +1,5 @@
 import type { MonitorItem, ThreadNode, TurnSummary } from "../../../shared/monitor";
+import { useI18n } from '../LanguageContext';
 
 export function TranscriptPanel({
   thread,
@@ -9,6 +10,7 @@ export function TranscriptPanel({
   turns: Record<string, TurnSummary>;
   items: Record<string, MonitorItem>;
 }) {
+  const { t, label, time } = useI18n();
   const threadTurns = thread
     ? thread.turnIds
         .map((turnId) => turns[turnId])
@@ -20,20 +22,20 @@ export function TranscriptPanel({
     <section className="panel transcript-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Transcript</p>
-          <h3>{thread?.name ?? thread?.id ?? "Select a thread"}</h3>
+          <p className="eyebrow">{t('Transcript')}</p>
+          <h3>{thread?.name ?? thread?.id ?? t('Select a thread')}</h3>
         </div>
       </div>
 
       {!thread ? (
-        <div className="empty-state">Pick a thread to inspect its stream.</div>
+        <div className="empty-state">{t('Pick a thread to inspect its stream.')}</div>
       ) : (
         <div className="transcript-timeline">
           {threadTurns.map((turn) => (
             <article key={turn.id} className="turn-block">
               <header className="turn-header">
-                <span className={`status-pill ${toneFromTurn(turn.status)}`}>{turn.status}</span>
-                <span className="panel-meta">{new Date(turn.startedAt).toLocaleTimeString("en")}</span>
+                <span className={`status-pill ${toneFromTurn(turn.status)}`}>{label(turn.status)}</span>
+                <span className="panel-meta">{time(turn.startedAt)}</span>
               </header>
 
               {turn.itemIds.map((itemId) => {
@@ -44,11 +46,11 @@ export function TranscriptPanel({
 
                 return (
                   <div key={item.id} className={`stream-item ${item.type}`}>
-                    <strong>{item.title}</strong>
+                    <strong>{label(item.title)}</strong>
                     {item.command ? <code className="command-line">{item.command}</code> : null}
                     {item.text ? <p>{item.text}</p> : null}
                     {item.output ? <pre>{item.output}</pre> : null}
-                    {item.toolName ? <span className="panel-meta">tool: {item.toolName}</span> : null}
+                    {item.toolName ? <span className="panel-meta">{t('Tool: {name}', { name: item.toolName })}</span> : null}
                   </div>
                 );
               })}

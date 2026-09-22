@@ -7,14 +7,15 @@ import { WebSocketServer } from "ws";
 import { isAllowedBrowserOrigin } from "./http-security";
 import { MonitorService } from "./service";
 
-const host = "127.0.0.1";
+const host = process.env.CODEX_MONITOR_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? "4201");
+const serverOrigin = new URL(`http://${host}:${port}`).origin;
 
 const app = express();
 const service = new MonitorService();
 
 app.use((request, response, next) => {
-  if (!isAllowedBrowserOrigin(request.headers.origin)) {
+  if (!isAllowedBrowserOrigin(request.headers.origin, serverOrigin)) {
     response.status(403).json({ error: "Forbidden origin" });
     return;
   }
@@ -24,7 +25,7 @@ app.use((request, response, next) => {
 app.use(
   cors({
     origin(origin, callback) {
-      callback(null, isAllowedBrowserOrigin(origin));
+      callback(null, isAllowedBrowserOrigin(origin, serverOrigin));
     }
   })
 );
@@ -129,6 +130,8 @@ app.get("/api/history/jobs", async (request, response) => {
         ? request.query.sourceKinds.split(",").filter(Boolean)
         : null;
     const history = await service.listHistoryJobs({
+      archiveMode: request.query.archives === 'all' ? 'all' : 'recent',
+      period: request.query.period === 'today' || request.query.period === '7d' || request.query.period === 'lifetime' ? request.query.period : 'quota',
       cursor:
         typeof request.query.cursor === "string" ? request.query.cursor : null,
       limit:
@@ -172,7 +175,8 @@ const server = createServer(app);
 const wss = new WebSocketServer({
   server,
   path: "/ws",
-  verifyClient: ({ origin }: { origin: string }) => isAllowedBrowserOrigin(origin)
+  verifyClient: ({ origin }: { origin: string }) =>
+    isAllowedBrowserOrigin(origin, serverOrigin)
 });
 
 wss.on("connection", (socket) => {

@@ -2,6 +2,8 @@ import type {
   ArmAutomationRequest,
   ArmGlobalAutomationRequest,
   HistoryJobListResponse,
+  HistoryArchiveMode,
+  HistoryPeriod,
   HistoryJobSortKey,
   HistoryThreadListResponse,
   MonitorSnapshot,
@@ -84,8 +86,12 @@ export const api = {
     sortKey?: HistoryJobSortKey;
     sortDirection?: SortDirection;
     signal?: AbortSignal;
+    archiveMode?: HistoryArchiveMode;
+    period?: HistoryPeriod;
   }): Promise<HistoryJobListResponse> {
     const params = new URLSearchParams();
+    params.set('archives', args.archiveMode ?? 'recent');
+    params.set('period', args.period ?? 'quota');
     params.set("sourceKinds", args.sourceKinds.join(","));
     params.set("limit", String(args.limit ?? 20));
     if (args.searchTerm) {

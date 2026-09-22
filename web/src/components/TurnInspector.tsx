@@ -5,6 +5,7 @@ import type {
   ThreadNode,
   TurnSummary
 } from "../../../shared/monitor";
+import { useI18n } from '../LanguageContext';
 
 export function TurnInspector({
   thread,
@@ -19,6 +20,7 @@ export function TurnInspector({
   pendingRequests: PendingRequest[];
   activeShutdown: ActiveShutdownState;
 }) {
+  const { t, label, time } = useI18n();
   const latestCommands = turn
     ? turn.itemIds
         .map((itemId) => items[itemId])
@@ -30,44 +32,44 @@ export function TurnInspector({
     <section className="panel inspector-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Inspector</p>
-          <h3>{thread?.runtimeStatus.bucket ?? "No thread selected"}</h3>
+          <p className="eyebrow">{t('Inspector')}</p>
+          <h3>{thread ? label(thread.runtimeStatus.bucket) : t('No thread selected')}</h3>
         </div>
       </div>
 
       {!thread ? (
-        <div className="empty-state">Thread metadata appears here.</div>
+        <div className="empty-state">{t('Thread metadata appears here.')}</div>
       ) : (
         <>
           <div className="inspector-section">
-            <span className="panel-meta">Latest turn</span>
-            <strong>{turn?.status ?? "no turn yet"}</strong>
-            <span>{thread.lastCommandSummary ?? thread.latestMessagePreview ?? "No recent activity summary."}</span>
+            <span className="panel-meta">{t('Latest turn')}</span>
+            <strong>{turn ? label(turn.status) : t('no turn yet')}</strong>
+            <span>{thread.lastCommandSummary ?? thread.latestMessagePreview ?? t('No recent activity summary.')}</span>
           </div>
 
           <div className="inspector-section">
-            <span className="panel-meta">Plan</span>
+            <span className="panel-meta">{t('Plan')}</span>
             {turn?.plan.length ? (
               <ul className="plan-list">
                 {turn.plan.map((step) => (
                   <li key={step.step}>
-                    <span className="panel-meta">{step.status}</span>
+                    <span className="panel-meta">{label(step.status)}</span>
                     <strong>{step.step}</strong>
                   </li>
                 ))}
               </ul>
             ) : (
-              <span>No plan updates captured for this turn.</span>
+              <span>{t('No plan updates captured for this turn.')}</span>
             )}
           </div>
 
           <div className="inspector-section">
-            <span className="panel-meta">Diff</span>
-            {turn?.diff ? <pre>{turn.diff}</pre> : <span>No diff emitted yet.</span>}
+            <span className="panel-meta">{t('Diff')}</span>
+            {turn?.diff ? <pre>{turn.diff}</pre> : <span>{t('No diff emitted yet.')}</span>}
           </div>
 
           <div className="inspector-section">
-            <span className="panel-meta">Commands</span>
+            <span className="panel-meta">{t('Commands')}</span>
             {latestCommands.length ? (
               latestCommands.map((item) => (
                 <div key={item.id} className="command-summary">
@@ -76,28 +78,28 @@ export function TurnInspector({
                 </div>
               ))
             ) : (
-              <span>No command output in this turn yet.</span>
+              <span>{t('No command output in this turn yet.')}</span>
             )}
           </div>
 
           <div className="inspector-section">
-            <span className="panel-meta">Pending requests</span>
+            <span className="panel-meta">{t('Pending requests')}</span>
             {pendingRequests.length ? (
               pendingRequests.map((request) => (
                 <div key={request.id} className="pending-card">
-                  <strong>{request.summary}</strong>
-                  <span>{request.method}</span>
+                  <strong>{t(request.summary)}</strong>
+                  <span title={request.method}>{label(request.kind)}</span>
                 </div>
               ))
             ) : (
-              <span>No pending human requests for this thread.</span>
+              <span>{t('No pending human requests for this thread.')}</span>
             )}
           </div>
 
           {activeShutdown.scheduled ? (
             <div className="inspector-section">
-              <span className="panel-meta">Shutdown timer</span>
-              <strong>{activeShutdown.executeAt ? new Date(activeShutdown.executeAt).toLocaleTimeString("en") : "scheduled"}</strong>
+              <span className="panel-meta">{t('Shutdown timer')}</span>
+              <strong>{activeShutdown.executeAt ? time(activeShutdown.executeAt) : label('scheduled')}</strong>
               <span>{activeShutdown.command}</span>
             </div>
           ) : null}

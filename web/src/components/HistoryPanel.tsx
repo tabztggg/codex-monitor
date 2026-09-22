@@ -32,7 +32,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
     return 30_000;
   });
   const [period, setPeriod] = useState<HistoryPeriod>('quota');
-  const { jobs, allocation, analysis, nextRefreshAt, refreshNow, updatedAt, error, archives, loading, requestedMode, loadArchives } = useTaskHistory(interval, period);
+  const { jobs, allocation, analysis, nextRefreshAt, refreshNow, rebuildStatistics, updatedAt, error, archives, loading, requestedMode, loadArchives } = useTaskHistory(interval, period);
   const activePeriod = analysis?.period ?? 'quota';
   const [view, setView] = useState(readView);
   useEffect(() => { try { window.localStorage.setItem('codex-monitor-table-view', JSON.stringify(view)); } catch { /* Storage is optional. */ } }, [view]);
@@ -93,6 +93,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
         <select aria-label={t('Task refresh interval')} value={interval} onChange={e => { const n = Number(e.target.value); if (refreshIntervals.includes(n)) setInterval(n); }}>{refreshIntervals.map(n => <option key={n} value={n}>{n === 30000 ? t('30 seconds') : n === 60000 ? t('1 minute') : t('{count} minutes', { count: n / 60000 })}</option>)}</select>
         <span className="refresh-countdown">{loading ? t('Refreshing…') : nextRefreshAt ? t('Next refresh in {time}', { time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }) : t('Automatic refresh paused')}</span>
         <button type="button" className="small-control" disabled={loading} onClick={refreshNow}>{t('Refresh now')}</button>
+        <button type="button" className="small-control" disabled={loading} onClick={rebuildStatistics} title={t('Re-read logs in the current archive scope. Saved quota attribution is preserved.')}>{t('Rebuild statistics')}</button>
       </div>
     </div>
     <div className="task-toolbar">

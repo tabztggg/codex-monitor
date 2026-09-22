@@ -132,6 +132,7 @@ app.get("/api/history/jobs", async (request, response) => {
     const history = await service.listHistoryJobs({
       archiveMode: request.query.archives === 'all' ? 'all' : 'recent',
       period: request.query.period === 'today' || request.query.period === '7d' || request.query.period === 'lifetime' ? request.query.period : 'quota',
+      forceRefresh: request.query.forceRefresh === 'true',
       cursor:
         typeof request.query.cursor === "string" ? request.query.cursor : null,
       limit:

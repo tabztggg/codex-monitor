@@ -128,6 +128,39 @@ describe('archived task history', () => {
     expect(result.data.find(job => job.id === 'active')?.name).toBe('Active title');
   });
 
+  it('rebuilds summaries saved by the old identity parser even when logs have not changed', () => {
+    writeSession(archives, 'recoverable', 123);
+    new HistoryJobReader(sessions, ledger).listJobs({ nowMs });
+    const cacheFile = path.join(root, 'cache', 'archived-history.json');
+    const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    cache.version = 1;
+    cache.entries[0][1].job.id = 'incorrect-parent';
+    cache.entries[0][1].job.isSubagent = true;
+    fs.writeFileSync(cacheFile, JSON.stringify(cache));
+    const result = new HistoryJobReader(sessions, ledger).listJobs({ nowMs });
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toMatchObject({ id: 'recoverable', totalUsage: { totalTokens: 123 } });
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(2);
+  });
+
+  it('retries a transient read error without requiring a log modification or restart', () => {
+    const file = writeSession(sessions, 'recoverable', 123);
+    const reader = new HistoryJobReader(sessions);
+    const realOpen = vi.mocked(fs.openSync).getMockImplementation()!;
+    let reads = 0;
+    vi.mocked(fs.openSync).mockImplementation((...args) => {
+      // The bounded identity probe is first; fail only the full usage read.
+      if (String(args[0]) === file && ++reads === 2) throw new Error('temporary read failure');
+      return realOpen(...args);
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(reader.listJobs({ nowMs }).total).toBe(0);
+    vi.mocked(fs.openSync).mockRestore();
+    expect(reader.listJobs({ nowMs: nowMs + 60_000 }).data[0])
+      .toMatchObject({ id: 'recoverable', totalUsage: { totalTokens: 123 } });
+    expect(error).toHaveBeenCalledOnce();
+  });
+
   it('selects the newest 30 archive roots before opening logs, and scans older ones only on explicit request', () => {
     const db = new DatabaseSync(path.join(root, 'state_5.sqlite'));
     db.exec('CREATE TABLE threads (id TEXT, archived INTEGER, archived_at INTEGER, source TEXT)');

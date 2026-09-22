@@ -24,11 +24,14 @@ import { calibrate20x, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEv
 import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
 import { readProjectResolver } from './project-metadata';
 import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
+import { IncrementalSessionLog } from './session-log-reader';
 
 type SessionFile = {
   path: string;
   mtimeMs: number;
   size: number;
+  ctimeMs: number;
+  identity: string;
 };
 
 type CachedHistoryJob = {
@@ -37,6 +40,17 @@ type CachedHistoryJob = {
   parsedAtMs: number;
   usageWindowStartedAtMs: number | null;
   job: ParsedHistoryJob | null;
+  ctimeMs?: number;
+  identity?: string;
+  compact?: CompactHistoryData;
+};
+
+type CompactHistoryData = {
+  version: 1;
+  records: string[];
+  preview: string | null;
+  activityMin: number | null;
+  activityMax: number | null;
 };
 
 type ParsedHistoryJob = HistoryJob & {
@@ -102,6 +116,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
 };
 
 const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
+const ARCHIVE_CACHE_VERSION = 2;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
@@ -109,6 +124,7 @@ export class HistoryJobReader {
   private readonly archiveCacheFile: string | undefined;
   private archiveCacheDirty = false;
   private readonly identities = new Map<string, ArchiveMetadata>();
+  private readonly incremental = new Map<string, { reader: IncrementalSessionLog; stats: CompactHistoryRecords }>();
 
   public constructor(
     private readonly sessionsRoot = resolveCodexSessionsRoot(),
@@ -133,7 +149,14 @@ export class HistoryJobReader {
     observeUsage?: boolean;
     archiveMode?: HistoryArchiveMode;
     period?: HistoryPeriod;
+    forceRefresh?: boolean;
   }): HistoryJobListResponse {
+    if (args.forceRefresh) {
+      this.cache.clear();
+      this.incremental.clear();
+      this.identities.clear();
+      this.archiveCacheDirty = true;
+    }
     const nowMs = args.nowMs ?? Date.now();
     const period = args.period ?? 'quota';
     const indexedNames = readSessionNames(path.join(this.sessionsRoot, "..", "session_index.jsonl"));
@@ -154,9 +177,14 @@ export class HistoryJobReader {
     for (const cachedPath of this.cache.keys()) {
       if (!activePaths.has(cachedPath)) {
         this.cache.delete(cachedPath);
+        this.incremental.delete(cachedPath);
+        this.identities.delete(cachedPath);
         this.archiveCacheDirty = true;
       }
     }
+
+    for (const file of this.incremental.keys()) if (!activePaths.has(file)) this.incremental.delete(file);
+    for (const file of this.identities.keys()) if (!activePaths.has(file)) this.identities.delete(file);
 
     const sourceKindSet =
       args.sourceKinds && args.sourceKinds.length > 0
@@ -173,7 +201,8 @@ export class HistoryJobReader {
         const previous = this.cache.get(file.path);
         const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null);
         const archived = archivedPaths.has(file.path);
-        if (archived && previous !== this.cache.get(file.path)) this.archiveCacheDirty = true;
+        const next = this.cache.get(file.path);
+        if (archived && (previous?.compact !== next?.compact || previous?.mtimeMs !== next?.mtimeMs || previous?.size !== next?.size)) this.archiveCacheDirty = true;
         return job ? { ...job, archived } : null;
       })
       .filter((job): job is ParsedHistoryJob => Boolean(job));
@@ -262,60 +291,47 @@ export class HistoryJobReader {
     usageWindowStartedAtMs: number | null
   ): ParsedHistoryJob | null {
     const cached = this.cache.get(file.path);
-    if (
-      cached &&
-      cached.mtimeMs === file.mtimeMs &&
-      cached.size === file.size &&
-      (cached.job?.dailyUsage !== undefined || !cached.job) &&
-      (cached.job?.quotaCalibrationEvents !== undefined || !cached.job ||
-        usageWindowStartedAtMs === null || Date.parse(cached.job.updatedAt) < usageWindowStartedAtMs) &&
-      (cached.usageWindowStartedAtMs === usageWindowStartedAtMs || usageWindowStartedAtMs === null ||
-        // Keep lifetime summaries when the requested period follows all recorded activity.
-        (cached.job && Date.parse(cached.job.updatedAt) < usageWindowStartedAtMs)) &&
-      (isRollingUsageStable(cached.job, cached.parsedAtMs) ||
-        nowMs - cached.parsedAtMs < 60_000) &&
-      !hasRecentOpenTurn(cached.job, nowMs)
-    ) {
-      const job = cloneValue(cached.job);
-      if (job && cached.usageWindowStartedAtMs !== usageWindowStartedAtMs) {
-        job.sinceResetUsage = null;
-        job.sinceResetEstimatedCostUsd = null;
-        job.sinceResetUnpricedTokens = 0;
-        job.quotaCalibrationEvents = [];
-        job.quotaDailyUsage = [];
-      }
-      return job;
+    const unchanged = Boolean(cached?.compact && cached.mtimeMs === file.mtimeMs &&
+      cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
+    if (unchanged && cached?.job && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+        (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
+          nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
+      return cloneValue(cached.job);
     }
 
-    let job: ParsedHistoryJob | null;
     try {
-      job = parseHistorySessionFile({
+      let compact = cached?.compact;
+      if (!unchanged) {
+        let state = this.incremental.get(file.path);
+        if (!state) {
+          state = { reader: new IncrementalSessionLog(), stats: new CompactHistoryRecords() };
+          this.incremental.set(file.path, state);
+        }
+        state.reader.read(file.path, line => state!.stats.consume(line), () => { state!.stats = new CompactHistoryRecords(); });
+        // Detach persisted records from the mutable reader state. A later partial
+        // read failure must not corrupt the last successfully cached summary.
+        compact = state.stats.serialize();
+      }
+      if (!compact) return null;
+      const stats = new CompactHistoryRecords(compact);
+      const job = parseHistorySessionFile({
         sessionId: extractSessionId(file.path),
-        fileContent: readSessionLines(file.path),
+        fileContent: stats.lines(),
         updatedAt: new Date(file.mtimeMs).toISOString(),
         nowMs,
         usageWindowStartedAtMs
       });
+      if (job) job.preview = compact.preview;
+      this.cache.set(file.path, {
+        mtimeMs: file.mtimeMs, size: file.size, ctimeMs: file.ctimeMs, identity: file.identity,
+        parsedAtMs: nowMs, usageWindowStartedAtMs, job, compact
+      });
+      return cloneValue(job);
     } catch (error) {
       console.error(`Could not read Codex session ${file.path}:`, error instanceof Error ? error.message : String(error));
-      this.cache.set(file.path, {
-        mtimeMs: file.mtimeMs,
-        size: file.size,
-        parsedAtMs: nowMs,
-        usageWindowStartedAtMs,
-        job: null
-      });
-      return null;
+      this.incremental.get(file.path)?.reader.invalidate();
+      return cached?.job ? cloneValue(cached.job) : null;
     }
-
-    this.cache.set(file.path, {
-      mtimeMs: file.mtimeMs,
-      size: file.size,
-      parsedAtMs: nowMs,
-      usageWindowStartedAtMs,
-      job
-    });
-    return cloneValue(job);
   }
 
   private selectArchives(activeFiles: SessionFile[], archiveFiles: SessionFile[], metadata: Map<string, ArchiveMetadata>, mode: HistoryArchiveMode) {
@@ -378,18 +394,23 @@ export class HistoryJobReader {
     try {
       const stored = JSON.parse(readFileSync(this.archiveCacheFile, 'utf8'));
       // Bump the version whenever the parser or model pricing changes.
-      if (stored.version !== 1 || stored.root !== path.resolve(this.archivedRoot) || !Array.isArray(stored.entries)) return;
+      if (stored.version !== ARCHIVE_CACHE_VERSION || stored.root !== path.resolve(this.archivedRoot) || !Array.isArray(stored.entries)) return;
       const entries = stored.entries as [string, CachedHistoryJob][];
       for (const [file, cached] of entries) {
         const relative = path.relative(this.archivedRoot, file);
         if (relative.startsWith('..') || path.isAbsolute(relative) ||
           !Number.isFinite(cached.mtimeMs) || !Number.isFinite(cached.size) || !Number.isFinite(cached.parsedAtMs) ||
           !(cached.usageWindowStartedAtMs === null || Number.isFinite(cached.usageWindowStartedAtMs)) ||
-          !cached.job || typeof cached.job.id !== 'string' || !Number.isFinite(Date.parse(cached.job.updatedAt))) {
+          !cached.job || typeof cached.job.id !== 'string' || !Number.isFinite(Date.parse(cached.job.updatedAt)) ||
+          (cached.compact !== undefined && !isCompactHistoryData(cached.compact))) {
           throw new Error('Invalid archived history cache entry');
         }
       }
-      for (const [file, cached] of entries) this.cache.set(file, cached);
+      for (const [file, cached] of entries) {
+        // Version 2 summaries predate the compact numeric timeline. Keep their
+        // optional upgrade lazy: only selected archives are read to populate it.
+        this.cache.set(file, cached);
+      }
     } catch (error) {
       console.warn('Could not load archived history cache; rebuilding from session logs:', error instanceof Error ? error.message : String(error));
     }
@@ -401,13 +422,111 @@ export class HistoryJobReader {
       const entries = [...this.cache].filter(([file, cached]) => archivedPaths.has(file) && cached.job);
       mkdirSync(path.dirname(this.archiveCacheFile), { recursive: true });
       const temporary = `${this.archiveCacheFile}.${process.pid}.tmp`;
-      writeFileSync(temporary, JSON.stringify({ version: 1, root: path.resolve(this.archivedRoot), entries }), { mode: 0o600 });
+      writeFileSync(temporary, JSON.stringify({ version: ARCHIVE_CACHE_VERSION, root: path.resolve(this.archivedRoot), entries }), { mode: 0o600 });
       renameSync(temporary, this.archiveCacheFile);
       this.archiveCacheDirty = false;
     } catch (error) {
       console.warn('Could not save archived history cache:', error instanceof Error ? error.message : String(error));
     }
   }
+}
+
+/** Only statistics survive a scan; transcripts, instructions and tool output do not. */
+class CompactHistoryRecords {
+  private readonly data: CompactHistoryData;
+
+  constructor(data?: CompactHistoryData) {
+    this.data = data ?? { version: 1, records: [], preview: null, activityMin: null, activityMax: null };
+  }
+
+  consume(line: string): void {
+    let record: Record<string, unknown> | null;
+    try { record = asRecord(JSON.parse(line)); } catch { return; }
+    if (!record) return;
+    const type = asString(record.type);
+    const payload = asRecord(record.payload);
+    const timestamp = toIsoDate(record.timestamp);
+    let compact: Record<string, unknown> | null = null;
+    if (type === 'session_meta') {
+      const source = asRecord(payload?.source);
+      const subagent = asRecord(source?.subagent) ?? asRecord(source?.subAgent);
+      const spawn = asRecord(subagent?.thread_spawn) ?? asRecord(subagent?.threadSpawn);
+      compact = { ...statFields(payload, ['id', 'timestamp', 'name', 'cwd', 'model_provider', 'modelProvider']),
+        parent_thread_id: asString(payload?.parent_thread_id) ?? asString(payload?.parentThreadId) ??
+          asString(spawn?.parent_thread_id) ?? asString(spawn?.parentThreadId),
+        source: normalizeSourceKind(payload?.source) ?? normalizeOriginator(payload?.originator) };
+    } else if (type === 'turn_context') {
+      compact = statFields(payload, ['cwd', 'model_provider', 'modelProvider', 'model']);
+    } else if (type === 'event_msg') {
+      const event = asString(payload?.type);
+      if (event === 'token_count') {
+        const info = asRecord(payload?.info);
+        const rate = asRecord(payload?.rate_limits);
+        compact = { type: event,
+          info: { last_token_usage: compactTokenUsage(info?.last_token_usage), total_token_usage: compactTokenUsage(info?.total_token_usage) },
+          rate_limits: rate ? { ...statFields(rate, ['plan_type', 'limit_id']),
+            primary: statFields(asRecord(rate.primary), ['window_minutes', 'used_percent', 'resets_at']),
+            secondary: statFields(asRecord(rate.secondary), ['window_minutes', 'used_percent', 'resets_at']) } : null };
+      } else if (event === 'task_started' || event === 'task_complete' || event === 'turn_aborted') {
+        compact = statFields(payload, ['type', 'turn_id', 'turnId', 'completed_at', 'completedAt', 'duration_ms']);
+      } else if (event === 'user_message') {
+        this.data.preview = userPreview(asString(payload?.message)) ?? this.data.preview;
+      }
+    } else if (type === 'response_item' && isUserMessage(payload)) {
+      this.data.preview = extractUserPreview(payload) ?? this.data.preview;
+    }
+    if (compact) {
+      this.flushActivity();
+      this.data.records.push(JSON.stringify({ timestamp, type, payload: compact }));
+    } else {
+      const at = timestamp ? Date.parse(timestamp) : NaN;
+      if (Number.isFinite(at)) {
+        this.data.activityMin = this.data.activityMin === null ? at : Math.min(this.data.activityMin, at);
+        this.data.activityMax = this.data.activityMax === null ? at : Math.max(this.data.activityMax, at);
+      }
+    }
+  }
+
+  *lines(): Generator<string> {
+    yield* this.data.records;
+    yield* this.activityLines();
+  }
+
+  serialize(): CompactHistoryData {
+    return { ...this.data, records: [...this.data.records] };
+  }
+
+  private *activityLines(): Generator<string> {
+    for (const at of new Set([this.data.activityMin, this.data.activityMax])) {
+      if (at !== null) yield JSON.stringify({ type: 'activity', timestamp: new Date(at).toISOString() });
+    }
+  }
+
+  private flushActivity(): void {
+    this.data.records.push(...this.activityLines());
+    this.data.activityMin = this.data.activityMax = null;
+  }
+}
+
+function statFields(record: Record<string, unknown> | null, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.flatMap(key => {
+    const value = record?.[key];
+    return typeof value === 'string' || typeof value === 'number' ? [[key, value]] : [];
+  }));
+}
+
+function compactTokenUsage(value: unknown): Record<string, unknown> | null {
+  const record = asRecord(value);
+  return record ? statFields(record, ['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens',
+    'output_tokens', 'reasoning_output_tokens', 'total_tokens']) : null;
+}
+
+function isCompactHistoryData(value: unknown): value is CompactHistoryData {
+  const record = asRecord(value);
+  return record?.version === 1 && Array.isArray(record.records) && record.records.every(line => typeof line === 'string') &&
+    (record.preview === null || typeof record.preview === 'string') &&
+    (record.activityMin === null || typeof record.activityMin === 'number' && Number.isFinite(record.activityMin)) &&
+    (record.activityMax === null || typeof record.activityMax === 'number' && Number.isFinite(record.activityMax));
 }
 
 // The desktop index also names tasks omitted by thread/list, such as archived tasks.
@@ -691,6 +810,7 @@ export function parseHistorySessionFile(args: {
   usageWindowStartedAtMs?: number | null;
 }): ParsedHistoryJob | null {
   let sessionId = args.sessionId;
+  let metadataId: string | null = null;
   let parentThreadId: string | null = null;
   let isSubagent = false;
   let name: string | null = null;
@@ -744,6 +864,13 @@ export function parseHistorySessionFile(args: {
       continue;
     }
 
+    const recordType = asString(record.type);
+    const payload = asRecord(record.payload);
+    const incomingId = recordType === 'session_meta' ? asString(payload?.id) : null;
+    // Forked logs can include an ancestor's session_meta immediately after
+    // their own header. It is inherited context, not a change of task identity.
+    if (incomingId && metadataId && incomingId !== metadataId) continue;
+
     const recordTimestampMs = parseDateMs(record.timestamp);
     if (recordTimestampMs !== null) {
       latestRecordTimestampMs =
@@ -756,14 +883,19 @@ export function parseHistorySessionFile(args: {
           : Math.min(createdAtMs, recordTimestampMs);
     }
 
-    const recordType = asString(record.type);
-    const payload = asRecord(record.payload);
-
     if (recordType === "session_meta") {
-      sessionId = asString(payload?.id) ?? sessionId;
+      if (incomingId) {
+        metadataId = incomingId;
+        sessionId = incomingId;
+      }
+      const source = asRecord(payload?.source);
+      const subagent = asRecord(source?.subagent) ?? asRecord(source?.subAgent);
+      const spawn = asRecord(subagent?.thread_spawn) ?? asRecord(subagent?.threadSpawn);
       parentThreadId =
         asString(payload?.parent_thread_id) ??
         asString(payload?.parentThreadId) ??
+        asString(spawn?.parent_thread_id) ??
+        asString(spawn?.parentThreadId) ??
         parentThreadId;
       name = asString(payload?.name) ?? name;
       cwd = asString(payload?.cwd) ?? cwd;
@@ -1017,7 +1149,9 @@ function walkDirectory(directory: string, results: SessionFile[]): void {
       results.push({
         path: fullPath,
         mtimeMs: stats.mtimeMs,
-        size: stats.size
+        size: stats.size,
+        ctimeMs: stats.ctimeMs,
+        identity: `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`
       });
     } catch {
       continue;

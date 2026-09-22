@@ -48,7 +48,7 @@ Switch the metric between estimated cost, tokens, and 20x equivalents.
 | Time ranges | Select Today, Last 7 days, Current quota period, or Task lifetime. |
 | Trends and rankings | Explore daily usage and the top five projects by cost, tokens, or 20x equivalents. |
 | Table controls | Search, filter, sort every column, hide columns, and choose comfortable or compact density. Headers and task names stay visible while scrolling. |
-| Refresh controls | Refresh immediately or every 30 seconds, 1, 2, 5, or 10 minutes, with a countdown and connection status. |
+| Refresh controls | Incremental refresh immediately or every 30 seconds, 1, 2, 5, or 10 minutes; explicitly rebuild statistics for the current scope when needed. |
 | Chinese / English | Switch in the top-right corner. New visitors start in English; the last choice is remembered. |
 | Task details | Expand previews, paths, and token breakdowns; open tasks in Codex or inspect tracked live runs. |
 
@@ -122,6 +122,12 @@ into old accounts or retrieve their missing history.
 - Calibration needs at least five percentage points of usable weekly quota
   observations. A new setup may initially show `--`.
 
+Upgrading from the older session parser rebuilds cached archive summaries and
+starts a fresh quota-attribution baseline. Previously observed account usage
+is left unattributed instead of preserving potentially incorrect task shares;
+new observations receive task shares from that baseline onward. Recorded tokens,
+estimated costs, and 20x equivalents are recalculated from the original logs.
+
 See [metric details](docs/setup-and-reference.md#metric-details) for the calculation
 and its limits.
 
@@ -141,6 +147,23 @@ The default scope includes all unarchived root tasks and the **30 most recently
 archived root tasks**, plus attributable children. Older archive logs are not
 fully parsed merely to hide them later. **Calculate all archives** explicitly
 expands the scope and can take longer on large histories.
+
+A task keeps its own rollout identity when its log contains inherited parent
+metadata. Nested subagent usage is added to its principal task once, without
+hiding that task. Temporary log-read failures are retried on the next refresh.
+
+On startup, the monitor loads the selected archive scope once (the default is
+the latest 30 archived roots plus unarchived tasks). Subsequent automatic updates
+and **Refresh now** reuse unchanged logs and process only appended data for
+growing logs. A finished task receives a final tail update before its unchanged
+result is reused; new activity continues incrementally. Account quota and active
+status continue to update on their own schedules.
+
+**Rebuild statistics** explicitly re-reads logs in the current archive scope.
+It does not expand recent archives to all archives or reset saved quota
+attribution. Changing the time range, search, sorting, or display filters does
+not trigger a full rebuild. Thread metadata is shared across concurrent requests
+and cached for up to 60 seconds, so pagination does not repeatedly fetch it.
 
 **Hide archived tasks**, search, row filters, and collapsed groups affect only
 the displayed rows. Scope totals, project totals, and rankings still include
@@ -162,6 +185,8 @@ access controls; see [network access](docs/setup-and-reference.md#network-access
 Optional shutdown controls are inherited from upstream. The quick start above
 and this version's Windows launcher use dry-run mode. Real shutdown uses Windows
 `shutdown.exe`; see [shutdown behavior](docs/setup-and-reference.md#shutdown-automation).
+Cancellation waits for any in-flight scheduling command. If Windows rejects the
+cancel command, the pending shutdown remains visible with an error.
 
 ## Development
 
@@ -178,6 +203,10 @@ monitor before starting another backend on the same port.
 Built with TypeScript, React, Vite, Express, and WebSocket. See the
 [setup and architecture reference](docs/setup-and-reference.md) for configuration,
 launchers, troubleshooting, and source layout.
+
+The `tsup` dependency override selects esbuild 0.28.2 or later to address
+[GHSA-g7r4-m6w7-qqqr](https://github.com/evanw/esbuild/security/advisories/GHSA-g7r4-m6w7-qqqr).
+Keep it until tsup's own dependency range includes the fixed version.
 
 ## Credits and license status
 

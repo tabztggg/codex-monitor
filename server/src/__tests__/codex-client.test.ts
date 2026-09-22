@@ -1,10 +1,166 @@
 import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { EventEmitter } from "node:events";
+import { PassThrough, Writable } from "node:stream";
 import {
+  CodexAppServerClient,
   createCodexAppServerSpawnError,
   resolveCodexExecutable
 } from "../codex-client";
+
+class FakeAppServer extends EventEmitter {
+  public readonly messages: Array<{ id?: number; method: string }> = [];
+  public readonly stdout = new PassThrough();
+  public readonly stderr = new PassThrough();
+  public readonly stdin = new Writable({
+    write: (chunk, _encoding, callback) => {
+      this.messages.push(JSON.parse(chunk.toString()));
+      callback();
+    }
+  });
+  public readonly kill = vi.fn();
+
+  public reply(id: number, result: unknown = {}) {
+    this.stdout.write(`${JSON.stringify({ id, result })}\n`);
+  }
+}
+
+describe("CodexAppServerClient startup", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("times out an unanswered read without replaying it and ignores its late response", async () => {
+    vi.useFakeTimers();
+    const child = new FakeAppServer();
+    const client = new CodexAppServerClient(() => child, 50);
+    const startup = client.ensureStarted();
+    child.reply(child.messages[0].id!);
+    await startup;
+
+    const read = client.request("account/rateLimits/read");
+    const rejected = expect(read).rejects.toThrow('request "account/rateLimits/read" timed out');
+    await vi.advanceTimersByTimeAsync(50);
+    await rejected;
+    expect(child.messages.filter((message) => message.method === "account/rateLimits/read")).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    const timedOutId = child.messages.at(-1)!.id!;
+
+    const nextRead = client.request("thread/list");
+    await vi.advanceTimersByTimeAsync(0);
+    child.reply(timedOutId, { stale: true });
+    child.reply(child.messages.at(-1)!.id!, { data: [] });
+    await expect(nextRead).resolves.toEqual({ data: [] });
+    expect(vi.getTimerCount()).toBe(0);
+    child.emit("close", 0);
+  });
+
+  it("cleans up an initialization timeout and reconnects only on the next request", async () => {
+    vi.useFakeTimers();
+    const first = new FakeAppServer();
+    const second = new FakeAppServer();
+    const spawn = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const client = new CodexAppServerClient(spawn, 50);
+    const rejected = expect(client.ensureStarted()).rejects.toThrow('request "initialize" timed out');
+    await vi.advanceTimersByTimeAsync(50);
+    await rejected;
+    expect(first.kill).toHaveBeenCalledOnce();
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+
+    const restarted = client.ensureStarted();
+    second.reply(second.messages[0].id!);
+    await restarted;
+    expect(spawn).toHaveBeenCalledTimes(2);
+    second.emit("close", 0);
+  });
+
+  it("clears a pending request and timeout when writing throws", async () => {
+    vi.useFakeTimers();
+    const child = new FakeAppServer();
+    const client = new CodexAppServerClient(() => child, 50);
+    const startup = client.ensureStarted();
+    child.reply(child.messages[0].id!);
+    await startup;
+    vi.spyOn(child.stdin, "write").mockImplementationOnce(() => { throw new Error("Write failed"); });
+    await expect(client.request("thread/list")).rejects.toThrow("Write failed");
+    expect(client["pendingRequests"].size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    child.emit("close", 0);
+  });
+
+  it("rejects pending requests and removes their timers on a broken input stream", async () => {
+    vi.useFakeTimers();
+    const child = new FakeAppServer();
+    const client = new CodexAppServerClient(() => child, 50);
+    const startup = client.ensureStarted();
+    child.reply(child.messages[0].id!);
+    await startup;
+    const first = expect(client.request("thread/list")).rejects.toThrow("Broken pipe");
+    const second = expect(client.request("account/rateLimits/read")).rejects.toThrow("Broken pipe");
+    await vi.advanceTimersByTimeAsync(0);
+    child.stdin.emit("error", new Error("Broken pipe"));
+    await Promise.all([first, second]);
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(client["pendingRequests"].size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores non-object JSON without interrupting the handshake", async () => {
+    const child = new FakeAppServer();
+    const client = new CodexAppServerClient(() => child);
+    const startup = client.ensureStarted();
+    expect(() => child.stdout.write('null\nfalse\n42\n"text"\n[]\n')).not.toThrow();
+    child.reply(child.messages[0].id!);
+    await startup;
+    expect(child.messages.at(-1)?.method).toBe("initialized");
+    child.emit("close", 0);
+  });
+
+  it("waits for the initialize handshake before sending concurrent requests", async () => {
+    const child = new FakeAppServer();
+    const client = new CodexAppServerClient(() => child);
+    const startup = client.ensureStarted();
+    const read = client.request("account/rateLimits/read");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(child.messages.map((message) => message.method)).toEqual(["initialize"]);
+
+    child.reply(child.messages[0].id!);
+    await startup;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(child.messages.map((message) => message.method)).toEqual([
+      "initialize", "initialized", "account/rateLimits/read"
+    ]);
+    child.reply(child.messages[2].id!, { rateLimits: {} });
+    await expect(read).resolves.toEqual({ rateLimits: {} });
+    child.emit("close", 0);
+  });
+
+  it("restarts after initialization fails and ignores a late close from the old process", async () => {
+    const oldChild = new FakeAppServer();
+    const newChild = new FakeAppServer();
+    const spawn = vi.fn().mockReturnValueOnce(oldChild).mockReturnValueOnce(newChild);
+    const client = new CodexAppServerClient(spawn);
+    const startup = client.ensureStarted();
+    const rejected = expect(startup).rejects.toThrow("initialize failed");
+    oldChild.stdout.write(`${JSON.stringify({ id: oldChild.messages[0].id, error: { code: -1, message: "initialize failed" } })}\n`);
+    await rejected;
+    expect(oldChild.kill).toHaveBeenCalledOnce();
+
+    const restarted = client.ensureStarted();
+    oldChild.emit("close", 1);
+    newChild.reply(newChild.messages[0].id!);
+    await restarted;
+    expect(spawn).toHaveBeenCalledTimes(2);
+    const read = client.request("account/rateLimits/read");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    newChild.reply(newChild.messages.at(-1)!.id!, { ok: true });
+    await expect(read).resolves.toEqual({ ok: true });
+    newChild.emit("close", 0);
+  });
+});
 
 describe("resolveCodexExecutable", () => {
   it("finds the VS Code-bundled Codex binary when PATH does not include it", () => {

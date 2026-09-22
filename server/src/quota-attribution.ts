@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export type QuotaSample = { id: string; cost: number; tokens: number; unpriced?: number; historical?: boolean };
 type Ledger = {
-  version: 1;
+  version: 2;
   key: string;
   used: number;
   observedAt: string;
@@ -35,15 +35,27 @@ export class QuotaAttribution {
   private state: Ledger | null = null;
   constructor(private readonly file?: string) {
     if (file && existsSync(file)) {
-      const state = JSON.parse(readFileSync(file, 'utf8')) as Ledger;
-      if (state.version !== 1 || typeof state.key !== 'string' ||
-          !Number.isFinite(state.used) || !Number.isFinite(state.unattributed) ||
-          !state.baseline || !state.attributed || typeof state.observedAt !== 'string' ||
-          !Object.values(state.baseline).every(v => Number.isFinite(v.cost) && Number.isFinite(v.tokens)) ||
-          !Object.values(state.attributed).every(v => Number.isFinite(v) && v >= 0)) {
-        throw new Error('Invalid quota attribution ledger');
+      try {
+        const state = JSON.parse(readFileSync(file, 'utf8')) as Ledger | { version: 1 };
+        // Older parser versions could hide principal tasks and corrupt their weights.
+        // Preserve the file until a successful observation establishes a fresh baseline.
+        if (state?.version === 1) {
+          console.warn('Quota attribution uses the previous session parser; rebuilding its baseline on the next observation.');
+          return;
+        }
+        if (!state || state.version !== 2 || typeof state.key !== 'string' ||
+            !nonnegative(state.used) || state.used > 100 || !nonnegative(state.unattributed) ||
+            !isRecord(state.baseline) || !isRecord(state.attributed) ||
+            typeof state.observedAt !== 'string' || !Number.isFinite(Date.parse(state.observedAt)) ||
+            !Object.values(state.baseline).every(v => isRecord(v) && nonnegative(v.cost) && nonnegative(v.tokens) &&
+              (v.unpriced === undefined || nonnegative(v.unpriced))) ||
+            !Object.values(state.attributed).every(nonnegative)) {
+          throw new Error('Invalid quota attribution ledger');
+        }
+        this.state = state;
+      } catch (error) {
+        console.warn('Quota attribution ledger unavailable; rebuilding its baseline on the next observation:', error instanceof Error ? error.message : String(error));
       }
-      this.state = state;
     }
   }
 
@@ -54,7 +66,7 @@ export class QuotaAttribution {
     let next: Ledger;
     if (!previous || !isSameQuotaWindow(previous.key, key) || used < previous.used) {
       // Existing account consumption predates observation; never assign it retroactively.
-      next = { version: 1, key, used, baseline, observedAt: new Date(nowMs).toISOString(), attributed: {}, unattributed: used };
+      next = { version: 2, key, used, baseline, observedAt: new Date(nowMs).toISOString(), attributed: {}, unattributed: used };
     } else {
       const delta = used - previous.used;
       const discoveredArchives = samples.filter(s => s.historical && !previous.baseline[s.id]);
@@ -98,4 +110,12 @@ export class QuotaAttribution {
   }
 
   read(key: string) { return this.state && isSameQuotaWindow(this.state.key, key) ? this.state : null; }
+}
+
+function nonnegative(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

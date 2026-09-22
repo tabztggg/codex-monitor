@@ -56,6 +56,14 @@ find_linux_desktop_id() {
 
     for file in "$dir"/*.desktop; do
       [ -f "$file" ] || continue
+      # The installed monitor shortcut also contains "Codex". Launching it here
+      # would recursively reopen this script instead of opening the Codex app.
+      case "$file" in
+        */codex-with-monitor.desktop) continue ;;
+      esac
+      if grep -Eq '^Exec=.*start-codex-with-monitor[.]sh' "$file"; then
+        continue
+      fi
       if grep -Eiq '^(Name=.*Codex|Exec=.*codex)' "$file"; then
         basename "$file" .desktop
         return 0

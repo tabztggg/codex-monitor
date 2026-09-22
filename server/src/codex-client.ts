@@ -32,6 +32,7 @@ type JsonRpcNotification = {
 type PendingResolver = {
   resolve: (value: any) => void;
   reject: (reason?: unknown) => void;
+  timeout: NodeJS.Timeout;
 };
 
 const CODEX_OVERRIDE_ENV_KEYS = [
@@ -61,18 +62,19 @@ export class CodexAppServerClient extends EventEmitter<{
   private readonly pendingRequests = new Map<RequestId, PendingResolver>();
 
   public constructor(
-    private readonly spawnProcess: () => ProcessHandle = defaultSpawnProcess
+    private readonly spawnProcess: () => ProcessHandle = defaultSpawnProcess,
+    private readonly requestTimeoutMs = 30_000
   ) {
     super();
   }
 
   public async ensureStarted(): Promise<void> {
-    if (this.process) {
-      return;
-    }
-
     if (this.initializingPromise) {
       return this.initializingPromise;
+    }
+
+    if (this.process) {
+      return;
     }
 
     this.initializingPromise = this.startInternal();
@@ -103,7 +105,8 @@ export class CodexAppServerClient extends EventEmitter<{
   }
 
   private async startInternal(): Promise<void> {
-    this.process = this.spawnProcess();
+    const process = this.spawnProcess();
+    this.process = process;
 
     this.stdoutReader = readline.createInterface({
       input: this.process.stdout,
@@ -117,28 +120,39 @@ export class CodexAppServerClient extends EventEmitter<{
 
     this.stdoutReader.on("line", (line) => this.handleLine(line));
     this.stderrReader.on("line", (line) => this.emit("stderr", line));
+    process.stdin.on("error", (error) => {
+      if (this.process !== process) return;
+      this.handleProcessClose(process, null, error);
+      process.kill();
+    });
 
     if ("on" in this.process && typeof this.process.on === "function") {
       (this.process as unknown as NodeJS.EventEmitter).on("close", (code) => {
-        this.handleProcessClose(typeof code === "number" ? code : null);
+        this.handleProcessClose(process, typeof code === "number" ? code : null);
       });
       (this.process as unknown as NodeJS.EventEmitter).on("error", (error) => {
-        this.handleProcessClose(null, error);
+        this.handleProcessClose(process, null, error);
       });
     }
 
-    await this.sendRequest("initialize", {
-      clientInfo: {
-        name: "codex-monitor",
-        title: "Codex Monitor",
-        version: "0.1.0"
-      },
-      capabilities: {
-        experimentalApi: true
-      }
-    });
+    try {
+      await this.sendRequest("initialize", {
+        clientInfo: {
+          name: "codex-monitor",
+          title: "Codex Monitor",
+          version: "0.1.0"
+        },
+        capabilities: {
+          experimentalApi: true
+        }
+      });
+      this.writeMessage({ method: "initialized" });
+    } catch (error) {
+      this.handleProcessClose(process, null, error);
+      process.kill();
+      throw error;
+    }
 
-    this.writeMessage({ method: "initialized" });
     this.emit("initialized");
   }
 
@@ -146,8 +160,18 @@ export class CodexAppServerClient extends EventEmitter<{
     const id = this.nextId++;
 
     return await new Promise<T>((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-      this.writeMessage(params === undefined ? { id, method } : { id, method, params });
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`Codex app-server request "${method}" timed out after ${this.requestTimeoutMs} ms.`));
+      }, this.requestTimeoutMs);
+      this.pendingRequests.set(id, { resolve, reject, timeout });
+      try {
+        this.writeMessage(params === undefined ? { id, method } : { id, method, params });
+      } catch (error) {
+        clearTimeout(timeout);
+        this.pendingRequests.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -172,6 +196,10 @@ export class CodexAppServerClient extends EventEmitter<{
         "stderr",
         `Failed to parse app-server output: ${error instanceof Error ? error.message : String(error)}`
       );
+      return;
+    }
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return;
     }
 
@@ -205,6 +233,7 @@ export class CodexAppServerClient extends EventEmitter<{
     }
 
     this.pendingRequests.delete(message.id);
+    clearTimeout(pending.timeout);
 
     if (message.error) {
       pending.reject(new Error(`[${message.error.code}] ${message.error.message}`));
@@ -214,7 +243,9 @@ export class CodexAppServerClient extends EventEmitter<{
     pending.resolve(message.result);
   }
 
-  private handleProcessClose(code: number | null, error?: unknown): void {
+  private handleProcessClose(process: ProcessHandle, code: number | null, error?: unknown): void {
+    // A previous child can emit close after a replacement has already started.
+    if (this.process !== process) return;
     this.stdoutReader?.close();
     this.stderrReader?.close();
     this.stdoutReader = null;
@@ -222,6 +253,7 @@ export class CodexAppServerClient extends EventEmitter<{
     this.process = null;
 
     for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
       pending.reject(
         error ??
           new Error(

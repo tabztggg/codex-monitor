@@ -24,17 +24,19 @@ export function codexUsageFromRateLimitsRead(
   updatedAt = isoNow()
 ): CodexUsageSnapshot {
   const record = asRecord(response);
-  const primaryLimit = normalizeRateLimit(record?.rateLimits);
+  const legacyLimit = normalizeRateLimit(record?.rateLimits);
   const limitsById = asRecord(record?.rateLimitsByLimitId);
   const limits = limitsById
-    ? Object.values(limitsById)
-        .map((value) => normalizeRateLimit(value))
+    ? Object.entries(limitsById)
+        .map(([id, value]) => normalizeRateLimit(value, id))
         .filter((value): value is CodexUsageLimit => Boolean(value))
     : [];
 
-  if (primaryLimit && !limits.some((limit) => limit.id === primaryLimit.id)) {
-    limits.unshift(primaryLimit);
+  if (legacyLimit && !limits.some((limit) => limit.id === legacyLimit.id)) {
+    limits.unshift(legacyLimit);
   }
+  const primaryLimit = limits.find(limit => limit.id === 'codex') ??
+    limits.find(limit => limit.id === legacyLimit?.id) ?? limits[0] ?? null;
 
   return {
     status: primaryLimit ? "available" : "unavailable",
@@ -77,13 +79,13 @@ export function codexUsageFromRateLimitsUpdated(
   };
 }
 
-function normalizeRateLimit(value: unknown): CodexUsageLimit | null {
+function normalizeRateLimit(value: unknown, fallbackId = "codex"): CodexUsageLimit | null {
   const record = asRecord(value);
   if (!record) {
     return null;
   }
 
-  const id = asString(record.limitId) ?? "codex";
+  const id = asString(record.limitId) ?? fallbackId;
   return {
     id,
     name: asString(record.limitName),

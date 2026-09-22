@@ -22,6 +22,8 @@ export class AutomationController {
   private globalPolicy: RunAutomationPolicy;
   private globalState = structuredClone(DEFAULT_AUTOMATION_STATE);
   private activeSessionCount = 0;
+  private shutdownOperation: Promise<void> = Promise.resolve();
+  private schedulingShutdown: { scope: "run" | "global"; runId: string | null } | null = null;
 
   public constructor(
     private readonly store: MonitorStore,
@@ -106,7 +108,7 @@ export class AutomationController {
   ): Promise<void> {
     this.clearGlobalDebounce();
 
-    if (this.activeShutdown.scope === "global") {
+    if (this.isShutdownFor("global")) {
       await this.cancelShutdown(reason, options);
       return;
     }
@@ -136,21 +138,45 @@ export class AutomationController {
     reason = "manual",
     options: { disarm?: boolean } = {}
   ): Promise<void> {
-    for (const [, timer] of this.debounceTimers) {
-      clearTimeout(timer);
-    }
-    this.debounceTimers.clear();
-    this.clearGlobalDebounce();
+    this.clearAllDebounces();
+    await this.queueShutdownOperation(() => this.cancelShutdownInternal(reason, options));
+  }
+
+  private async cancelShutdownInternal(
+    reason: string,
+    options: { disarm?: boolean }
+  ): Promise<void> {
+    this.clearAllDebounces();
 
     const runId = this.activeShutdown.runId;
     if (this.activeShutdown.scheduled && !this.isDryRun()) {
       try {
         await this.runCommand("shutdown.exe", ["/a"]);
-      } catch {
-        // Windows returns a non-zero exit code when no shutdown is pending.
+      } catch (error) {
+        // ERROR_NO_SHUTDOWN_IN_PROGRESS confirms there is nothing left to cancel.
+        if (!(typeof error === "object" && error !== null && "code" in error && error.code === 1116)) {
+          const message = error instanceof Error ? error.message : String(error);
+          const lastAction = `Shutdown cancellation failed: ${message}`;
+          if (runId) this.store.setRunAutomationState(runId, { lastAction });
+          if (this.activeShutdown.scope === "global") this.globalState = { ...this.globalState, lastAction };
+          this.notifyChange();
+          throw error;
+        }
       }
     }
 
+    this.finishCancellation(runId, reason, options);
+  }
+
+  private clearAllDebounces(): void {
+    for (const [, timer] of this.debounceTimers) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
+    this.clearGlobalDebounce();
+  }
+
+  private finishCancellation(runId: string | null, reason: string, options: { disarm?: boolean }): void {
     if (runId) {
       const run = this.store.getRun(runId);
       if (run) {
@@ -215,8 +241,8 @@ export class AutomationController {
 
     if (!this.globalPolicy.enabled) {
       this.clearGlobalDebounce();
-      if (this.activeShutdown.scope === "global") {
-        void this.cancelShutdown("global automation disabled");
+      if (this.isShutdownFor("global")) {
+        this.cancelOnActivity("global automation disabled");
       }
       this.globalState = {
         ...DEFAULT_AUTOMATION_STATE
@@ -228,9 +254,9 @@ export class AutomationController {
       this.clearGlobalDebounce();
       if (
         this.globalPolicy.cancelOnNewActivity &&
-        this.activeShutdown.scope === "global"
+        this.isShutdownFor("global")
       ) {
-        void this.cancelShutdown("new Codex activity");
+        this.cancelOnActivity("new Codex activity");
         return;
       }
 
@@ -259,6 +285,8 @@ export class AutomationController {
       };
       return;
     }
+
+    if (this.schedulingShutdown?.scope === "global") return;
 
     if (this.activeShutdown.scheduled) {
       this.globalState = {
@@ -301,10 +329,9 @@ export class AutomationController {
     if (!run.automationPolicy.enabled) {
       this.clearDebounce(runId);
       if (
-        this.activeShutdown.scope === "run" &&
-        this.activeShutdown.runId === runId
+        this.isShutdownFor("run", runId)
       ) {
-        void this.cancelShutdown("automation disabled");
+        this.cancelOnActivity("automation disabled");
       }
       this.store.setRunAutomationState(runId, {
         status: "disabled",
@@ -329,10 +356,9 @@ export class AutomationController {
       this.clearDebounce(runId);
       if (
         run.automationPolicy.cancelOnNewActivity &&
-        this.activeShutdown.scope === "run" &&
-        this.activeShutdown.runId === runId
+        this.isShutdownFor("run", runId)
       ) {
-        void this.cancelShutdown("new activity");
+        this.cancelOnActivity("new activity");
       } else {
         this.store.setRunAutomationState(runId, {
           status: "armed",
@@ -358,6 +384,8 @@ export class AutomationController {
       });
       return;
     }
+
+    if (this.schedulingShutdown?.scope === "run" && this.schedulingShutdown.runId === runId) return;
 
     if (this.debounceTimers.has(runId)) {
       return;
@@ -400,6 +428,17 @@ export class AutomationController {
   }
 
   private async scheduleShutdown(runId: string): Promise<void> {
+    await this.queueShutdownOperation(async () => {
+      this.schedulingShutdown = { scope: "run", runId };
+      try {
+        await this.scheduleRunShutdownInternal(runId);
+      } finally {
+        this.schedulingShutdown = null;
+      }
+    });
+  }
+
+  private async scheduleRunShutdownInternal(runId: string): Promise<void> {
     const run = this.store.getRun(runId);
     if (!run || !run.settled || !run.automationPolicy.enabled) {
       return;
@@ -409,7 +448,11 @@ export class AutomationController {
       this.activeShutdown.scheduled &&
       (this.activeShutdown.scope !== "run" || this.activeShutdown.runId !== runId)
     ) {
-      await this.cancelShutdown("replaced by a newer run");
+      try {
+        await this.cancelShutdownInternal("replaced by a newer run", {});
+      } catch {
+        return;
+      }
     }
 
     const seconds = run.automationPolicy.shutdownDelaySeconds;
@@ -455,6 +498,17 @@ export class AutomationController {
   }
 
   private async scheduleGlobalShutdown(): Promise<void> {
+    await this.queueShutdownOperation(async () => {
+      this.schedulingShutdown = { scope: "global", runId: null };
+      try {
+        await this.scheduleGlobalShutdownInternal();
+      } finally {
+        this.schedulingShutdown = null;
+      }
+    });
+  }
+
+  private async scheduleGlobalShutdownInternal(): Promise<void> {
     if (
       !this.globalPolicy.enabled ||
       this.activeSessionCount > 0 ||
@@ -514,6 +568,24 @@ export class AutomationController {
     }
 
     await execFileAsync(file, args);
+  }
+
+  private queueShutdownOperation(operation: () => Promise<void>): Promise<void> {
+    const result = this.shutdownOperation.then(operation);
+    this.shutdownOperation = result.catch(() => {});
+    return result;
+  }
+
+  private isShutdownFor(scope: "run" | "global", runId: string | null = null): boolean {
+    return [this.activeShutdown, this.schedulingShutdown].some(
+      (shutdown) => shutdown?.scope === scope && shutdown.runId === runId
+    );
+  }
+
+  private cancelOnActivity(reason: string): void {
+    // Cancellation errors remain visible in automation state; do not create an
+    // unhandled rejection from polling or notification callbacks.
+    void this.cancelShutdown(reason).catch(() => {});
   }
 
   private isDryRun(): boolean {

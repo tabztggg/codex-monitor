@@ -35,9 +35,14 @@
     "@vitejs/plugin-react-swc": "^3.11.0",
     "concurrently": "^9.2.1",
     "tsup": "^8.5.1",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.2",
     "vite": "^6.4.2",
     "vitest": "^4.1.3"
+  },
+  "overrides": {
+    "tsup": {
+      "esbuild": "^0.28.2"
+    }
   }
 }

@@ -35,6 +35,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     refreshedAtMs: number;
     data: Map<string, HistoryJobMetadata>;
   } | null = null;
+  private historyThreadMetadataRefreshPromise: Promise<Map<string, HistoryJobMetadata>> | null = null;
 
   public constructor(
     client = new CodexAppServerClient(),
@@ -185,6 +186,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     sortDirection?: string | null;
     archiveMode?: 'recent' | 'all';
     period?: 'quota' | 'today' | '7d' | 'lifetime';
+    forceRefresh?: boolean;
   }): Promise<HistoryJobListResponse> {
     let metadataById: Map<string, HistoryJobMetadata> | null = null;
     try {
@@ -195,6 +197,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
 
     return this.historyJobReader.listJobs({
       ...args,
+      forceRefresh: args.forceRefresh === true && !args.cursor,
       metadataById,
       usageWindow: this.getPrimaryUsageWindow()
     });
@@ -238,11 +241,21 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     const nowMs = Date.now();
     if (
       this.historyThreadMetadataCache &&
-      nowMs - this.historyThreadMetadataCache.refreshedAtMs < 10000
+      nowMs - this.historyThreadMetadataCache.refreshedAtMs < 60_000
     ) {
       return this.historyThreadMetadataCache.data;
     }
 
+    if (this.historyThreadMetadataRefreshPromise) return this.historyThreadMetadataRefreshPromise;
+    this.historyThreadMetadataRefreshPromise = this.refreshHistoryThreadMetadata();
+    try {
+      return await this.historyThreadMetadataRefreshPromise;
+    } finally {
+      this.historyThreadMetadataRefreshPromise = null;
+    }
+  }
+
+  private async refreshHistoryThreadMetadata(): Promise<Map<string, HistoryJobMetadata>> {
     await this.client.ensureStarted();
     const metadataById = new Map<string, HistoryJobMetadata>();
     let cursor: string | null = null;
@@ -287,7 +300,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     } while (cursor && pageCount < 25);
 
     this.historyThreadMetadataCache = {
-      refreshedAtMs: nowMs,
+      refreshedAtMs: Date.now(),
       data: metadataById
     };
     return metadataById;

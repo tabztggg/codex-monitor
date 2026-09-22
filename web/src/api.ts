@@ -88,10 +88,12 @@ export const api = {
     signal?: AbortSignal;
     archiveMode?: HistoryArchiveMode;
     period?: HistoryPeriod;
+    forceRefresh?: boolean;
   }): Promise<HistoryJobListResponse> {
     const params = new URLSearchParams();
     params.set('archives', args.archiveMode ?? 'recent');
     params.set('period', args.period ?? 'quota');
+    if (args.forceRefresh && !args.cursor) params.set('forceRefresh', 'true');
     params.set("sourceKinds", args.sourceKinds.join(","));
     params.set("limit", String(args.limit ?? 20));
     if (args.searchTerm) {

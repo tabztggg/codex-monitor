@@ -15,6 +15,8 @@ export const chinese: Record<string, string> = {
   'The trend shows dates with recorded usage in the selected period. Rankings use the full selected scope, including hidden rows.': '趋势显示所选范围内有用量记录的日期。排行汇总整个统计范围，包含被隐藏的行。',
   'Account attribution is available only for the current quota period.': '账号额度分配仅在本周期范围可用。',
   'Refreshing…': '正在刷新…', 'Automatic refresh paused': '自动刷新已暂停', 'Next refresh in {time}': '{time} 后刷新', 'Refresh now': '立即刷新',
+  'Rebuild statistics': '重新统计',
+  'Re-read logs in the current archive scope. Saved quota attribution is preserved.': '重新读取当前归档范围内的日志，保留已保存的额度分配。',
   'View options': '视图选项', 'Density': '显示密度', 'Comfortable': '舒适', 'Compact': '紧凑', 'Visible columns': '显示列',
   'Loading the selected period. Previous results remain labeled with their original period.': '正在加载所选时间范围，完成前保留原范围的结果和标识。',
   'All available history': '全部可用历史', 'Period unavailable': '周期暂不可用',

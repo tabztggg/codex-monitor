@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isSameQuotaWindow, QuotaAttribution } from '../quota-attribution';
@@ -6,6 +6,48 @@ import { isSameQuotaWindow, QuotaAttribution } from '../quota-attribution';
 const sample = (id: string, cost: number, unpriced = 0) => ({ id, cost, tokens: cost * 100 + unpriced, unpriced });
 const weeklyKey = (endMs: number, name = 'Overall Codex', durationMs = 604800000) =>
   JSON.stringify([name, 'Weekly', endMs - durationMs, new Date(endMs).toISOString()]);
+
+it('rebaselines old parser ledgers without assigning recovered historical tasks the next quota increase', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'quota-migrate-'));
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const file = path.join(root, 'ledger.json');
+    const original = JSON.stringify({ version: 1, key: 'week', used: 10,
+      baseline: { live: { cost: 10, tokens: 1000 } },
+      attributed: { live: 2 }, unattributed: 8, observedAt: new Date(0).toISOString() });
+    writeFileSync(file, original);
+    const ledger = new QuotaAttribution(file);
+    expect(ledger.read('week')).toBeNull();
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    ledger.observe('week', 11, [sample('live', 11), sample('recovered-old', 500)], 1);
+    expect(ledger.read('week')).toMatchObject({ version: 2, used: 11, attributed: {}, unattributed: 11,
+      baseline: { 'recovered-old': { cost: 500, tokens: 50000 } } });
+    const reopened = new QuotaAttribution(file);
+    reopened.observe('week', 12, [sample('live', 12), sample('recovered-old', 500)], 2);
+    expect(reopened.read('week')?.attributed.live).toBe(1);
+    expect(reopened.read('week')?.attributed['recovered-old'] ?? 0).toBe(0);
+    expect(reopened.read('week')?.unattributed).toBe(11);
+    expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(2);
+    expect(warning).toHaveBeenCalledOnce();
+  } finally { warning.mockRestore(); rmSync(root, { recursive: true, force: true }); }
+});
+
+it.each(['{truncated', JSON.stringify({ version: 2, key: 'week', used: 10, observedAt: new Date(0).toISOString(),
+  baseline: { broken: null }, attributed: {}, unattributed: 10 })])('recovers from a damaged ledger without replacing it before a successful observation', original => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'quota-damaged-'));
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const file = path.join(root, 'ledger.json');
+    writeFileSync(file, original);
+    const ledger = new QuotaAttribution(file);
+    expect(ledger.read('week')).toBeNull();
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    ledger.observe('week', 10, [sample('existing', 500)], 1);
+    expect(ledger.read('week')).toMatchObject({ version: 2, attributed: {}, unattributed: 10 });
+    expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(2);
+    expect(warning).toHaveBeenCalledOnce();
+  } finally { warning.mockRestore(); rmSync(root, { recursive: true, force: true }); }
+});
 
 it('preserves allocations, pending weights, and restart state across reset timestamp jitter', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'quota-jitter-'));

@@ -5,6 +5,37 @@ import {
 } from "../usage";
 
 describe("Codex usage normalization", () => {
+  it('uses map-only limits and preserves keyed bucket identities when values omit limitId', () => {
+    const usage = codexUsageFromRateLimitsRead({ rateLimitsByLimitId: {
+      codex_bengalfox: { primary: { usedPercent: 90, windowDurationMins: 300, resetsAt: 1777292438 } },
+      codex: { secondary: { usedPercent: 35, windowDurationMins: 10080, resetsAt: 1777536841 } }
+    } });
+    expect(usage.status).toBe('available');
+    expect(usage.error).toBeNull();
+    expect(usage.limits.map(limit => limit.id)).toEqual(['codex_bengalfox', 'codex']);
+    expect(usage.primaryLimit).toMatchObject({ id: 'codex', secondary: { usedPercent: 35 } });
+  });
+
+  it('uses the keyed overall quota instead of a stale legacy snapshot', () => {
+    const usage = codexUsageFromRateLimitsRead({
+      rateLimits: { limitId: 'codex', secondary: { usedPercent: 10, windowDurationMins: 10080 } },
+      rateLimitsByLimitId: {
+        codex: { limitId: 'codex', secondary: { usedPercent: 35, windowDurationMins: 10080 } }
+      }
+    });
+    expect(usage.primaryLimit?.secondary?.usedPercent).toBe(35);
+    expect(usage.limits).toHaveLength(1);
+  });
+
+  it('retains a legacy overall quota when the keyed map contains only a specialized bucket', () => {
+    const usage = codexUsageFromRateLimitsRead({
+      rateLimits: { limitId: 'codex', secondary: { usedPercent: 10, windowDurationMins: 10080 } },
+      rateLimitsByLimitId: { codex_bengalfox: { primary: { usedPercent: 90, windowDurationMins: 300 } } }
+    });
+    expect(usage.primaryLimit).toMatchObject({ id: 'codex', secondary: { usedPercent: 10 } });
+    expect(usage.limits.map(limit => limit.id)).toEqual(['codex', 'codex_bengalfox']);
+  });
+
   it("maps Codex primary and weekly windows into remaining percentages", () => {
     const usage = codexUsageFromRateLimitsRead(
       {

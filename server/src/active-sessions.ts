@@ -1,16 +1,29 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type ActiveSession } from "../../shared/monitor";
 import { asRecord, asString } from "./utils";
 import { userPreview } from "../../shared/session-preview";
+import { IncrementalSessionLog } from "./session-log-reader";
 
 const DEFAULT_ACTIVE_WINDOW_MS = 15 * 60 * 1000;
 
 type CachedSessionState = {
-  mtimeMs: number;
-  size: number;
-  session: ActiveSession | null;
+  reader: IncrementalSessionLog;
+  state: ActiveSessionState;
+  sessionId: string;
+};
+
+type ActiveSessionState = {
+  hasSessionMeta: boolean;
+  subagent: boolean;
+  latestTurnId: string | null;
+  latestTurnStartedAt: string | null;
+  terminalTurnIds: Set<string>;
+  name: string | null;
+  cwd: string | null;
+  latestUserInput: string | null;
+  latestTimestamp: string | null;
 };
 
 export class ActiveSessionTracker {
@@ -32,7 +45,7 @@ export class ActiveSessionTracker {
     }
 
     return sessionFiles
-      .map((file) => this.readActiveSession(file.path, file.mtimeMs, file.size, nowMs))
+      .map((file) => this.readActiveSession(file.path, file.mtimeMs, nowMs))
       .filter((session): session is ActiveSession => Boolean(session))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
@@ -40,39 +53,35 @@ export class ActiveSessionTracker {
   private readActiveSession(
     filePath: string,
     mtimeMs: number,
-    size: number,
     nowMs: number
   ): ActiveSession | null {
-    const cached = this.cache.get(filePath);
-    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
-      return cached.session && nowMs - Date.parse(cached.session.updatedAt) <= this.activeWindowMs
-        ? cached.session : null;
+    let cached = this.cache.get(filePath);
+    if (!cached) {
+      const sessionId = extractSessionId(filePath);
+      if (!sessionId) return null;
+      cached = { reader: new IncrementalSessionLog(), state: createActiveSessionState(), sessionId };
+      this.cache.set(filePath, cached);
     }
 
-    const sessionId = extractSessionId(filePath);
-    if (!sessionId) {
-      this.cache.set(filePath, { mtimeMs, size, session: null });
-      return null;
-    }
-
-    let fileContent = "";
+    const entry = cached;
     try {
-      fileContent = readFileSync(filePath, "utf8");
+      entry.reader.read(
+        filePath,
+        (line) => consumeActiveSessionLine(entry.state, line),
+        () => { entry.state = createActiveSessionState(); }
+      );
     } catch {
-      this.cache.set(filePath, { mtimeMs, size, session: null });
+      // The reader invalidates its offset on failure, so a transient read error
+      // is retried from a clean state on the next poll.
       return null;
     }
 
-    const session = parseActiveSessionFile({
-      sessionId,
-      fileContent,
+    return activeSessionFromState(entry.state, {
+      sessionId: entry.sessionId,
       updatedAt: new Date(mtimeMs).toISOString(),
       nowMs,
       activeWindowMs: this.activeWindowMs
     });
-
-    this.cache.set(filePath, { mtimeMs, size, session });
-    return session;
   }
 }
 
@@ -83,88 +92,96 @@ export function parseActiveSessionFile(args: {
   nowMs: number;
   activeWindowMs: number;
 }): ActiveSession | null {
-  let latestTurnId: string | null = null;
-  let latestTurnStartedAt: string | null = null;
-  const terminalTurnIds = new Set<string>();
-  let name: string | null = null;
-  let cwd: string | null = null;
-  let latestUserInput: string | null = null;
-  let latestTimestamp: string | null = null;
-
+  const state = createActiveSessionState();
   for (const rawLine of args.fileContent.split(/\r?\n/)) {
-    if (!rawLine.trim()) {
-      continue;
-    }
+    consumeActiveSessionLine(state, rawLine);
+  }
+  return activeSessionFromState(state, args);
+}
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawLine);
-    } catch {
-      continue;
-    }
+function createActiveSessionState(): ActiveSessionState {
+  return {
+    hasSessionMeta: false,
+    subagent: false,
+    latestTurnId: null,
+    latestTurnStartedAt: null,
+    terminalTurnIds: new Set(),
+    name: null,
+    cwd: null,
+    latestUserInput: null,
+    latestTimestamp: null
+  };
+}
 
-    const record = asRecord(parsed);
-    if (!record) {
-      continue;
-    }
-
-    const recordType = asString(record.type);
-    const payload = asRecord(record.payload);
-    const timestamp = asString(record.timestamp);
-    if (timestamp && Number.isFinite(Date.parse(timestamp)) &&
-        (!latestTimestamp || Date.parse(timestamp) > Date.parse(latestTimestamp))) latestTimestamp = timestamp;
-
-    if (recordType === "session_meta") {
-      if (asRecord(payload?.source)?.subagent || asRecord(payload?.source)?.subAgent ||
-          asString(payload?.source)?.startsWith("subAgent")) return null;
-      name = asString(payload?.name) ?? name;
-      cwd = asString(payload?.cwd) ?? cwd;
-      continue;
-    }
-
-    if (recordType === "turn_context") {
-      cwd = asString(payload?.cwd) ?? cwd;
-      continue;
-    }
-
-    if (recordType === "response_item") {
-      const payloadType = asString(payload?.type);
-      const role = asString(payload?.role);
-      if (payloadType === "message" && role === "user") {
-        const nextPreview = payload ? extractUserPreview(payload) : null;
-        if (nextPreview) {
-          latestUserInput = nextPreview;
-        }
-      }
-      continue;
-    }
-
-    if (recordType !== "event_msg") {
-      continue;
-    }
-
-    const payloadType = asString(payload?.type);
-    if (payloadType === "user_message") latestUserInput = userPreview(asString(payload?.message)) ?? latestUserInput;
-    const turnId = asString(payload?.turn_id) ?? asString(payload?.turnId);
-    if (payloadType === "task_started" && turnId) {
-      latestTurnId = turnId;
-      latestTurnStartedAt = asString(record.timestamp) ?? latestTurnStartedAt;
-      continue;
-    }
-
-    if (
-      (payloadType === "task_complete" || payloadType === "turn_aborted") &&
-      turnId
-    ) {
-      terminalTurnIds.add(turnId);
-    }
+function consumeActiveSessionLine(state: ActiveSessionState, rawLine: string): void {
+  if (!rawLine.trim() || state.subagent) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawLine);
+  } catch {
+    return;
   }
 
-  if (!latestTurnId || terminalTurnIds.has(latestTurnId)) {
+  const record = asRecord(parsed);
+  if (!record) return;
+  const recordType = asString(record.type);
+  const payload = asRecord(record.payload);
+  const timestamp = asString(record.timestamp);
+  if (timestamp && Number.isFinite(Date.parse(timestamp)) &&
+      (!state.latestTimestamp || Date.parse(timestamp) > Date.parse(state.latestTimestamp))) state.latestTimestamp = timestamp;
+
+  if (recordType === "session_meta") {
+    // Later metadata can be inherited from an ancestor. The first header owns
+    // this file's identity, including whether it is an internal subagent.
+    if (!state.hasSessionMeta) {
+      state.hasSessionMeta = true;
+      state.subagent = Boolean(asRecord(payload?.source)?.subagent || asRecord(payload?.source)?.subAgent ||
+        asString(payload?.source)?.startsWith("subAgent"));
+      state.name = asString(payload?.name);
+      state.cwd = asString(payload?.cwd);
+    }
+    return;
+  }
+
+  if (recordType === "turn_context") {
+    state.cwd = asString(payload?.cwd) ?? state.cwd;
+    return;
+  }
+
+  if (recordType === "response_item") {
+    if (asString(payload?.type) === "message" && asString(payload?.role) === "user") {
+      state.latestUserInput = (payload ? extractUserPreview(payload) : null) ?? state.latestUserInput;
+    }
+    return;
+  }
+
+  if (recordType !== "event_msg") return;
+
+  const payloadType = asString(payload?.type);
+  if (payloadType === "user_message") state.latestUserInput = userPreview(asString(payload?.message)) ?? state.latestUserInput;
+  const turnId = asString(payload?.turn_id) ?? asString(payload?.turnId);
+  if (payloadType === "task_started" && turnId) {
+    state.latestTurnId = turnId;
+    state.latestTurnStartedAt = timestamp ?? state.latestTurnStartedAt;
+    return;
+  }
+
+  if ((payloadType === "task_complete" || payloadType === "turn_aborted") && turnId) {
+    state.terminalTurnIds.add(turnId);
+  }
+}
+
+function activeSessionFromState(state: ActiveSessionState, args: {
+  sessionId: string;
+  updatedAt: string;
+  nowMs: number;
+  activeWindowMs: number;
+}): ActiveSession | null {
+  if (state.subagent || !state.latestTurnId || state.terminalTurnIds.has(state.latestTurnId)) {
     return null;
   }
 
-  const updatedAt = latestTimestamp ?? args.updatedAt;
+  const updatedAt = state.latestTimestamp ?? args.updatedAt;
   const updatedAtMs = Date.parse(updatedAt);
   if (
     Number.isFinite(updatedAtMs) &&
@@ -175,12 +192,12 @@ export function parseActiveSessionFile(args: {
 
   return {
     id: args.sessionId,
-    name,
-    preview: latestUserInput,
-    cwd,
+    name: state.name,
+    preview: state.latestUserInput,
+    cwd: state.cwd,
     createdAt: null,
     updatedAt,
-    lastTurnStartedAt: latestTurnStartedAt
+    lastTurnStartedAt: state.latestTurnStartedAt
   };
 }
 

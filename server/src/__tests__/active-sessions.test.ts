@@ -1,7 +1,12 @@
 import { ActiveSessionTracker, parseActiveSessionFile } from "../active-sessions";
-import { mkdtempSync, writeFileSync, appendFileSync, statSync, utimesSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, appendFileSync, statSync, utimesSync, rmSync, readSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs")>();
+  return { ...original, readSync: vi.fn(original.readSync) };
+});
 
 describe("parseActiveSessionFile", () => {
   it("returns an active session when the latest turn started and has not finished", () => {
@@ -109,6 +114,99 @@ describe("parseActiveSessionFile", () => {
 });
 
 describe("ActiveSessionTracker cache", () => {
+  afterEach(() => vi.mocked(readSync).mockClear());
+
+  it("does not reread unchanged logs and only reads the appended tail of a large log", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "monitor-active-"));
+    try {
+      const file = path.join(root, "rollout-019d773d-49eb-7ae0-9327-ff3b0b39c7a7.jsonl");
+      const now = Date.now();
+      const timestamp = new Date(now).toISOString();
+      writeFileSync(file, [
+        JSON.stringify({ type: "session_meta", payload: { name: "Current task", source: "cli" } }),
+        JSON.stringify({ timestamp, type: "event_msg", payload: { type: "task_started", turn_id: "first" } }),
+        JSON.stringify({ timestamp, type: "response_item", payload: { type: "function_call_output", output: "x".repeat(1024 * 1024) } })
+      ].join("\n") + "\n");
+      const tracker = new ActiveSessionTracker(root, 1000);
+      expect(tracker.listActiveSessions(now)).toHaveLength(1);
+      vi.mocked(readSync).mockClear();
+      expect(tracker.listActiveSessions(now + 500)).toHaveLength(1);
+      expect(readSync).not.toHaveBeenCalled();
+
+      const completion = JSON.stringify({ timestamp, type: "event_msg", payload: { type: "task_complete", turn_id: "first" } }) + "\n";
+      appendFileSync(file, completion);
+      expect(tracker.listActiveSessions(now + 500)).toHaveLength(0);
+      const bytesRead = vi.mocked(readSync).mock.results.reduce((sum, result) => sum + (result.type === "return" ? Number(result.value) : 0), 0);
+      expect(bytesRead).toBeLessThanOrEqual(Buffer.byteLength(completion) + 512);
+
+      appendFileSync(file, JSON.stringify({ timestamp: new Date(now + 1500).toISOString(), type: "event_msg", payload: { type: "task_started", turn_id: "second" } }) + "\n");
+      expect(tracker.listActiveSessions(now + 1500)[0]?.lastTurnStartedAt).toBe(new Date(now + 1500).toISOString());
+      expect(tracker.listActiveSessions(now + 2501)).toHaveLength(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("retains UTF-8 user previews when an appended record is split across polls", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "monitor-active-"));
+    try {
+      const file = path.join(root, "rollout-019d773d-49eb-7ae0-9327-ff3b0b39c7a7.jsonl");
+      const now = Date.now();
+      const timestamp = new Date(now).toISOString();
+      writeFileSync(file, JSON.stringify({ timestamp, type: "event_msg", payload: { type: "task_started", turn_id: "turn" } }) + "\n");
+      const tracker = new ActiveSessionTracker(root);
+      expect(tracker.listActiveSessions(now)).toHaveLength(1);
+      const line = Buffer.from(JSON.stringify({ timestamp, type: "event_msg", payload: { type: "user_message", message: "中文任务 🚀" } }) + "\n");
+      const split = line.indexOf(Buffer.from("中")) + 1;
+      appendFileSync(file, line.subarray(0, split));
+      expect(tracker.listActiveSessions(now)[0]?.preview).toBeNull();
+      appendFileSync(file, line.subarray(split));
+      expect(tracker.listActiveSessions(now)[0]?.preview).toBe("中文任务 🚀");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("retries a failed read instead of caching an inactive session", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "monitor-active-"));
+    try {
+      const file = path.join(root, "rollout-019d773d-49eb-7ae0-9327-ff3b0b39c7a7.jsonl");
+      const now = Date.now();
+      writeFileSync(file, JSON.stringify({ timestamp: new Date(now).toISOString(), type: "event_msg", payload: { type: "task_started", turn_id: "turn" } }) + "\n");
+      const tracker = new ActiveSessionTracker(root);
+      vi.mocked(readSync).mockImplementationOnce(() => { throw new Error("Temporary read failure"); });
+      expect(tracker.listActiveSessions(now)).toHaveLength(0);
+      expect(tracker.listActiveSessions(now)).toHaveLength(1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("rebuilds session identity after a same-size rewrite", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "monitor-active-"));
+    try {
+      const file = path.join(root, "rollout-019d773d-49eb-7ae0-9327-ff3b0b39c7a7.jsonl");
+      const now = Date.now();
+      const log = (name: string) => [
+        JSON.stringify({ type: "session_meta", payload: { source: "cli", name } }),
+        JSON.stringify({ timestamp: new Date(now).toISOString(), type: "event_msg", payload: { type: "task_started", turn_id: "turn" } })
+      ].join("\n") + "\n";
+      writeFileSync(file, log("First"));
+      const tracker = new ActiveSessionTracker(root);
+      expect(tracker.listActiveSessions(now)[0]?.name).toBe("First");
+      const stat = statSync(file);
+      writeFileSync(file, log("Other"));
+      utimesSync(file, stat.atime, new Date(stat.mtimeMs + 2000));
+      expect(tracker.listActiveSessions(now)[0]?.name).toBe("Other");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("uses the first metadata header instead of inherited ancestor identity", () => {
+    const now = Date.now();
+    const session = parseActiveSessionFile({ sessionId: "current", updatedAt: new Date(now).toISOString(), nowMs: now, activeWindowMs: 900000,
+      fileContent: [
+        JSON.stringify({ type: "session_meta", payload: { source: "cli", name: "Current", cwd: "C:/current" } }),
+        JSON.stringify({ type: "session_meta", payload: { source: { subagent: { other: "ancestor" } }, name: "Ancestor", cwd: "C:/ancestor" } }),
+        JSON.stringify({ timestamp: new Date(now).toISOString(), type: "event_msg", payload: { type: "task_started", turn_id: "turn" } })
+      ].join("\n")
+    });
+    expect(session).toMatchObject({ id: "current", name: "Current", cwd: "C:/current" });
+  });
+
   it("expires unchanged sessions and detects completion even when mtime does not change", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "monitor-active-"));
     try {

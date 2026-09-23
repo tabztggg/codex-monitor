@@ -30,8 +30,8 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 }
 
 export const api = {
-  fetchSnapshot(): Promise<MonitorSnapshot> {
-    return jsonFetch<MonitorSnapshot>("/api/snapshot");
+  fetchSnapshot(signal?: AbortSignal): Promise<MonitorSnapshot> {
+    return jsonFetch<MonitorSnapshot>("/api/snapshot", { signal });
   },
   armAutomation(runId: string, body: ArmAutomationRequest): Promise<RunSnapshot> {
     return jsonFetch<RunSnapshot>(`/api/runs/${runId}/automation/arm`, {

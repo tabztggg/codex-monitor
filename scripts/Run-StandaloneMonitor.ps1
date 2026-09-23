@@ -106,6 +106,16 @@ try {
   $env:CODEX_MONITOR_DRY_RUN = '1'
   $env:PORT = [string]$config.port
   $env:CODEX_MONITOR_HOST = [string]$config.hostAddress
+  # The installed configuration is authoritative, including an absent/empty list.
+  if ($null -ne $config.allowedOrigins) {
+    if ($config.allowedOrigins -isnot [Array]) { throw 'standalone.json allowedOrigins must be an array of HTTP/HTTPS origins.' }
+    foreach ($origin in $config.allowedOrigins) {
+      if ($origin -isnot [string] -or [string]::IsNullOrWhiteSpace($origin) -or $origin.Contains(',')) {
+        throw 'standalone.json allowedOrigins must contain individual non-empty HTTP/HTTPS origins.'
+      }
+    }
+  }
+  $env:CODEX_MONITOR_ALLOWED_ORIGINS = @($config.allowedOrigins) -join ','
   $env:CODEX_HOME = [string]$config.codexHome
   $codexPath = [string]$config.codexPath
   if (-not (Test-Path -LiteralPath $codexPath)) {

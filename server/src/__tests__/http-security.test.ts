@@ -1,4 +1,36 @@
-import { isAllowedBrowserOrigin } from "../http-security";
+import { isAllowedBrowserOrigin, parseAllowedBrowserOrigins } from "../http-security";
+
+describe("parseAllowedBrowserOrigins", () => {
+  it("keeps external access disabled when the configuration is absent or blank", () => {
+    for (const value of [undefined, "", "   "]) {
+      expect([...parseAllowedBrowserOrigins(value)]).toEqual([]);
+    }
+  });
+
+  it("normalizes root slashes, host casing and default ports, and removes duplicates", () => {
+    expect([...parseAllowedBrowserOrigins(
+      " HTTP://CodexMonitor.Cpolar.Cn:80/, https://codexmonitor.cpolar.cn, http://codexmonitor.cpolar.cn "
+    )]).toEqual(["http://codexmonitor.cpolar.cn", "https://codexmonitor.cpolar.cn"]);
+    expect([...parseAllowedBrowserOrigins("https://[::1]:8443/")]).toEqual(["https://[::1]:8443"]);
+  });
+
+  it.each([
+    "*", "https://*.cpolar.cn", "https://%2A.cpolar.cn", "null", "not a url",
+    "file://codexmonitor.cpolar.cn", "ws://codexmonitor.cpolar.cn", "https:codexmonitor.cpolar.cn",
+    "https://codexmonitor.cpolar.cn/path", "https://codexmonitor.cpolar.cn/.",
+    "https://codexmonitor.cpolar.cn?query=1", "https://codexmonitor.cpolar.cn#fragment",
+    "https://user:password@codexmonitor.cpolar.cn", "https://@codexmonitor.cpolar.cn",
+    "https://codexmonitor.cpolar.cn\\", "https://codexmonitor. cpolar.cn",
+    "https://codexmonitor.cpolar.cn:99999", "https://codexmonitor.cpolar.cn,", ",https://codexmonitor.cpolar.cn"
+  ])("rejects invalid origin configuration %s", (value) => {
+    expect(() => parseAllowedBrowserOrigins(value)).toThrow(/CODEX_MONITOR_ALLOWED_ORIGINS entry \d+ must be an HTTP\(S\) origin/);
+  });
+
+  it("identifies the invalid entry without exposing its contents", () => {
+    expect(() => parseAllowedBrowserOrigins("https://example.com,https://user:secret@example.com"))
+      .toThrow("CODEX_MONITOR_ALLOWED_ORIGINS entry 2 must be an HTTP(S) origin without paths, queries, fragments, credentials, or wildcards.");
+  });
+});
 
 describe("isAllowedBrowserOrigin", () => {
   it("allows missing and loopback browser origins", () => {
@@ -37,6 +69,25 @@ describe("isAllowedBrowserOrigin", () => {
       "null"
     ]) {
       expect(isAllowedBrowserOrigin(origin, serverOrigin)).toBe(false);
+    }
+  });
+
+  it("allows only explicitly configured external origins while preserving LAN and loopback", () => {
+    const serverOrigin = "http://192.0.2.10:4201";
+    const externalOrigin = "https://codexmonitor.cpolar.cn";
+    const additionalOrigins = parseAllowedBrowserOrigins(`${externalOrigin}/,http://codexmonitor.cpolar.cn:8080`);
+    expect(isAllowedBrowserOrigin(externalOrigin, serverOrigin)).toBe(false);
+    for (const origin of [undefined, serverOrigin, "http://localhost:5173", externalOrigin, "http://codexmonitor.cpolar.cn:8080"]) {
+      expect(isAllowedBrowserOrigin(origin, serverOrigin, additionalOrigins)).toBe(true);
+    }
+    for (const origin of [
+      "http://codexmonitor.cpolar.cn", "https://codexmonitor.cpolar.cn:8080",
+      "https://other.cpolar.cn", "https://sub.codexmonitor.cpolar.cn",
+      "https://codexmonitor.cpolar.cn.example.com", "https://codexmonitor.cpolar.cn/path",
+      "https://codexmonitor.cpolar.cn?query=1", "https://codexmonitor.cpolar.cn#fragment",
+      "https://user@codexmonitor.cpolar.cn", "null"
+    ]) {
+      expect(isAllowedBrowserOrigin(origin, serverOrigin, additionalOrigins)).toBe(false);
     }
   });
 });

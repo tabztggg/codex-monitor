@@ -185,6 +185,11 @@ export const chinese: Record<string, string> = {
   'History pagination did not advance.': '任务列表分页没有前进，请稍后刷新。', 'Forbidden origin': '此访问来源未获允许',
   'Codex did not return rate limit data.': 'Codex 未返回额度限制数据。', 'Codex sent malformed rate limit data.': 'Codex 返回的额度数据格式无效。',
   'Request failed with {status}': '请求失败，状态码 {status}',
+  'Monitor snapshot request timed out.': 'Monitor 数据请求超时。',
+  'Monitor WebSocket connection timed out.': 'Monitor 实时连接超时。',
+  'Codex app-server restart is delayed; retry in {seconds} seconds.': 'Codex 后台连接正在等待重试，{seconds} 秒后可重试。',
+  'Codex app-server client has been shut down.': 'Codex 后台连接已停止。',
+  'Codex app-server closed during initialization.': 'Codex 后台进程在初始化期间退出。',
   'Weekly': '每周', '5-hour': '5 小时', 'Daily': '每日', '{minutes}-minute': '{minutes} 分钟', '{hours}-hour': '{hours} 小时', '{days}-day': '{days} 天',
   'Running': '运行中', 'Idle': '空闲', 'Error': '错误', 'Waiting for you': '等待处理', 'Not loaded': '未加载',
   'Settled': '已结束', 'Disabled': '已停用', 'Armed': '已就绪', 'Debouncing': '等待空闲稳定', 'Scheduled': '已安排',
@@ -231,6 +236,8 @@ export function createI18n(language: Language) {
     },
     error: (value: string) => {
       const status = value.match(/^Request failed with (\d+)$/);
+      const cooldown = value.match(/^Codex app-server restart is delayed; retry in (\d+) seconds\.$/);
+      if (cooldown) return t('Codex app-server restart is delayed; retry in {seconds} seconds.', { seconds: cooldown[1] });
       return status ? t('Request failed with {status}', { status: status[1] }) : t(value);
     }
   };

@@ -49,6 +49,11 @@ ends any pending retry. If all three retries fail, start it again after resolvin
 the error. Terminating the outer launcher itself requires a manual start or a
 new logon.
 
+Separately, the Node backend limits restarts of its Codex app-server child with a
+5/10/20/40/60-second cooldown. It resets after 30 seconds of stable initialization,
+and writes each failure's delay to `stderr.log`. This applies while Node remains
+running; it does not replace the launcher's three-retry limit for Node exits.
+
 Use the desktop shortcut to start the monitor. The Start menu also contains
 **Stop** and **Restart** shortcuts. The previous Startup shortcut and the source checkout's Windows
 launcher both delegate to the same installed task, avoiding a second instance.
@@ -69,6 +74,26 @@ dashboard unless `-NoBrowser` is supplied. `Status` reports the last scheduled
 task result and checks the monitor's HTTP health endpoint. Stopping the current
 instance does not remove the task's next-logon startup trigger. Use Task
 Scheduler to disable that trigger when persistent automatic startup is unwanted.
+
+## Reverse proxy or tunnel
+
+The optional `allowedOrigins` array in the installed `standalone.json` declares
+external page origins. For example, add this property alongside the existing
+host, port and executable settings (replace the example domain):
+
+```json
+"allowedOrigins": ["https://monitor.example.com"]
+```
+
+Include the HTTP origin separately only if you also use HTTP. The runner passes
+this list as `CODEX_MONITOR_ALLOWED_ORIGINS`; a missing or empty list permits no
+extra origins, even if the Windows environment contains an older setting.
+Each entry must be one HTTP/HTTPS origin without paths, credentials, queries,
+fragments or wildcards. Invalid settings prevent startup and appear in the logs.
+Install the updated runner and backend, then restart using the management script.
+Leave the tunnel target pointing to the configured LAN host and port; enable
+WebSocket forwarding in the reverse proxy. This setting does not change the bind
+address, firewall or tunnel, and does not provide authentication.
 
 ## Logs and troubleshooting
 
@@ -116,6 +141,10 @@ Monitor 由 Windows 计划任务 **Codex Monitor** 管理，在当前用户登�
 安装的启动器负责，每次间隔一分钟，每次启动最多重试三次；每轮先清理上一轮后台进程。
 停止任务也会取消等待中的重试。最外层启动器被终止时，需要手动启动或下次登录。
 它可以在关闭 Codex 桌面窗口和原启动终端后继续运行。
+
+Node 后端内部的 Codex app-server 子进程另有 5/10/20/40/60 秒重启退避，初始化成功后
+稳定运行 30 秒才恢复初始间隔，每次失败的等待时间写入 `stderr.log`。此机制适用于 Node
+仍在运行时，不替代外层启动器对 Node 退出的三次重试限制。
 这是**登录自启**，不承诺未登录或注销后继续运行，也没有注册为 Windows 服务。
 
 Node.js 和已登录、支持 `codex app-server` 的 Codex CLI 仍然必需；Monitor 自己启动
@@ -127,6 +156,13 @@ Windows 启动器都会转到同一个已安装任务，避免重复启动。Sto
 日志在安装目录的 `logs` 下：`stdout.log`、`stderr.log` 记录当前输出，`.1` 到 `.3`
 保留之前启动的输出，`lifecycle.jsonl` 记录启动、退出和运行器错误。也可查看计划任务
 的上次运行结果；HTTP 健康检查成功不代表 CLI 登录和账号数据一定可用。
+
+通过 cpolar／反向代理访问时，在已安装的 `standalone.json` 中增加 `allowedOrigins`
+数组，例如上面的 HTTPS 来源；如果还使用 HTTP，也要单独列出 HTTP 来源。每项只写
+协议、主机和可选端口，不包含路径、凭据、查询参数或通配符。更新启动器和后端后，
+使用管理脚本重启才会生效；在其他终端设置环境变量不会修改独立安装的配置。
+未配置或空数组不额外允许任何来源，也不会继承 Windows 中的旧环境变量。
+隧道目标仍填本机局域网地址和端口，代理需转发 WebSocket；此设置不提供登录认证。
 
 **安装目录不会自动跟随源码更新。** 更新后需在源码目录重新构建，停止已安装实例，
 备份并重新部署 `dist`、匹配的依赖清单和所需生产依赖，再启动验证。保留本地配置、

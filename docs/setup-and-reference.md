@@ -62,6 +62,7 @@ card: HTTP health alone does not prove Codex authentication or connectivity.
 | --- | --- | --- |
 | `PORT` | `4201` | HTTP and WebSocket port. |
 | `CODEX_MONITOR_HOST` | `127.0.0.1` | Backend bind address; takes precedence over the Windows launcher's local host file. |
+| `CODEX_MONITOR_ALLOWED_ORIGINS` | empty | Comma-separated extra HTTP/HTTPS page origins for reverse proxies and tunnels; exact matches only. |
 | `CODEX_HOME` | `~/.codex` | Existing Codex home used for history and metadata. |
 | `CODEX_MONITOR_CODEX_PATH` | unset | Explicit Codex executable path. |
 | `CODEX_BIN` | unset | Alternate executable override. |
@@ -247,14 +248,31 @@ English. Grouping starts off and archive mode starts at recent on each page load
 The backend defaults to `127.0.0.1`. `CODEX_MONITOR_HOST` can bind to a specific
 LAN address that exists on the host. Adapt the address to the actual machine.
 
-HTTP and WebSocket accept loopback origins and the exact configured HTTP server
-origin. Requests without an `Origin` header are also allowed. There is no built-in
+HTTP and WebSocket accept loopback origins, the configured HTTP server origin,
+and explicitly configured extra origins. Requests without an `Origin` header are also allowed. There is no built-in
 login, API token validation, or TLS; these origin checks are not authentication.
 
 Task information and automation controls are accessible to clients that can
 reach the service. Remote deployment needs its own authenticated access boundary
-and network restrictions. Public tunnel domains are not automatically accepted;
-there is no configurable public-origin allowlist or turnkey cpolar integration.
+and network restrictions. Public tunnel domains are not automatically accepted.
+Set the page's external origin in `CODEX_MONITOR_ALLOWED_ORIGINS`, for example:
+
+```powershell
+$env:CODEX_MONITOR_ALLOWED_ORIGINS = 'https://monitor.example.com'
+npm start
+```
+
+If both HTTP and HTTPS are used, list both explicitly, separated by commas.
+Scheme, hostname and port must match; subdomains and other ports are not included.
+Outer whitespace and a single trailing slash are accepted. Paths, credentials,
+queries, fragments, wildcards and empty entries are rejected at startup.
+The same rule protects static assets, APIs, CORS responses and `/ws` upgrades.
+The server does not trust `Host` or forwarded headers to extend the allowlist.
+The frontend uses its page's origin and automatically selects `ws` or `wss`.
+The proxy must forward WebSocket upgrades to the same backend port. Restart
+after configuration changes. For the Windows standalone installation, use its
+[`allowedOrigins` configuration](standalone-windows.md#reverse-proxy-or-tunnel)
+instead of setting the variable in an unrelated terminal.
 
 The maintainer's machine-specific firewall helper is excluded from the
 repository. Firewall rules and tunnel configuration are not installed by these
@@ -287,6 +305,7 @@ dry run does not verify real shutdown.
 | Filters do not change totals | Displayed rows are intentionally separate from the statistics scope. |
 | Full-archive scan is slow | Large histories need parsing. Recent mode limits this work. |
 | Updated UI is not visible | Rebuild, refresh, and verify the page points to the intended server. |
+| LAN works but tunnel page is blank or live connection fails | Add the exact external HTTP/HTTPS origin to the allowlist and restart; check proxy WebSocket forwarding. |
 
 ## Run in development
 
@@ -359,5 +378,4 @@ two dashboard images retained from upstream have blurred task names/content.
 
 Retain upstream attribution and resolve missing project-license metadata before
 describing a release as freely redistributable. The Chinese
-[GitHub publication copy](github-release.zh-CN.md) contains ready-to-use text
-and the remaining publication decisions.
+[release notes](github-release.zh-CN.md) summarize the latest changes and upgrade steps.

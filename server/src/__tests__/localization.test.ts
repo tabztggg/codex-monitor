@@ -48,6 +48,10 @@ describe('Chinese and English interface', () => {
     expect(zh.windowLabel('3-day')).toBe('3 天');
     expect(en.windowLabel('3-day')).toBe('3-day');
     expect(zh.error('Request failed with 403')).toBe('请求失败，状态码 403');
+    expect(zh.error('Monitor snapshot request timed out.')).toBe('Monitor 数据请求超时。');
+    expect(zh.error('Monitor WebSocket connection timed out.')).toBe('Monitor 实时连接超时。');
+    expect(zh.error('Codex app-server restart is delayed; retry in 60 seconds.')).toBe('Codex 后台连接正在等待重试，60 秒后可重试。');
+    expect(en.error('Codex app-server restart is delayed; retry in 60 seconds.')).toBe('Codex app-server restart is delayed; retry in 60 seconds.');
     expect(zh.dateTime('invalid')).toBe('不可用');
     const time = '2026-09-22T02:00:00Z';
     expect(zh.dateTime(time)).toBe(new Date(time).toLocaleString('zh-CN'));

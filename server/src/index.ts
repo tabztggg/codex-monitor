@@ -4,18 +4,21 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { isAllowedBrowserOrigin } from "./http-security";
+import { isAllowedBrowserOrigin, parseAllowedBrowserOrigins } from "./http-security";
 import { MonitorService } from "./service";
 
 const host = process.env.CODEX_MONITOR_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? "4201");
 const serverOrigin = new URL(`http://${host}:${port}`).origin;
+const additionalOrigins = parseAllowedBrowserOrigins(process.env.CODEX_MONITOR_ALLOWED_ORIGINS);
+const isAllowedOrigin = (origin: string | undefined) =>
+  isAllowedBrowserOrigin(origin, serverOrigin, additionalOrigins);
 
 const app = express();
 const service = new MonitorService();
 
 app.use((request, response, next) => {
-  if (!isAllowedBrowserOrigin(request.headers.origin, serverOrigin)) {
+  if (!isAllowedOrigin(request.headers.origin)) {
     response.status(403).json({ error: "Forbidden origin" });
     return;
   }
@@ -25,7 +28,7 @@ app.use((request, response, next) => {
 app.use(
   cors({
     origin(origin, callback) {
-      callback(null, isAllowedBrowserOrigin(origin, serverOrigin));
+      callback(null, isAllowedOrigin(origin));
     }
   })
 );
@@ -177,7 +180,7 @@ const wss = new WebSocketServer({
   server,
   path: "/ws",
   verifyClient: ({ origin }: { origin: string }) =>
-    isAllowedBrowserOrigin(origin, serverOrigin)
+    isAllowedOrigin(origin)
 });
 
 wss.on("connection", (socket) => {

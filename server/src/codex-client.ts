@@ -41,6 +41,10 @@ const CODEX_OVERRIDE_ENV_KEYS = [
   "CODEX_BIN"
 ] as const;
 
+const INITIAL_RESTART_DELAY_MS = 5_000;
+const MAX_RESTART_DELAY_MS = 60_000;
+const STABLE_CONNECTION_MS = 30_000;
+
 export interface ProcessHandle {
   stdin: Writable;
   stdout: Readable;
@@ -59,6 +63,10 @@ export class CodexAppServerClient extends EventEmitter<{
   private stdoutReader: readline.Interface | null = null;
   private stderrReader: readline.Interface | null = null;
   private initializingPromise: Promise<void> | null = null;
+  private restartNotBefore = 0;
+  private nextRestartDelayMs = INITIAL_RESTART_DELAY_MS;
+  private initializedAt: number | null = null;
+  private stopped = false;
   private nextId = 1;
   private readonly pendingRequests = new Map<RequestId, PendingResolver>();
 
@@ -70,12 +78,20 @@ export class CodexAppServerClient extends EventEmitter<{
   }
 
   public async ensureStarted(): Promise<void> {
+    if (this.stopped) {
+      throw new Error("Codex app-server client has been shut down.");
+    }
     if (this.initializingPromise) {
       return this.initializingPromise;
     }
 
     if (this.process) {
       return;
+    }
+
+    const remainingMs = this.restartNotBefore - Date.now();
+    if (remainingMs > 0) {
+      throw new Error(`Codex app-server restart is delayed; retry in ${Math.ceil(remainingMs / 1000)} seconds.`);
     }
 
     this.initializingPromise = this.startInternal();
@@ -102,11 +118,22 @@ export class CodexAppServerClient extends EventEmitter<{
   }
 
   public shutdown(): void {
-    this.process?.kill();
+    this.stopped = true;
+    const process = this.process;
+    if (process) {
+      this.handleProcessClose(process, null, new Error("Codex app-server client has been shut down."));
+      process.kill();
+    }
   }
 
   private async startInternal(): Promise<void> {
-    const process = this.spawnProcess();
+    let process: ProcessHandle;
+    try {
+      process = this.spawnProcess();
+    } catch (error) {
+      this.deferRestart();
+      throw error;
+    }
     this.process = process;
 
     this.stdoutReader = readline.createInterface({
@@ -132,7 +159,9 @@ export class CodexAppServerClient extends EventEmitter<{
         this.handleProcessClose(process, typeof code === "number" ? code : null);
       });
       (this.process as unknown as NodeJS.EventEmitter).on("error", (error) => {
+        if (this.process !== process) return;
         this.handleProcessClose(process, null, error);
+        process.kill();
       });
     }
 
@@ -147,13 +176,19 @@ export class CodexAppServerClient extends EventEmitter<{
           experimentalApi: true
         }
       });
+      if (this.process !== process || this.stopped) {
+        throw new Error("Codex app-server closed during initialization.");
+      }
       this.writeMessage({ method: "initialized" });
     } catch (error) {
-      this.handleProcessClose(process, null, error);
-      process.kill();
+      if (this.process === process) {
+        this.handleProcessClose(process, null, error);
+        process.kill();
+      }
       throw error;
     }
 
+    this.initializedAt = Date.now();
     this.emit("initialized");
   }
 
@@ -253,6 +288,9 @@ export class CodexAppServerClient extends EventEmitter<{
     this.stderrReader = null;
     this.process = null;
 
+    if (!this.stopped) this.deferRestart();
+    this.initializedAt = null;
+
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(
@@ -265,6 +303,21 @@ export class CodexAppServerClient extends EventEmitter<{
 
     this.pendingRequests.clear();
     this.emit("close", code);
+  }
+
+  private deferRestart(): void {
+    const now = Date.now();
+    // A successful handshake alone must not reset backoff for a flapping child.
+    if (this.initializedAt !== null && now - this.initializedAt >= STABLE_CONNECTION_MS) {
+      this.nextRestartDelayMs = INITIAL_RESTART_DELAY_MS;
+    }
+    const delayMs = this.nextRestartDelayMs;
+    this.restartNotBefore = now + delayMs;
+    this.nextRestartDelayMs = Math.min(delayMs * 2, MAX_RESTART_DELAY_MS);
+    const message = `Codex app-server restart delayed for ${delayMs / 1000} seconds after a failure.`;
+    // Log once per failed child, not once per caller polling during the cooldown.
+    console.warn(`[codex-monitor] ${message}`);
+    this.emit("stderr", message);
   }
 }
 

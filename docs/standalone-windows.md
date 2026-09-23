@@ -1,6 +1,6 @@
 # Standalone Windows deployment
 
-[English README](../README.md) · [中文说明](#中文说明)
+[English README](../README.en.md) · [中文说明](#中文说明)
 
 This page documents the per-user deployment configured on the maintainer's
 Windows machine. The repository currently has no general one-click installer

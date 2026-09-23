@@ -31,6 +31,7 @@ export const chinese: Record<string, string> = {
   'Scope help': '范围说明', 'Comparison help': '折算说明',
   'Equivalent usage · Cost · Tokens': '影响：等效消耗 · 费用 · Token',
   'Waiting for calibration': '等待校准', 'No priced usage in this range': '此范围暂无可估算用量',
+  'Equivalent usage divides the selected-period cost by the calibration reference. Account quota attribution only allocates increases observed since monitoring began; earlier usage in the same task can be unattributed. The two estimates are not interchangeable, even for one account.': '等效消耗用所选范围的费用除以校准基准。账号额度占比仅分配开始观测后的额度增长；同一任务更早的消耗可能尚未归因。因此，即使只使用一个账号，两项估算也不能直接等同。',
   'Includes hidden tasks · + partial data · -- unavailable': '包含隐藏任务 · + 部分数据 · -- 暂不可用',
   'Usage account': '用量所属账号', 'Unknown account': '账号未知', 'API key account': 'API Key 账号',
   'Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.': '来源：Monitor 使用的 Codex CLI 登录账号，可能与 Codex 桌面应用中的账号不同。',

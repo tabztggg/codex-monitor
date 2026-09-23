@@ -1,4 +1,5 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -59,7 +60,7 @@ type ParsedHistoryJob = HistoryJob & {
   untimedTokens?: number;
   totalUnpricedTokens?: number;
   quotaCalibrationEvents?: QuotaCalibrationEvent[];
-  quotaCalibrationVersion?: 2;
+  quotaCalibrationVersion?: 4;
   parentThreadId: string | null;
   isSubagent: boolean;
 };
@@ -205,7 +206,8 @@ export class HistoryJobReader {
         const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null);
         const archived = archivedPaths.has(file.path);
         const next = this.cache.get(file.path);
-        if (archived && (previous?.compact !== next?.compact || previous?.mtimeMs !== next?.mtimeMs || previous?.size !== next?.size)) this.archiveCacheDirty = true;
+        if (archived && (previous?.compact !== next?.compact || previous?.mtimeMs !== next?.mtimeMs || previous?.size !== next?.size ||
+            previous?.job?.quotaCalibrationVersion !== next?.job?.quotaCalibrationVersion)) this.archiveCacheDirty = true;
         return job ? { ...job, archived } : null;
       })
       .filter((job): job is ParsedHistoryJob => Boolean(job));
@@ -295,7 +297,7 @@ export class HistoryJobReader {
     const cached = this.cache.get(file.path);
     const unchanged = Boolean(cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.job?.quotaCalibrationVersion === 2 && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.job?.quotaCalibrationVersion === 4 && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -813,6 +815,7 @@ export function parseHistorySessionFile(args: {
 }): ParsedHistoryJob | null {
   let sessionId = args.sessionId;
   let metadataId: string | null = null;
+  let calibrationStreamId: string | null = null;
   let parentThreadId: string | null = null;
   let isSubagent = false;
   let name: string | null = null;
@@ -828,7 +831,6 @@ export function parseHistorySessionFile(args: {
   let modelProvider: string | null = null;
   let lastRunUsage: TokenUsage | null = null;
   let previousTokenUsageKey: string | null = null;
-  let tokenCountIndex = 0;
   let totalUsage: TokenUsage | null = null;
   let totalEstimatedCostUsd = 0;
   let totalCostIsComplete = true;
@@ -843,6 +845,7 @@ export function parseHistorySessionFile(args: {
   let hasPricedSinceResetUsage = false;
   let latestTurnId: string | null = null;
   const quotaCalibrationEvents: QuotaCalibrationEvent[] = [];
+  const quotaCalibrationEventIds = new Set<string>();
   const dailyUsage = new Map<string, HistoryUsageDay>();
   const quotaDailyUsage = new Map<string, HistoryUsageDay>();
   let untimedTokens = 0;
@@ -889,6 +892,7 @@ export function parseHistorySessionFile(args: {
     if (recordType === "session_meta") {
       if (incomingId) {
         metadataId = incomingId;
+        if (sessionId !== incomingId) calibrationStreamId = null;
         sessionId = incomingId;
       }
       const source = asRecord(payload?.source);
@@ -972,16 +976,23 @@ export function parseHistorySessionFile(args: {
     }
 
     if (payloadType === "token_count") {
-      const sampleId = `${sessionId ?? args.sessionId}:${tokenCountIndex++}`;
       const info = asRecord(payload?.info);
       const increment = normalizeTokenUsage(info?.last_token_usage);
       const cumulative = normalizeTokenUsage(info?.total_token_usage);
       const cumulativeKey = cumulative ? JSON.stringify(cumulative) : null;
       const duplicate = Boolean(increment && cumulativeKey && cumulativeKey === previousTokenUsageKey);
       if (recordTimestampMs !== null && recordTimestampMs <= args.nowMs) {
-        quotaCalibrationEvents.push({ id: sampleId, at: recordTimestampMs,
-          cost: duplicate || !increment ? 0 : estimateApiEquivalentCost(increment, activeModel),
-          limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
+        const sampleId = calibrationSampleId(sessionId, recordTimestampMs, increment, cumulative, payload?.rate_limits);
+        // An exact duplicate must not replace the original sample with the zero
+        // cost produced by cumulative-counter deduplication.
+        if (!quotaCalibrationEventIds.has(sampleId)) {
+          quotaCalibrationEventIds.add(sampleId);
+          calibrationStreamId ??= createHash('sha256').update(sessionId ?? args.sessionId ?? '').digest('hex');
+          quotaCalibrationEvents.push({ id: sampleId, streamId: calibrationStreamId, at: recordTimestampMs,
+            duplicateUsage: duplicate,
+            cost: duplicate || !increment ? 0 : estimateApiEquivalentCost(increment, activeModel),
+            limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
+        }
       }
       // Rate-limit refreshes can repeat the previous response's token usage.
       // Only deduplicate when unchanged cumulative counters prove no new usage.
@@ -1064,7 +1075,7 @@ export function parseHistorySessionFile(args: {
   return {
     id: sessionId,
     quotaCalibrationEvents,
-    quotaCalibrationVersion: 2,
+    quotaCalibrationVersion: 4,
     dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
     archived: false,
     parentThreadId,
@@ -1375,6 +1386,20 @@ function extractUserPreview(payload: Record<string, unknown> | null): string | n
     .filter((entry): entry is string => Boolean(entry));
 
   return userPreview(pieces.join("\n\n"));
+}
+
+function calibrationSampleId(sessionId: string | null, at: number, increment: TokenUsage | null,
+  cumulative: TokenUsage | null, rateLimits: unknown): string {
+  const rate = asRecord(rateLimits);
+  const windowFields = (value: unknown) => {
+    const window = asRecord(value);
+    return [asFiniteNumber(window?.window_minutes), asFiniteNumber(window?.used_percent), asFiniteNumber(window?.resets_at)];
+  };
+  // Content identity survives split logs, archive moves and repricing. Only
+  // allowlisted statistics enter the digest; paths and transcript text do not.
+  const fingerprint = JSON.stringify([sessionId, at, increment, cumulative,
+    asString(rate?.plan_type), asString(rate?.limit_id), windowFields(rate?.primary), windowFields(rate?.secondary)]);
+  return `v3:${createHash('sha256').update(fingerprint).digest('hex')}`;
 }
 
 function normalizeTokenUsage(value: unknown): TokenUsage | null {

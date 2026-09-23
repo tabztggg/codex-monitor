@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Link, Route, Routes, useParams } from "react-router-dom";
 import type {
   CodexUsageSnapshot,
@@ -67,17 +67,36 @@ export default function App() {
   const { snapshot, error, connectionLabel } = useMonitorState();
   const safeSnapshot = snapshot ?? EMPTY_SNAPSHOT;
   const nowMs = useNow(1000);
+  const topbarRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const topbar = topbarRef.current;
+    if (!topbar) return;
+    const root = document.documentElement;
+    const property = '--monitor-topbar-height';
+    const previousHeight = root.style.getPropertyValue(property);
+    // Native anchor and keyboard scrolling share the actual wrapped header height.
+    const updateHeight = () => root.style.setProperty(property, `${Math.ceil(topbar.getBoundingClientRect().height)}px`);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(topbar);
+    return () => {
+      observer.disconnect();
+      if (previousHeight) root.style.setProperty(property, previousHeight);
+      else root.style.removeProperty(property);
+    };
+  }, []);
 
   return (
     <BrowserRouter>
       <div className="app-shell">
-        <header className="topbar">
-          <Link to="/" className="brand-link">
+        <header className="topbar" ref={topbarRef}>
+          <a href="/#usage-overview" className="brand-link">
             <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
               <path d="M14 2 3 8v8l11-6V2Zm4 0v8l11 6V8L18 2ZM3 20v4l11 6V16L3 20Zm15-4v14l11-6v-4l-11-4Z" fill="currentColor" />
             </svg>
             <h1>Codex Monitor</h1>
-          </Link>
+          </a>
           <nav className="dashboard-nav" aria-label={t('Dashboard navigation')}>
             <a className="dashboard-nav-link" href="/#usage-overview">{t('Usage overview')}</a>
             <a className="dashboard-nav-link" href="/#task-details">{t('Task details')}</a>

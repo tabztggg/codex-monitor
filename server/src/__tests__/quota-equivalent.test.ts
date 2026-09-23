@@ -118,6 +118,52 @@ describe('20x weekly equivalents', () => {
     expect(calibration).toEqual({ costPerPercent: 2, quotaPercent: 5 });
   });
 
+  it('combines simultaneous parallel costs before applying the quota reading regardless of file order', () => {
+    const low = event(1, 0, 10);
+    const high = event(1, 5, 10);
+    for (const simultaneous of [[low, high], [high, low]]) {
+      expect(calibrate20x([event(0, 0, 0), ...simultaneous], start, end))
+        .toEqual({ costPerPercent: 4, quotaPercent: 5 });
+    }
+    // A missing price in the same group must not become a qualified interval
+    // just because the priced event happens to be read first.
+    for (const simultaneous of [[high, { ...low, cost: null }], [{ ...low, cost: null }, high]]) {
+      expect(calibrate20x([event(0, 0, 0), ...simultaneous, event(2, 10, 10)], start, end))
+        .toEqual({ costPerPercent: 2, quotaPercent: 5 });
+    }
+  });
+
+  it('retains each window high-water mark across switches without recounting stale returns', () => {
+    const switched = [event(0, 10, 0), event(1, 15, 10),
+      event(2, 10, 0, end + 3600000), event(3, 15, 10, end + 3600000),
+      event(4, 10, 2), event(5, 15, 2)];
+    expect(calibrate20x(switched, start, end)).toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    expect(calibrate20x([...switched, event(6, 20, 10), event(7, 25, 10)], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 15 });
+  });
+
+  it('retains high-water marks through observation gaps but discards costs that cross interruptions', () => {
+    expect(calibrate20x([event(0, 10, 0), event(1, 15, 10),
+      event(45, 10, 2), event(46, 15, 2), event(47, 20, 10), event(48, 25, 10)], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    expect(calibrate20x([event(0, 0, 0), event(1, 0, 100),
+      event(2, 0, 0, end + 3600000), event(3, 5, 10, end + 3600000),
+      event(4, 0, 1000), event(5, 5, 10)], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    expect(calibrate20x([event(0, 0, 0), event(1, 0, 100), event(45, 5, 1000), event(46, 10, 10)], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 5 });
+  });
+
+  it('does not infer the active account from simultaneous reports of distinct or unknown windows', () => {
+    const first = event(1, 5, 100);
+    const other = event(1, 5, 100, end + 3600000);
+    const unknown = { ...event(1, 5, 100), limit: null };
+    for (const simultaneous of [[first, other], [other, first], [first, unknown], [unknown, first]]) {
+      expect(calibrate20x([event(0, 0, 0), ...simultaneous, event(2, 5, 1000), event(3, 10, 10)], start, end))
+        .toEqual({ costPerPercent: 2, quotaPercent: 5 });
+    }
+  });
+
   it('calibrates multiple account windows without counting their initial balances or switch jumps', () => {
     expect(calibrate20x([
       event(0, 80, 1000), event(1, 85, 10),
@@ -131,6 +177,45 @@ describe('20x weekly equivalents', () => {
       event(0, 10, 0), event(1, 15, 10), event(2, 10, 2), event(3, 15, 2),
       event(4, 16, 2), event(5, 21, 10)
     ], start, end)).toEqual({ costPerPercent: 2, quotaPercent: 10 });
+  });
+
+  it('keeps costs from independently monotonic clients whose quota snapshots lag the global reading', () => {
+    const from = (id: string, minute: number, used: number, cost: number) => ({ ...event(minute, used, cost), streamId: id });
+    const reports = [from('a', 0, 0, 0), from('a', 1, 5, 10),
+      from('b', 2, 1, 2), from('b', 3, 2, 2), from('a', 4, 10, 6)];
+    expect(calibrate20x(reports, start, end)).toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    // The same rule applies when the slower source was already observed.
+    expect(calibrate20x([from('b', 0, 0, 0), ...reports], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    // Without source identities, lower snapshots remain ambiguous and cannot
+    // be treated as proven parallel-client lag.
+    expect(calibrate20x(reports.map(({ streamId: _source, ...report }) => report), start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 5 });
+  });
+
+  it('rejects actual same-source corrections and missing prices even when other clients are monotonic', () => {
+    const from = (id: string, minute: number, used: number, cost: number | null) => ({ ...event(minute, used, cost), streamId: id });
+    expect(calibrate20x([from('a', 0, 0, 0), from('a', 1, 5, 10),
+      from('a', 2, 1, 2), from('a', 3, 2, 2), from('b', 4, 10, 6), from('b', 5, 15, 10)], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    expect(calibrate20x([from('a', 0, 0, 0), from('a', 1, 5, 10),
+      from('b', 2, 1, null), from('b', 3, 2, 2), from('a', 4, 10, 6), from('a', 5, 15, 10)], start, end))
+      .toEqual({ costPerPercent: 2, quotaPercent: 10 });
+  });
+
+  it('does not let simultaneous maximum readings hide a same-source regression', () => {
+    const from = (id: string, minute: number, used: number, cost: number) => ({ ...event(minute, used, cost), streamId: id });
+    const high = from('a', 2, 10, 8);
+    const low = from('a', 2, 1, 2);
+    for (const simultaneous of [[low, high], [high, low]]) {
+      expect(calibrate20x([from('a', 0, 0, 0), from('a', 1, 5, 10), ...simultaneous,
+        from('a', 3, 15, 10)], start, end)).toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    }
+    const lagging = { ...low, streamId: 'b' };
+    for (const simultaneous of [[lagging, high], [high, lagging]]) {
+      expect(calibrate20x([from('a', 0, 0, 0), from('a', 1, 5, 10), ...simultaneous], start, end))
+        .toEqual({ costPerPercent: 2, quotaPercent: 10 });
+    }
   });
 
   it('rejects corrections, observation gaps, missing prices and missing weekly limits', () => {
@@ -167,11 +252,58 @@ describe('20x weekly equivalents', () => {
       updatedAt: new Date(start).toISOString(), nowMs: start + 120000, usageWindowStartedAtMs: start });
     expect(parsed?.totalUsage?.totalTokens).toBe(1000);
     expect(parsed?.quotaCalibrationEvents?.map(e => [e.cost, e.limit?.used])).toEqual([[0.01, 10], [0, 15]]);
-    expect(parsed?.quotaCalibrationEvents?.map(e => e.id)).toEqual(['task:0', 'task:1']);
+    const samples = parsed?.quotaCalibrationEvents ?? [];
+    expect(new Set(samples.map(e => e.id)).size).toBe(2);
+    expect(samples.every(e => /^v3:[a-f0-9]{64}$/.test(e.id ?? ''))).toBe(true);
+    expect(new Set(samples.map(e => e.streamId)).size).toBe(1);
+    expect(samples.every(e => /^[a-f0-9]{64}$/.test(e.streamId ?? ''))).toBe(true);
     const nextPeriod = parseHistorySessionFile({ sessionId: 'task', fileContent: lines.map(line => JSON.stringify(line)).join('\n'),
       updatedAt: new Date(start).toISOString(), nowMs: end + 120000, usageWindowStartedAtMs: end });
     expect(nextPeriod?.quotaCalibrationEvents).toEqual(parsed?.quotaCalibrationEvents);
     expect(nextPeriod?.sinceResetUsage).toBeNull();
+  });
+
+  it('preserves proven duplicate usage across overlapping fragments, refreshes and restarts in either read order', () => {
+    const token = (minute: number, tokens: number, used: number) => ({
+      timestamp: new Date(start + minute * 60000).toISOString(), type: 'event_msg', payload: {
+        type: 'token_count', info: {
+          last_token_usage: { input_tokens: tokens, total_tokens: tokens },
+          total_token_usage: { input_tokens: tokens, total_tokens: tokens }
+        }, rate_limits: { plan_type: 'pro', primary: { used_percent: used, window_minutes: 10080, resets_at: end / 1000 } }
+      }
+    });
+    const parse = (records: unknown[], model = 'gpt-6-astra') => parseHistorySessionFile({
+      sessionId: 'overlap-task', updatedAt: new Date(start).toISOString(), nowMs: start + 180000,
+      fileContent: [{ type: 'session_meta', payload: { id: 'overlap-task' } },
+        { type: 'turn_context', payload: { model } }, ...records].map(value => JSON.stringify(value)).join('\n')
+    })!.quotaCalibrationEvents!;
+    const records = [token(0, 0, 0), token(1, 1000, 0), token(2, 1000, 5)];
+    const complete = parse(records);
+    const fragment = parse([records[2]]);
+    expect(complete[2]).toMatchObject({ id: fragment[0].id, duplicateUsage: true, cost: 0 });
+    expect(fragment[0]).toMatchObject({ duplicateUsage: false, cost: 0.01 });
+    for (const samples of [[...complete, ...fragment], [...fragment, ...complete]]) {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'monitor-overlap-calibration-'));
+      const file = path.join(dir, 'reference.json');
+      try {
+        const calibration = new QuotaCalibration(file);
+        expect(calibration.resolve(samples, start, start + 180000).costPerPercent).toBe(0.002);
+        expect(calibration.resolve(fragment, start, start + 240000).costPerPercent).toBe(0.002);
+        const saved = JSON.parse(readFileSync(file, 'utf8'));
+        expect(saved.samples.find((sample: QuotaCalibrationEvent) => sample.id === fragment[0].id))
+          .toMatchObject({ cost: 0, duplicateUsage: true });
+        const restarted = new QuotaCalibration(file);
+        expect(restarted.resolve(fragment, start, start + 300000).costPerPercent).toBe(0.002);
+        // Normal prices are still replaceable for events not proven duplicate.
+        // A changed model context retains content identities but changes cost.
+        const repriced = parse(records, 'gpt-5.6-sol');
+        expect(repriced.map(sample => sample.id)).toEqual(complete.map(sample => sample.id));
+        expect(repriced[1]).toMatchObject({ duplicateUsage: false, cost: 0.004 });
+        expect(restarted.resolve(repriced, start, start + 360000).costPerPercent).toBe(0.0008);
+        expect(new QuotaCalibration(file).resolve(parse([records[2]], 'gpt-5.6-sol'), start, start + 420000).costPerPercent)
+          .toBe(0.0008);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
   });
 
   it('allows totals far above 100%, handles partial and unavailable data, and sorts tasks and projects', () => {

@@ -4,8 +4,8 @@
 
 [简体中文](README.md) | English
 
-**Latest: [v0.4.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.0)** ·
-Redesigned dashboard, clearer cross-account scope and period boundaries · [Changelog and upgrade notes](CHANGELOG.md)
+**Latest: [v0.4.1](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.1)** ·
+Parallel-chat calibration and duplicate-log fixes, with sticky header navigation · [Changelog and upgrade notes](CHANGELOG.md)
 
 A local dashboard for account quota, recorded tokens, estimated costs, and live
 activity. This customized version builds on
@@ -104,6 +104,10 @@ management, logs, and redeploying updates; no general one-click installer is
 currently included. LAN settings can be supplied locally without committing
 them. See [Windows launchers](docs/setup-and-reference.md#windows-launchers).
 
+The header stays visible while browsing task details, trends and estimation
+methodology. Its links return to the overview, with anchor spacing adapting to
+the wrapped header on narrow screens.
+
 ## Understand the numbers
 
 | Metric | Meaning | Scope |
@@ -125,6 +129,18 @@ not the recorded account tier; automatic account-tier verification is not availa
 unpriced models, and tool fees can affect accuracy. The monitor does not sign
 into old accounts or retrieve their missing history.
 
+Calibration tracks each task's quota readings separately, allowing normal lag
+between parallel clients. Same-task regressions, unknown costs and observation
+gaps do not qualify. Concurrent readings are combined; per-window high-water
+marks and stable sample identities prevent recounting and fragment collisions.
+On sample-format upgrades, the previous reference remains visible while compatible
+samples rebuild within the existing archive scope, until five percentage points
+qualify. In v0.4.1, sample identities and persisted samples use v3; calibration data
+in parser caches upgrades lazily to v4. No cache clearing is required, and the quota-attribution ledger is preserved.
+Account quota attribution only allocates increases observed after monitoring
+began; earlier usage in the same task can remain unattributed, so it need not equal
+the equivalent estimate.
+
 - `--` means unavailable or not yet attributable, not zero usage.
 - `+` marks a partial estimate or total.
 - Prices are a local table, not a live pricing feed.
@@ -144,7 +160,7 @@ and update time, visibly marked as stale. Those readings do not create new quota
 attribution; a confirmed logout or different account does not inherit old quota.
 Initial task statistics refresh as soon as the quota window becomes ready.
 
-Upgrading from the older session parser rebuilds cached archive summaries and
+Upgrading from the session parser used before v0.2.0 rebuilds cached archive summaries and
 starts a fresh quota-attribution baseline. Previously observed account usage
 is left unattributed instead of preserving potentially incorrect task shares;
 new observations receive task shares from that baseline onward. Recorded tokens,

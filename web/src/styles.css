@@ -42,6 +42,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-padding-top: calc(var(--monitor-topbar-height, 66px) + 16px);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -755,19 +759,19 @@ a {
 
 /* Dashboard: account quota, cross-account estimates, then task detail. */
 .app-shell { width: min(1440px, calc(100% - 64px)); padding: 0 0 28px; }
-.topbar { min-height: 66px; padding: 12px 0; margin: 0 0 22px; border-bottom: 1px solid var(--line); flex-direction: row; }
+.topbar { position: sticky; top: 0; z-index: 50; min-height: 66px; padding: 12px 0; margin: 0 0 22px; border-bottom: 1px solid var(--line); background: var(--bg); flex-direction: row; align-items: center; }
 .brand-link { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .brand-mark { width: 29px; height: 29px; color: var(--accent); }
 .topbar h1 { font-size: 21px; font-weight: 650; letter-spacing: -.6px; }
-.dashboard-nav { display: flex; gap: 8px; margin-left: 26px; align-self: stretch; align-items: center; }
-.dashboard-nav-link { padding: 10px 14px; color: var(--muted); font-size: 13px; border-radius: 6px; }
+.dashboard-nav { display: flex; min-width: 0; gap: 8px; margin-left: 26px; align-self: stretch; align-items: center; }
+.dashboard-nav-link { padding: 10px 14px; color: var(--muted); font-size: 13px; border-radius: 6px; text-align: center; }
 .dashboard-nav-link:hover, .dashboard-nav-link:focus-visible { color: var(--good); background: var(--surface-soft); }
-.topbar-actions { margin-left: auto; }
+.topbar-actions { margin-left: auto; flex-shrink: 0; }
 .language-switch { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; background: var(--surface); color: var(--good); font-size: 13px; cursor: pointer; }
 .dashboard-page { gap: 16px; margin-top: 0; min-width: 0; }
 .history-panel { padding: 0; min-width: 0; gap: 0; }
 .dashboard-heading, .statistics-heading, .task-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.dashboard-heading { margin-bottom: 14px; scroll-margin-top: 16px; }
+.dashboard-heading { margin-bottom: 14px; }
 .dashboard-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 20px; }
 .dashboard-title h2, .statistics-heading h2, .task-section-heading h2 { margin: 0; font-size: 24px; line-height: 1.3; letter-spacing: -.5px; font-weight: 650; }
 .dashboard-title p { margin: 0; font-size: 13px; color: var(--muted); }
@@ -856,7 +860,7 @@ a {
 .calibration-segments i { width: 30px; height: 6px; border-radius: 4px; background: var(--line-strong); }
 .calibration-segments .filled { background: var(--warn); }
 .basis-link { margin-left: auto; background: transparent; border: 0; color: var(--accent-blue); padding: 2px 0; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.task-list-section { margin-top: 22px; min-width: 0; scroll-margin-top: 16px; }
+.task-list-section { margin-top: 22px; min-width: 0; }
 .task-section-heading { margin-bottom: 12px; }
 .task-section-heading h2 { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .task-count { font-size: 13px; color: var(--muted); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-weight: 500; letter-spacing: 0; }
@@ -934,7 +938,6 @@ a {
 .simple-table .task-detail-content { max-width: 100%; }
 .simple-table .task-detail-content dl { grid-template-columns: minmax(80px, 1fr) minmax(0, 1.5fr); }
 .view-mode-help, .muted-note { font-size: 12px; color: var(--muted); line-height: 1.6; }
-#task-trends { scroll-margin-top: 16px; }
 .insights-panel, .metric-explanation { margin: 10px 0 0; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font-size: 13px; }
 .insights-panel > summary, .metric-explanation > summary { cursor: pointer; padding: 12px 16px; color: var(--ink); min-height: 44px; }
 .insights-panel[open] > summary, .metric-explanation[open] > summary { border-bottom: 1px solid var(--line); }

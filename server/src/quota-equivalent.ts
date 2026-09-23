@@ -5,6 +5,9 @@ import path from 'node:path';
 type SavedCalibration = { version: 1; costPerPercent: number; quotaPercent: number; windowStart: number; updatedAt: number };
 const SAMPLE_RETENTION_MS = 30 * 86400000;
 const SAVE_INTERVAL_MS = 30000;
+// v3 records use content identities and per-stream quota observations. Old
+// sample keys cannot safely coexist with them; retain only the old reference.
+const SAMPLE_VERSION = 3;
 
 /** Keep the last usable reference across resets, reduced archive scopes and restarts. */
 export class QuotaCalibration {
@@ -26,7 +29,7 @@ export class QuotaCalibration {
           windowStart: value.windowStart, updatedAt: value.updatedAt };
         // Version 1 files without samples remain valid references. Do not replace
         // them from a potentially narrower selection until fresh samples qualify.
-        if (Array.isArray(value.samples) && value.samples.every(validSample)) {
+        if (value.sampleVersion === SAMPLE_VERSION && Array.isArray(value.samples) && value.samples.every(validSample)) {
           for (const event of value.samples) this.samples.set(sampleKey(event), event);
           this.referenceSamplesKnown = value.referenceSamplesKnown === true;
         }
@@ -39,8 +42,13 @@ export class QuotaCalibration {
     for (const event of events) {
       if (!validSample(event) || event.at < now - SAMPLE_RETENTION_MS || event.at > now) continue;
       const key = sampleKey(event);
-      if (!sameSample(this.samples.get(key), event)) {
-        this.samples.set(key, { ...event, limit: event.limit ? { ...event.limit } : null });
+      const previous = this.samples.get(key);
+      // A full log can prove unchanged cumulative usage while an overlapping
+      // fragment lacks that preceding context. Retain the proven zero cost.
+      const sample = previous?.duplicateUsage && !event.duplicateUsage
+        ? { ...event, cost: 0, duplicateUsage: true } : event;
+      if (!sameSample(previous, sample)) {
+        this.samples.set(key, { ...sample, limit: sample.limit ? { ...sample.limit } : null });
         samplesChanged = this.dirty = true;
       }
     }
@@ -61,7 +69,10 @@ export class QuotaCalibration {
       this.remember(candidate.costPerPercent, candidate.quotaPercent, candidateStart, candidate.updatedAt);
       source = windowStart === null ? 'previous' : 'current';
     } else if (events.length && current && current.costPerPercent !== null && this.saved &&
-        current.updatedAt === this.saved.updatedAt && windowStart === this.saved.windowStart && this.referenceSamplesKnown) {
+        current.updatedAt === this.saved.updatedAt && current.costPerPercent === this.saved.costPerPercent &&
+        current.quotaPercent === this.saved.quotaPercent && this.referenceSamplesKnown) {
+      // Startup may recover this exact reference before the live account's
+      // window arrives. Its observations, not that temporary start, identify it.
       source = 'current';
     } else if (!this.saved) {
       // Upgrade recovery uses metadata already read for the selected tasks; never scan extra archives.
@@ -92,7 +103,7 @@ export class QuotaCalibration {
     try {
       mkdirSync(path.dirname(this.file), { recursive: true });
       writeFileSync(this.file + '.tmp', JSON.stringify({ ...this.saved,
-        samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
+        sampleVersion: SAMPLE_VERSION, samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
       renameSync(this.file + '.tmp', this.file);
       this.dirty = false;
       this.referenceDirty = this.saveFailed = false;
@@ -109,6 +120,9 @@ function validTimestamp(value: unknown): value is number {
 
 function validSample(event: QuotaCalibrationEvent): boolean {
   return Boolean(event && validTimestamp(event.at) && (event.id === undefined || typeof event.id === 'string') &&
+    (event.streamId === undefined || typeof event.streamId === 'string' && event.streamId.length > 0) &&
+    (event.duplicateUsage === undefined || typeof event.duplicateUsage === 'boolean') &&
+    (!event.duplicateUsage || event.cost === 0) &&
     (event.cost === null || Number.isFinite(event.cost) && event.cost >= 0) &&
     (event.limit === null || event.limit && Number.isFinite(event.limit.used) && event.limit.used >= 0 && event.limit.used <= 100 &&
       validTimestamp(event.limit.resetsAt) && event.at < event.limit.resetsAt && event.at >= event.limit.resetsAt - 604800000));
@@ -119,13 +133,16 @@ function sampleKey(event: QuotaCalibrationEvent): string {
 }
 
 function sameSample(left: QuotaCalibrationEvent | undefined, right: QuotaCalibrationEvent): boolean {
-  return Boolean(left && left.at === right.at && left.cost === right.cost &&
+  return Boolean(left && left.at === right.at && left.cost === right.cost && left.streamId === right.streamId &&
+    Boolean(left.duplicateUsage) === Boolean(right.duplicateUsage) &&
     left.limit?.used === right.limit?.used && left.limit?.resetsAt === right.limit?.resetsAt);
 }
 
 // Only usage metadata and opaque sample identities are retained, never authentication data or transcript text.
 export interface QuotaCalibrationEvent {
   id?: string;
+  streamId?: string;
+  duplicateUsage?: boolean;
   at: number;
   cost: number | null;
   limit: { used: number; resetsAt: number } | null;
@@ -154,36 +171,84 @@ export function calibrate20x(events: QuotaCalibrationEvent[], start: number, end
 }
 
 function calibrationDetails(events: QuotaCalibrationEvent[], start: number, end: number) {
-  let previous: QuotaCalibrationEvent | null = null;
+  type WindowState = { resetsAt: number; highWater: number | null; streams: Map<string, number> };
+  type Observation = { used: number; cost: number | null; anonymousMinimum: number | null;
+    streams: Map<string, { minimum: number; maximum: number }>; regressed: boolean };
+  const windows: WindowState[] = [];
+  let previous: { at: number; window: WindowState } | null = null;
   let pendingCost = 0;
   let complete = true;
   let cost = 0;
   let quota = 0;
   let updatedAt: number | null = null;
-  for (const event of events.filter(e => e.at >= start && e.at < end).sort((a, b) => a.at - b.at)) {
-    const prior = previous as QuotaCalibrationEvent | null;
-    const sameWindow = Boolean(prior?.limit && event.limit &&
-      Math.abs(prior.limit.resetsAt - event.limit.resetsAt) <= 60000 &&
-      event.at - prior.at <= 30 * 60000);
-    if (!sameWindow) {
+  const sorted = events.filter(e => e.at >= start && e.at < end).sort((a, b) =>
+    a.at - b.at || (a.limit?.resetsAt ?? Infinity) - (b.limit?.resetsAt ?? Infinity) ||
+    (a.cost ?? Infinity) - (b.cost ?? Infinity));
+  for (let index = 0; index < sorted.length;) {
+    const at = sorted[index].at;
+    const groups = new Map<WindowState, Observation>();
+    let unknownWindow = false;
+    // Simultaneous parallel reports have no meaningful file order. Include
+    // all their response costs before applying their highest quota reading.
+    while (index < sorted.length && sorted[index].at === at) {
+      const event = sorted[index++];
+      if (!event.limit) { unknownWindow = true; continue; }
+      let window = windows.find(value => Math.abs(value.resetsAt - event.limit!.resetsAt) <= 60000);
+      if (!window) {
+        window = { resetsAt: event.limit.resetsAt, highWater: null, streams: new Map() };
+        windows.push(window);
+      }
+      const group = groups.get(window) ?? { used: event.limit.used, cost: 0,
+        anonymousMinimum: null, streams: new Map(), regressed: false };
+      group.used = Math.max(group.used, event.limit.used);
+      group.cost = group.cost === null || event.cost === null || !Number.isFinite(event.cost) || event.cost < 0
+        ? null : group.cost + event.cost;
+      if (event.streamId) {
+        const source = group.streams.get(event.streamId);
+        group.streams.set(event.streamId, { minimum: Math.min(source?.minimum ?? event.limit.used, event.limit.used),
+          maximum: Math.max(source?.maximum ?? event.limit.used, event.limit.used) });
+      } else group.anonymousMinimum = Math.min(group.anonymousMinimum ?? event.limit.used, event.limit.used);
+      groups.set(window, group);
+    }
+    for (const [window, group] of groups) {
+      group.regressed = group.anonymousMinimum !== null && window.highWater !== null && group.anonymousMinimum < window.highWater;
+      for (const [id, source] of group.streams) {
+        const highWater = window.streams.get(id);
+        // A different client's monotonic reading may lag the global reading.
+        // Only a fall within that same source proves an observed correction.
+        if (highWater !== undefined && source.minimum < highWater) group.regressed = true;
+        window.streams.set(id, Math.max(highWater ?? source.maximum, source.maximum));
+      }
+    }
+    if (unknownWindow || groups.size !== 1) {
+      // Without an unambiguous account window, do not pair costs across the
+      // interruption. Keep every known high-water mark for later stale reads.
+      for (const [window, group] of groups) window.highWater = Math.max(window.highWater ?? group.used, group.used);
+      previous = null;
       pendingCost = 0;
       complete = true;
+      continue;
+    }
+    const [window, group] = groups.entries().next().value!;
+    const highWater = window.highWater;
+    const prior = previous as { at: number; window: WindowState } | null;
+    const continuous = prior?.window === window && at - prior.at <= 30 * 60000;
+    if (!continuous) {
+      pendingCost = 0;
+      complete = !group.regressed;
     } else {
-      // Parallel clients can report a stale lower value. Never recount the
-      // rebound to a high-water mark already observed in this window.
-      if (event.limit!.used < prior!.limit!.used) complete = false;
-      if (event.cost === null || !Number.isFinite(event.cost) || event.cost < 0) complete = false;
-      else pendingCost += event.cost;
-      const delta = event.limit!.used - prior!.limit!.used;
+      if (group.regressed) complete = false;
+      if (group.cost === null) complete = false;
+      else pendingCost += group.cost;
+      const delta = group.used - highWater!;
       if (delta > 0) {
-        if (complete && pendingCost > 0) { cost += pendingCost; quota += delta; updatedAt = event.at; }
+        if (complete && pendingCost > 0) { cost += pendingCost; quota += delta; updatedAt = at; }
         pendingCost = 0;
         complete = true;
       }
     }
-    previous = sameWindow ? { ...event, limit: {
-      ...event.limit!, used: Math.max(prior!.limit!.used, event.limit!.used)
-    } } : event;
+    window.highWater = Math.max(highWater ?? group.used, group.used);
+    previous = { at, window };
   }
   // Integer quota snapshots are noisy. Avoid extrapolating from a single percentage point.
   return { costPerPercent: quota >= 5 && cost > 0 ? cost / quota : null, quotaPercent: quota, updatedAt };

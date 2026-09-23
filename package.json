@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Simple local dashboard for monitoring Codex sessions.",
   "private": true,
   "type": "module",

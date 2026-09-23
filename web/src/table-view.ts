@@ -1,12 +1,12 @@
 import type { TaskSortColumn } from './presentation';
 
 export const taskColumns: { key: TaskSortColumn; title: string; numeric?: boolean; width: number }[] = [
-  { key: 'task', title: 'Task', width: 200 }, { key: 'status', title: 'Status', width: 86 },
-  { key: 'usage', title: 'Approx. quota %', numeric: true, width: 118 },
-  { key: 'equivalent20x', title: '20x equivalent usage', numeric: true, width: 146 },
-  { key: 'cost', title: 'Estimated cost', numeric: true, width: 104 },
-  { key: 'tokens', title: 'Total tokens', numeric: true, width: 106 },
-  { key: 'activity', title: 'Activity', numeric: true, width: 98 }
+  { key: 'task', title: 'Task', width: 300 }, { key: 'status', title: 'Status', width: 120 },
+  { key: 'usage', title: 'Approx. quota %', numeric: true, width: 165 },
+  { key: 'equivalent20x', title: '20x equivalent usage', numeric: true, width: 195 },
+  { key: 'cost', title: 'Estimated cost', numeric: true, width: 150 },
+  { key: 'tokens', title: 'Total tokens', numeric: true, width: 160 },
+  { key: 'activity', title: 'Activity', numeric: true, width: 135 }
 ];
 
 export interface TableView {

@@ -4,6 +4,19 @@ export type Translate = (message: string, params?: Params) => string;
 
 // English messages are also the fallback for raw external diagnostics.
 export const chinese: Record<string, string> = {
+  'Dashboard navigation': '仪表盘导航', 'Usage overview': '用量总览', 'Task details': '任务明细',
+  'Trends & methodology': '趋势与依据', 'Current account quota': '当前账号额度',
+  '{percent} quota remaining': '额度剩余 {percent}', 'Next reset': '距离下次重置',
+  'Current account quota and cross-account usage, clearly separated.': '当前账号额度与跨账号消耗，分开看清。',
+  'Cross-account usage estimate': '跨账号用量估算', 'No project': '未分配项目',
+  'May exceed 100%': '可超过 100%', 'API-equivalent estimate': 'API 等价估算',
+  'Based on local records and observed quota changes.': '基于本地记录与观测到的额度变化估算。',
+  'Estimation basis': '估算依据',
+  'Across accounts': '跨账号', 'Local records': '本地记录',
+  'Time zone: {zone}': '时区：{zone}', 'Starts': '开始', 'Ends / resets': '结束／重置',
+  'Statistics start': '统计开始', 'Data through': '数据截至',
+  'The current account’s quota window defines this range; equivalent usage combines local records across accounts.': '本范围按当前账号的额度重置周期划定；等效消耗汇总范围内跨账号的本地记录。',
+  'This quota period has ended. Waiting for the renewed quota window.': '此额度周期已结束，正在等待新的额度周期。',
   'Showing the last confirmed account snapshot from {time}. Retrying automatically.': '显示 {time} 最后确认的账号数据，正在自动重试。',
   'Last confirmed account': '上次确认的账号',
   'Table view': '表格视图', 'Full table': '完整表格', 'Simple view': '精简视图',

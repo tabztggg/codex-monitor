@@ -72,8 +72,18 @@ export default function App() {
     <BrowserRouter>
       <div className="app-shell">
         <header className="topbar">
-          <h1>Codex Monitor</h1>
-          <LanguageSwitch />
+          <Link to="/" className="brand-link">
+            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <path d="M14 2 3 8v8l11-6V2Zm4 0v8l11 6V8L18 2ZM3 20v4l11 6V16L3 20Zm15-4v14l11-6v-4l-11-4Z" fill="currentColor" />
+            </svg>
+            <h1>Codex Monitor</h1>
+          </Link>
+          <nav className="dashboard-nav" aria-label={t('Dashboard navigation')}>
+            <a className="dashboard-nav-link" href="/#usage-overview">{t('Usage overview')}</a>
+            <a className="dashboard-nav-link" href="/#task-details">{t('Task details')}</a>
+            <a className="dashboard-nav-link" href="/#task-trends">{t('Trends & methodology')}</a>
+          </nav>
+          <div className="topbar-actions"><LanguageSwitch /></div>
         </header>
 
         {error ? <div className="banner banner-error">{t('Unable to load data.')} {errorText(error)}</div> : null}
@@ -105,11 +115,15 @@ export function DashboardPage({
   nowMs: number;
   connectionLabel: string;
 }) {
-  const { t, label } = useI18n();
+  const { t } = useI18n();
   return (
     <main className="dashboard-page">
-      <CodexUsageCard usage={snapshot.codexUsage} nowMs={nowMs} />
-      <HistoryPanel snapshot={snapshot} nowMs={nowMs} connectionLabel={connectionLabel} />
+      <HistoryPanel
+        snapshot={snapshot}
+        nowMs={nowMs}
+        connectionLabel={connectionLabel}
+        overviewSlot={<CodexUsageCard usage={snapshot.codexUsage} nowMs={nowMs} />}
+      />
       <footer className="monitor-footer">
         <details className="secondary-controls">
           <summary>{t('Auto shutdown')} · {t(snapshot.globalAutomation.policy.enabled ? snapshot.activeShutdown.dryRun ? "Dry-run" : "On" : "Off")}{getShutdownCountdown(snapshot, nowMs) ? ` · ${shutdownStatusLabel(snapshot, nowMs, t)}` : ""}</summary>
@@ -197,7 +211,7 @@ function CodexUsageCard({
   usage: CodexUsageSnapshot;
   nowMs: number;
 }) {
-  const { t, windowLabel, dateTime, error: errorText } = useI18n();
+  const { t, locale, windowLabel, dateTime, error: errorText } = useI18n();
   const window = overallUsageWindow(usage);
   const pace = window ? quotaPace(window, nowMs) : null;
   const unavailable = usage.status !== "available" || !window;
@@ -207,32 +221,57 @@ function CodexUsageCard({
   const difference = unavailable ? null : pace?.difference ?? null;
   const elapsed = unavailable ? null : pace?.elapsed ?? null;
   const heading = difference === null ? "Pace unavailable" : difference > 5 ? "Usage is ahead of elapsed time" : difference < -5 ? "Usage is below the proportional pace" : "Usage is in line with elapsed time";
+  const resetAt = window?.resetsAt && Number.isFinite(Date.parse(window.resetsAt)) ? window.resetsAt : null;
+  const resetDate = resetAt ? new Intl.DateTimeFormat(locale, {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    hour12: false, timeZoneName: 'shortOffset'
+  }).format(new Date(resetAt)).replace('GMT', 'UTC') : null;
   return (
     <section className="surface global-quota" aria-label={t('Overall Codex usage')}>
-      <div className="global-quota-heading">{t('Overall Codex usage')}{window ? ` · ${windowLabel(window.label)}` : ""}</div>
-      <div className="quota-account" aria-label={t('Usage account')}>
-        <strong>{t(usage.stale ? 'Last confirmed account' : 'Usage account')}: {usage.account?.email ?? t(usage.account?.type === 'apiKey' ? 'API key account' : 'Unknown account')}</strong>
-        {usage.account?.planType && <span>{usage.account.planType}</span>}
-        <details className="account-source"><summary>{t('CLI account · Details')}</summary><small>{t('Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.')}</small>
-        {usage.updatedAt && <small>{t('Updated at {time}', { time: dateTime(usage.updatedAt) })}</small>}</details>
-      </div>
-      {usage.stale && usage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</p>}
-      {unavailable ? <p className="usage-message">{usage.status === "loading" ? t("Loading overall Codex usage…") : usage.error ? `${t('Overall Codex quota is unavailable.')} ${errorText(usage.error)}` : t("Overall Codex quota is unavailable.")}</p> : (
-        <div className="global-quota-body">
-          <div>
-            <div className="quota-number">{formatPercent(remaining)} <span>{t('remaining')}</span></div>
-            <div className="quota-reset">{expired ? t("Waiting for the renewed quota") : formatResetLabel(window.resetsAt, nowMs, t)}</div>
+      <div className="global-quota-grid">
+        <div className="quota-account-column">
+          <div className="global-quota-heading">
+            <h2>{t('Current account quota')}</h2>
+            {window && <span className="quota-window-badge">{windowLabel(window.label)}</span>}
           </div>
-          <div className="quota-pace">
-            <h2>{t(heading)}</h2>
-            <div className="quota-compare"><span>{t('Quota used')}</span><div className="usage-meter" role="img" aria-label={t('{percent} quota used', { percent: formatPercent(used) })}><span style={{ width: `${clampMeterPercent(used)}%` }} /></div><b>{formatPercent(used)}</b></div>
-            <div className="quota-compare"><span>{t('Time elapsed')}</span><div className="usage-meter elapsed" role="img" aria-label={t('{percent} of period elapsed', { percent: formatPercent(elapsed) })}><span style={{ width: `${clampMeterPercent(elapsed)}%` }} /></div><b>{formatPercent(elapsed)}</b></div>
-            <p className={`pace-note ${difference !== null && difference > 5 ? "fast" : ""}`}>
-              {expired ? t("Codex has not reported the new period yet.") : difference === null ? t("The period or usage data is incomplete.") : Math.abs(difference) <= 5 ? t("Consumption follows the proportional pace of the period.") : t(difference > 0 ? '{count} percentage points above the proportional pace.' : '{count} percentage points below the proportional pace.', { count: Math.round(Math.abs(difference)) })}
-            </p>
+          <div className="quota-account" aria-label={t('Usage account')}>
+            <strong>{usage.account?.email ?? t(usage.account?.type === 'apiKey' ? 'API key account' : 'Unknown account')}</strong>
+            {usage.account?.planType && <span>{usage.account.planType}</span>}
+            {usage.stale && <span className="quota-account-stale">{t('Last confirmed account')}</span>}
+            <details className="account-source">
+              <summary>{t('CLI account · Details')}</summary>
+              <small>{t('Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.')}</small>
+              {usage.updatedAt && <small>{t('Updated at {time}', { time: dateTime(usage.updatedAt) })}</small>}
+            </details>
           </div>
         </div>
-      )}
+        {unavailable ? (
+          <p className="usage-message quota-unavailable" role="status">{usage.status === "loading" ? t("Loading overall Codex usage…") : usage.error ? `${t('Overall Codex quota is unavailable.')} ${errorText(usage.error)}` : t("Overall Codex quota is unavailable.")}</p>
+        ) : <>
+          <div className="quota-balance">
+            <div className="quota-number">{formatPercent(remaining)} <span>{t('remaining')}</span></div>
+            <div className="usage-meter quota-remaining-meter" role="img" aria-label={t('{percent} quota remaining', { percent: formatPercent(remaining) })}>
+              <span style={{ width: `${clampMeterPercent(remaining)}%` }} />
+            </div>
+            <div className="quota-stat-line">
+              <span>{t('Quota used')} <b>{formatPercent(used)}</b></span>
+              <span>{t('Time elapsed')} <b>{formatPercent(elapsed)}</b></span>
+            </div>
+            <details className="quota-pace">
+              <summary className={`pace-note ${difference !== null && difference > 5 ? "fast" : ""}`}>{expired ? t('Waiting for the renewed quota') : t(heading)}</summary>
+              <p className="quota-pace-description">
+                {expired ? t("Codex has not reported the new period yet.") : difference === null ? t("The period or usage data is incomplete.") : Math.abs(difference) <= 5 ? t("Consumption follows the proportional pace of the period.") : t(difference > 0 ? '{count} percentage points above the proportional pace.' : '{count} percentage points below the proportional pace.', { count: Math.round(Math.abs(difference)) })}
+              </p>
+            </details>
+          </div>
+          <div className="quota-reset-block">
+            <span className="quota-reset-label">{t('Next reset')}</span>
+            <strong className="quota-reset">{expired ? t("Waiting for the renewed quota") : formatResetLabel(resetAt, nowMs, t)}</strong>
+            {resetAt && <time className="quota-reset-at" dateTime={resetAt}>{resetDate}</time>}
+          </div>
+        </>}
+      </div>
+      {usage.stale && usage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</p>}
     </section>
   );
 }

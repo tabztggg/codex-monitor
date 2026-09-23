@@ -4,8 +4,8 @@ import { groupTasksByProject, projectTitle } from '../presentation';
 import { useI18n } from '../LanguageContext';
 import { formatEstimatedCost, formatTokenCount, formatUsagePercent, summarizeTasks, comparisonPlans, comparePlanUsage, type ComparisonPlan } from '../usage-display';
 
-export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparisonPlan = 'pro20x', section = 'all' }: {
-  jobs: HistoryJob[]; analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; periodLabel: string; comparisonPlan?: ComparisonPlan; section?: 'summary' | 'trend' | 'all';
+export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparisonPlan = 'pro20x', section = 'all', onShowBasis }: {
+  jobs: HistoryJob[]; analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; periodLabel: string; comparisonPlan?: ComparisonPlan; section?: 'summary' | 'trend' | 'all'; onShowBasis?: () => void;
 }) {
   const { t, locale, language } = useI18n();
   const planLabel = comparisonPlans[comparisonPlan].label;
@@ -29,12 +29,14 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
     {section !== 'trend' && <section className="scope-summary" aria-label={t('Scope totals')}>
       <div className="scope-summary-heading"><strong>{t('Scope totals')}</strong><span>{periodLabel} · {t('{count} tasks', { count: jobs.length })}</span></div>
       <div className="summary-metrics">
-        <div className="summary-equivalent"><span>{equivalentTitle}</span><strong>{formatUsagePercent(comparePlanUsage(totals.equivalent, comparisonPlan), locale)}{totals.equivalent !== null && !totals.equivalentComplete ? '+' : ''}</strong><small>{totals.equivalent === null ? t(reference ? 'No priced usage in this range' : 'Waiting for calibration') : t('One {plan} week = 100%', { plan: planLabel })}</small></div>
-        <div><span>{t('Estimated cost')}</span><strong>{formatEstimatedCost(totals.cost, totals.costComplete, locale)}</strong><small>{t('Selected period · USD')}</small></div>
-        <div><span>{t('Total tokens')}</span><strong>{formatTokenCount(totals.tokens, locale, totals.tokensComplete)}</strong><small>{t('Selected period')}</small></div>
+        <div className="summary-equivalent" aria-label={`${equivalentTitle} · ${t('Across accounts')}`}><span className="metric-label">{equivalentTitle} <span className="scope-badge">{t('Across accounts')}</span></span><strong>{formatUsagePercent(comparePlanUsage(totals.equivalent, comparisonPlan), locale)}{totals.equivalent !== null && !totals.equivalentComplete ? '+' : ''}</strong><small>{totals.equivalent === null ? t(reference ? 'No priced usage in this range' : 'Waiting for calibration') : `${t('One {plan} week = 100%', { plan: planLabel })} · ${t('May exceed 100%')}`}</small></div>
+        <div><span className="metric-label">{t('Estimated cost')}</span><strong>{formatEstimatedCost(totals.cost, totals.costComplete, locale)}</strong><small>{t('Selected period · USD')} · {t('API-equivalent estimate')}</small></div>
+        <div><span className="metric-label">{t('Total tokens')}</span><strong>{formatTokenCount(totals.tokens, locale, totals.tokensComplete)}</strong><small>{t('Selected period')} · {t('Local records')}</small></div>
       </div>
-      {allocation?.equivalent20x?.source === 'previous' && <p role="status">{t('Using previous calibration; updating in the background ({count}/5 percentage points).', { count: allocation.equivalent20x.calibrationQuotaPercent })}</p>}
-      <p>{t('Includes hidden tasks · + partial data · -- unavailable')}</p>
+      <div className="calibration-strip">
+        {allocation?.equivalent20x?.source === 'previous' ? <><p role="status">{t('Using previous calibration; updating in the background ({count}/5 percentage points).', { count: allocation.equivalent20x.calibrationQuotaPercent })}</p><span className="calibration-segments" aria-hidden="true">{Array.from({ length: 5 }, (_, index) => <i key={index} className={index < Math.floor(allocation.equivalent20x!.calibrationQuotaPercent ?? 0) ? 'filled' : ''} />)}</span></> : <p>{t(reference ? 'Based on local records and observed quota changes.' : 'Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>}
+        {onShowBasis && <button type="button" className="basis-link" onClick={onShowBasis}>{t('Estimation basis')} <span aria-hidden="true">→</span></button>}
+      </div>
     </section>}
     {section !== 'summary' && <details className="insights-panel">
       <summary>{t('Daily trend and project ranking')}</summary>

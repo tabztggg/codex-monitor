@@ -1,107 +1,92 @@
 # GitHub 发布文案
 
-以下文案对应当前已实现版本。仓库名、账号、版本标签和公开范围以实际发布时为准；
-本文不表示仓库或 Release 已创建。
+本文件对应 **v0.4.0**，用于仓库介绍和本次 Release 正文；文件存在不表示发布已经完成。
+版本标签、提交与验证状态以发布时的核验结果为准。
 
-## 仓库展示名称
+## 仓库展示名称与简介
 
 **Codex Monitor — 任务与项目用量仪表盘**
 
-英文展示名称：**Codex Monitor — Usage & Project Dashboard**
+中文主页与 About 为主要入口，保留 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 的上游署名。
+本仓库是易用性扩展版本，不代表上游官方发布。
 
-保留上游项目名称和署名，并在描述中说明这是扩展版本。
-
-## About 简介
-
-英文，可直接填入 GitHub 仓库 Description：
+中文 About：
 
 ```text
-Local Codex usage dashboard with task/project statistics, archive support, trends, bilingual UI and estimated Pro 20x quota equivalents.
+Codex 本地用量仪表盘：支持任务与项目统计、归档分析、趋势、中英文界面，以及 Pro 20x / 5x / Plus 等效额度估算。
 ```
 
-中文备选：
+English About:
 
 ```text
-本地 Codex 用量仪表盘：任务与项目统计、归档分析、用量趋势、中英文界面，以及跨账号 Pro 20x 等效消耗估算。
+Local Codex usage dashboard with task and project statistics, archives, trends, bilingual UI, and estimated Pro 20x / 5x / Plus quota equivalents.
 ```
 
-建议 Topics：
+## Release 标题
 
-```text
-codex codex-monitor usage-tracking token-usage dashboard typescript react local-first
-```
+**v0.4.0 — 全新仪表盘与清晰的跨账号统计**
 
-## 项目介绍
+## Release 正文
 
-Codex Monitor 帮你看清 Codex 的用量花在哪里。
+### 简体中文
 
-它在本地读取 Codex 会话记录，将账号额度、任务消耗和项目汇总放进一个仪表盘。
-你可以按时间范围比较 Token 和估算费用，查看每日趋势、项目排行，
-也可以把本机记录中的跨账号消耗折算成 Pro 20x 周额度。
+本版本重新设计仪表盘，让当前账号额度、跨账号用量估算和任务明细更容易区分，并明确显示统计周期的起止时间。
 
-本版本基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor)
-扩展，重点完善归档读取范围、中英文界面、项目统计和日常查看体验。
-项目为非官方工具；任务额度和 20x 数据是本地估算，不是官方账单。
+#### 本次更新
 
-## Release 文案草稿
+- **新版界面**：按账号额度、跨账号指标卡、任务明细分区，增加顶部跳转导航，统一按钮、间距、数字层级和状态颜色；适配中英文及窄屏布局。
+- **账号额度卡**：集中显示额度所属账号、剩余额度、已用比例、周期经过比例，以及下一次重置的倒计时和具体时间；保留 CLI 账号来源和旧快照说明。
+- **跨账号范围更明确**：等效消耗卡和表头标注“跨账号”，注明本地记录、可超过 100% 及一份所选套餐周额度的参考口径。周期选择和 Pro 20x / Pro 5x / Plus 对比入口放在指标上方。
+- **周期起止不再混淆**：分别显示额度周期开始、结束／重置和数据截至时间，并标注时区。过期周期会提示等待新周期；缺失或无效的周期信息不会补造日期。
+- **任务与刷新更易查看**：任务名下显示所属项目，调整表头宽度与滚动布局；自动刷新间隔直接可见，重算及刷新详情收在更多操作中。新增校准状态条和直达“估算依据”的入口。
+- **仓库预览**：更新中英文主页的新版真实 UI 截图，使用虚构账号、项目与用量展示。
 
-标题：**任务与项目用量分析增强**
+#### 升级说明
 
-### 主要改进
+1. 停止 Monitor，备份本地配置及 `.cache/`，取得本版本源码后运行 `npm ci`、`npm run build`，再使用原启动方式启动。
+2. Windows 独立安装者还需把构建输出、匹配的依赖清单及生产依赖部署到安装目录；仅更新源码或重启不会更新已安装副本。详见 [Windows 独立安装说明](https://github.com/tabztggg/codex-monitor/blob/v0.4.0/docs/standalone-windows.md)。
+3. 本次不迁移统计数据或重置校准。保留 `.cache/quota-calibration.json`、额度归因账本和本地 `standalone.json`，浏览器中已有语言和视图偏好继续生效。
+4. 默认仍只读取最近 30 个归档主任务；隐藏归档只改变列表，点击“统计所有归档”才扩大读取范围。后台校准与刷新仍保留已有可用数据。
 
-- 增加中英文切换，新访问者默认英语，记住上次选择。
-- 默认实际只读取最近 30 个归档主任务，支持手动统计全部归档。
-- 增加项目分组与汇总行，支持折叠，默认关闭分组。
-- 增加 20x 等效消耗，汇总本机记录中的历史账号用量，允许超过 100%。
-- 增加今天、近 7 天、本周期、任务累计四种时间范围。
-- 增加范围合计、每日趋势和项目消耗前五名。
-- 支持所有列排序、列显隐和显示密度，并保存视图偏好。
-- 增加立即刷新、刷新倒计时，以及 30 秒、1 / 2 / 5 / 10 分钟刷新间隔。
-- 固定表头和任务列，收起较长的说明与估算依据，统一按钮与表格排版。
-- 改进重复 Token 事件处理，保留已观测的任务额度分配。
+本次不提供二进制安装包。费用与等效消耗仍为本地估算，不是官方账单；记录中的 Pro 账号继续按 20x 假设处理，套餐选项只调整对比参考。
 
-### 统计说明
+#### 验证
 
-一份 Pro 20x 周额度始终是 100% 的参考值。时间范围决定累计哪些记录，
-不会把长时间累计的数值重新归一化为 100%。
+- Windows：217 项测试通过、2 项平台相关测试跳过；TypeScript 检查与生产构建通过。
+- 已检查中英文、宽窄屏布局、周期切换、排序、项目分组、归档隐藏、套餐对比和数据保留。
+- 周期显示测试覆盖截至时间与重置时间的区别、时区、过期周期、缺失及无效周期。本地检查不代替发布提交的 GitHub Actions 结果，也不等于三平台全部桌面流程人工实测。
 
-费用、Token、20x、项目汇总、趋势和排行跟随所选范围。
-当前账号估算额度占比仅在本周期显示，其他时间范围显示 `--`。
-隐藏归档、搜索和行筛选只改变列表，不改变范围合计。
+### English
 
-默认只纳入最近 30 个归档；查看累计时间不等于读取所有归档。
-记录中的 Pro 账号按 20x 假设处理，目前没有账号倍率选择器。
+This release redesigns the dashboard to distinguish current-account quota, cross-account usage estimates, and task details, with explicit statistics-window boundaries.
 
-### 验证记录
+#### Changes
 
-2026-09-22 在 Windows + Node.js 24 环境完成的功能验证：
+- **Redesigned dashboard:** separate account quota, cross-account metric cards, and task details. Add section navigation and consistent controls, spacing, numeric hierarchy, and state colors, with bilingual and narrow-screen layouts.
+- **Account quota card:** bring the quota account, remaining allowance, used percentage, elapsed-period percentage, reset countdown, and exact reset time together. Keep CLI account-source details and retained-snapshot notices.
+- **Clearer cross-account scope:** label equivalent-usage cards and columns as across accounts, explain local-record scope and values above 100%, and show the selected plan's weekly reference. Place period controls and Pro 20x / Pro 5x / Plus comparison above the metrics.
+- **Explicit period boundaries:** distinguish quota start, end/reset, and data cutoff with time zones. Expired periods indicate that a new window is pending; missing or invalid windows do not invent dates.
+- **More readable tasks and refresh controls:** show project subtitles, improve column widths and scrolling, and expose refresh intervals directly. Keep rebuild and refresh details in More actions, with a calibration status strip and a shortcut to the estimation basis.
+- **Repository previews:** refresh the Chinese and English homepages with screenshots of the actual redesigned UI using fictional accounts, projects, and usage.
 
-- 129 项测试通过，2 项跳过；TypeScript 检查和生产构建通过。
-- 桌面浏览器实测范围、图表、分组、归档隐藏、列设置、密度、语言和刷新交互。
-- 尚未完成此扩展版本的 macOS / Linux 端到端实测及真实移动设备验证。
+#### Upgrading
 
-这是该次本地验证记录。发布若包含后续代码改动，应更新记录，
-不要把它当作新仓库 CI 已通过的证明。
+1. Stop Monitor and back up local configuration and `.cache/`. Obtain this version, run `npm ci` and `npm run build`, then use your existing launcher.
+2. Windows standalone installations must also receive the build output, matching manifests, and production dependencies; updating source or restarting alone does not update an installed copy. See [Windows standalone deployment](https://github.com/tabztggg/codex-monitor/blob/v0.4.0/docs/standalone-windows.md).
+3. This release does not migrate statistics or reset calibration. Preserve `.cache/quota-calibration.json`, the attribution ledger, and local `standalone.json`. Existing browser language and view preferences continue to apply.
+4. The default still reads only the 30 most recently archived principal tasks. Hiding archives affects the list; Calculate all archives explicitly expands the read scope. Background calibration and refresh continue to retain available data.
 
-## 后续讨论项——尚未实现
+No binary installer is attached. Costs and equivalent usage remain local estimates, not official billing. Recorded Pro accounts are still assumed to be 20x; the plan selector changes only the comparison reference.
 
-- 将时间选择调整为“日 / 周 / 月 / 所有”，并增加本月统计。
-- 增加 Pro 账号倍率选择或更明确的适用条件设置。
+#### Validation
 
-这些是待确认的改进方向，不属于本次已完成功能或发布承诺。
+- Windows: 217 tests passed, 2 platform-specific tests skipped; TypeScript checking and production build passed.
+- Checked Chinese/English, wide/narrow layouts, period selection, sorting, project grouping, archive visibility, plan comparisons, and retained data.
+- Period tests cover cutoff versus reset times, time zones, expired periods, and missing or invalid windows. Local checks do not replace GitHub Actions results for the release commit or establish manual verification of every desktop workflow on all platforms.
 
-## 发布说明与后续注意事项
+## 发布操作备注
 
-1. **上游许可**：本次准备时，工作副本及当前 Git 提交均没有项目许可证文件。
-   需要确认上游适用许可并保留声明；本次没有擅自添加 MIT / Apache 标识。
-2. **仓库目标**：上游为 `manuelsh/codex-monitor`，个人仓库为 `tabztggg/codex-monitor`。
-   仓库现已公开可见；公开可见不代表已为上游代码补充开源许可证。
-3. **Windows 启动**：默认监听本机，环境变量或被 Git 忽略的本地地址文件可覆盖。
-   本机防火墙辅助脚本不随仓库上传；已有局域网启动配置保留在本地。
-4. **拟上传内容**：缓存、日志、会话记录、真实凭据和个人截图不应随代码上传。
-   旧截图已被 Git 跟踪，不能只靠 `.gitignore` 排除；后续上传仍需检查文件和历史。
-5. **展示图片**：新 README 没有使用旧截图冒充新版。若需要演示图，
-   使用脱敏或示例数据制作，并明确示例数据身份。
-
-此文件是可复用的介绍及 Release 文案，不是 GitHub 发布回执。
-仓库、分支、提交和可见性以 GitHub 实际状态为准。
+- Release 正文使用上方“简体中文”和“English”两部分，保留升级说明和估算边界。
+- 首页截图须来自新版真实应用，使用虚构账号、项目和用量；不上传真实日志、缓存、配置、私人对话或账号截图。
+- 目标个人仓库为 `tabztggg/codex-monitor`；上游 `manuelsh/codex-monitor` 仅用于来源标注，不向上游推送。
+- 本次验证及截图应在推送前复核。发布后另行核对远端提交、版本标签、Release 正文和 CI 状态；本文件不是发布回执。

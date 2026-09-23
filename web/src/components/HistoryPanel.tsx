@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { HistoryJob, HistoryPeriod, HistoryUsageAllocation, MonitorSnapshot, TokenUsage } from '../../../shared/monitor';
+import type { HistoryAnalysis, HistoryJob, HistoryPeriod, HistoryUsageAllocation, MonitorSnapshot, TokenUsage } from '../../../shared/monitor';
 import { groupTasksByProject, projectTitle, relativeActivity, taskTitle, visibleTasks, type ProjectTaskGroup, type TaskFilter, type TaskSortColumn, type SortDirection } from '../presentation';
 import { useTaskHistory } from '../useTaskHistory';
 import { useI18n } from '../LanguageContext';
@@ -16,7 +16,7 @@ function readView() {
   catch { return parseTableView(null); }
 }
 
-export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }: { snapshot: MonitorSnapshot; nowMs: number; connectionLabel?: string }) {
+export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', overviewSlot }: { snapshot: MonitorSnapshot; nowMs: number; connectionLabel?: string; overviewSlot?: ReactNode }) {
   const i18n = useI18n();
   const { t, locale, language, dateTime, label } = i18n;
   const [interval, setInterval] = useState(() => {
@@ -54,6 +54,13 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
   const [direction, setDirection] = useState<SortDirection>(() => view.layout === 'full' && view.hidden.includes('usage') ? 'asc' : 'desc');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(new Set<string>());
+  const basisRef = useRef<HTMLDetailsElement>(null);
+  const showBasis = () => {
+    if (!basisRef.current) return;
+    basisRef.current.open = true;
+    basisRef.current.scrollIntoView({ block: 'start' });
+    basisRef.current.querySelector('summary')?.focus();
+  };
   const shown = (key: TaskSortColumn) => !view.hidden.includes(key);
   const simple = view.layout === 'simple';
   const visibleColumns = tableColumns(view);
@@ -66,7 +73,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
     }
   };
   const shortPeriod = t(activePeriod === 'quota' ? 'This period' : activePeriod === 'lifetime' ? 'Lifetime' : activePeriod === '7d' ? '7 days' : 'Today');
-  const subtitle = (key: TaskSortColumn) => key === 'usage' ? t('Account · Period') : key === 'equivalent20x' ? t('All accounts')
+  const subtitle = (key: TaskSortColumn) => key === 'usage' ? t('Current account · This period') : key === 'equivalent20x' ? `${t('Across accounts')} · ${shortPeriod}`
     : key === 'cost' ? `${shortPeriod} · USD` : key === 'tokens' ? shortPeriod : null;
   const headerDescription = (c: typeof columns[number]) => `${columnTitle(c)}${c.key === 'usage' ? ` · ${t('Current account · This period')}`
     : c.key === 'equivalent20x' ? ` · ${t('All accounts')} · ${t(periods[activePeriod])}` : c.key === 'cost' || c.key === 'tokens' ? ` · ${t(periods[activePeriod])}` : ''}`;
@@ -97,7 +104,8 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
     : key === 'tokens' ? formatTokenCount(g.totalTokens, locale, g.tokensIsComplete)
     : key === 'activity' ? <time dateTime={g.updatedAt} title={dateTime(g.updatedAt)}>{relativeActivity(g.updatedAt, nowMs, language)}</time> : null;
   const taskValue = (job: HistoryJob, key: TaskSortColumn) => {
-    if (key === 'task') return <button type="button" className="task-title-button" aria-expanded={expanded === job.id} aria-controls={`task-detail-${job.id}`} title={taskTitle(job, language)} onClick={e => { e.stopPropagation(); setExpanded(expanded === job.id ? null : job.id); }}>{taskTitle(job, language)}</button>;
+    const projectLabel = job.project?.missing ? t('Unknown project · {id}', { id: job.project.id.slice(0, 8) }) : job.project?.name ?? t('No project');
+    if (key === 'task') return <div className="task-identity"><span className={`task-icon ${job.archived ? 'archived' : activeIds.has(job.id) ? 'active' : ''}`} aria-hidden="true">{job.archived ? '▤' : '▥'}</span><div><button type="button" className="task-title-button" aria-expanded={expanded === job.id} aria-controls={`task-detail-${job.id}`} title={taskTitle(job, language)} onClick={e => { e.stopPropagation(); setExpanded(expanded === job.id ? null : job.id); }}>{taskTitle(job, language)}</button><small className="task-project" title={projectLabel}>{projectLabel}</small></div></div>;
     if (key === 'status') return <span className={`task-state ${activeIds.has(job.id) ? 'active' : ''}`} title={job.archivedAt ? t('Archived at {time}', { time: dateTime(job.archivedAt) }) : undefined}>{t(job.archived ? 'Archived' : activeIds.has(job.id) ? 'Active' : 'Finished')}</span>;
     if (key === 'usage') return <span className={job.estimatedUsagePercentSinceReset ? 'value-quota' : 'value-muted'} title={quotaTitle}>{formatUsagePercent(job.estimatedUsagePercentSinceReset, locale)}</span>;
     if (key === 'equivalent20x' && job.estimated20xPercent == null) return <span className="value-muted metric-pending">{t(allocation?.equivalent20x?.costPerPercentUsd ? 'Unavailable' : 'Waiting for calibration')}</span>;
@@ -106,37 +114,47 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
     if (key === 'tokens') return <span title={formatTokenUsageDetails(job.totalUsage, i18n)}>{formatTokenCount(job.totalUsage?.totalTokens ?? null, locale, job.periodMetrics?.tokensComplete !== false)}</span>;
     return <time dateTime={job.updatedAt} title={dateTime(job.updatedAt)}>{relativeActivity(job.updatedAt, nowMs, language)}</time>;
   };
-  return <section className={`surface history-panel density-${view.density} ${simple ? 'simple-table' : 'full-table'}`} aria-busy={loading}>
-    <div className="panel-header"><h3>{t('Tasks')} <span className="task-count">{displayed.length}</span></h3>
+  return <section className={`history-panel density-${view.density} ${simple ? 'simple-table' : 'full-table'}`} aria-busy={loading}>
+    <div className="dashboard-heading" id="usage-overview">
+      <div className="dashboard-title"><h2>{t('Usage overview')}</h2><p>{t('Current account quota and cross-account usage, clearly separated.')}</p></div>
       <div className="history-refresh-controls">
         <span className={`connection-status ${connectionLabel === 'live' && snapshot.server.initialized ? 'connected' : ''}`}>{connectionLabel === 'live' && snapshot.server.initialized ? t('Connected') : t('Connection: {status}', { status: label(connectionLabel) })}</span>
-        <span className={`history-refresh ${error ? 'stale' : ''}`} title={updatedAt ? t('Last successful refresh: {time}', { time: dateTime(new Date(updatedAt).toISOString()) }) : undefined}>{t(error ? 'Update failed · showing last data' : loading ? 'Refreshing…' : 'Auto-updating')}</span>
-        <button type="button" className="small-control" disabled={loading} onClick={refreshNow}>{t('Refresh now')}</button>
-        <details className="view-settings refresh-menu"><summary>{t('More actions')}</summary><div className="view-settings-content">
-          <label className="inline-field">{t('Task refresh interval')}<select aria-label={t('Task refresh interval')} value={interval} onChange={e => { const n = Number(e.target.value); if (refreshIntervals.includes(n)) setInterval(n); }}>{refreshIntervals.map(n => <option key={n} value={n}>{n === 30000 ? t('30 seconds') : n === 60000 ? t('1 minute') : t('{count} minutes', { count: n / 60000 })}</option>)}</select></label>
-        <span className="refresh-countdown">{loading ? t('Refreshing…') : nextRefreshAt ? t('Next refresh in {time}', { time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }) : t('Automatic refresh paused')}</span>
-<button type="button" className="small-control" disabled={loading} onClick={rebuildStatistics} title={t('Re-read logs in the current archive scope. Saved quota attribution is preserved.')}>{t('Rebuild statistics')}</button>
+        <label className="refresh-interval"><span className="sr-only">{t('Task refresh interval')}</span><select value={interval} onChange={e => { const n = Number(e.target.value); if (refreshIntervals.includes(n)) setInterval(n); }}>{refreshIntervals.map(n => <option key={n} value={n}>{n === 30000 ? t('30 seconds') : n === 60000 ? t('1 minute') : t('{count} minutes', { count: n / 60000 })}</option>)}</select></label>
+        <button type="button" className="small-control refresh-button" disabled={loading} onClick={refreshNow}><span aria-hidden="true">↻</span> {t(loading ? 'Refreshing…' : 'Refresh now')}</button>
+        <details className="view-settings refresh-menu"><summary aria-label={t('More actions')} title={t('More actions')}>···</summary><div className="view-settings-content">
+          <span className={`history-refresh ${error ? 'stale' : ''}`}>{t(error ? 'Update failed · showing last data' : loading ? 'Refreshing…' : 'Auto-updating')}</span>
+          {updatedAt && <span className="muted-note">{t('Last successful refresh: {time}', { time: dateTime(new Date(updatedAt).toISOString()) })}</span>}
+          <span className="refresh-countdown">{loading ? t('Refreshing…') : nextRefreshAt ? t('Next refresh in {time}', { time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }) : t('Automatic refresh paused')}</span>
+          <button type="button" className="small-control" disabled={loading} onClick={rebuildStatistics} title={t('Re-read logs in the current archive scope. Saved quota attribution is preserved.')}>{t('Rebuild statistics')}</button>
         </div></details>
       </div>
     </div>
-    {snapshot.codexUsage.stale && snapshot.codexUsage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(snapshot.codexUsage.updatedAt) })}</p>}
-    <div className="statistics-controls">
-      <div><label className="inline-field">{t('Statistics time range')}<select aria-describedby="statistics-range-help" value={period} onChange={e => setPeriod(e.target.value as HistoryPeriod)}>{Object.entries(periods).map(([key, text]) => <option value={key} key={key}>{t(text)}</option>)}</select></label>
-        <small>{t('Equivalent usage · Cost · Tokens')}</small><details className="control-help"><summary>{t('Scope help')}</summary><p id="statistics-range-help">{t('Applies to equivalent usage, estimated cost, tokens, summaries and trends. Account quota attribution is only available for the current quota period.')}</p></details></div>
-      <div><label className="inline-field">{t('Equivalent usage comparison')}<select aria-describedby="comparison-plan-help" value={comparisonPlan} onChange={e => { if (isComparisonPlan(e.target.value)) setComparisonPlan(e.target.value); }}>{Object.entries(comparisonPlans).map(([key, plan]) => <option value={key} key={key}>{plan.label}</option>)}</select></label>
-        <small>{t('One {plan} week = 100%', { plan: planLabel })}</small><details className="control-help"><summary>{t('Comparison help')}</summary><p id="comparison-plan-help">{t('Changes only equivalent usage: task and project rows, summary and trend. One {plan} weekly allowance = 100%.', { plan: planLabel })}</p></details></div>
-    </div>
+    {overviewSlot}
+    <section className="cross-account-section" aria-labelledby="cross-account-title">
+      <div className="statistics-heading">
+        <h2 id="cross-account-title">{t('Cross-account usage estimate')} <span className="scope-badge">{t('Local records')}</span></h2>
+        <div className="statistics-controls">
+          <div className="period-control"><span id="statistics-range-label">{t('Statistics time range')}</span><div className="period-buttons" role="group" aria-labelledby="statistics-range-label" aria-describedby="statistics-range-help">{(['today', '7d', 'quota', 'lifetime'] as const).map(key => <button type="button" key={key} aria-pressed={period === key} onClick={() => setPeriod(key)}>{t(key === 'quota' ? 'This period' : key === 'lifetime' ? 'Lifetime' : key === '7d' ? '7 days' : 'Today')}</button>)}</div></div>
+          <label className="inline-field comparison-control">{t('Equivalent usage comparison')}<select aria-describedby="comparison-plan-help" value={comparisonPlan} onChange={e => { if (isComparisonPlan(e.target.value)) setComparisonPlan(e.target.value); }}>{Object.entries(comparisonPlans).map(([key, plan]) => <option value={key} key={key}>{plan.label}</option>)}</select></label>
+        </div>
+      </div>
+      <p className="statistics-applies">{t('Equivalent usage · Cost · Tokens')}</p>
+      {error && <p className="history-error" role="alert">{t('Could not refresh tasks: {error}', { error: i18n.error(error) })}</p>}
+      {period !== activePeriod && <p className="muted-note" role="status">{t('Loading the selected period. Previous results remain labeled with their original period.')}</p>}
+      <HistoryPeriodScope analysis={analysis ?? null} allocation={allocation} nowMs={nowMs} />
+      <TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="summary" onShowBasis={showBasis} />
+    </section>
+    <section className="task-list-section" id="task-details" aria-labelledby="task-list-title">
+      <div className="task-section-heading"><h2 id="task-list-title">{t('Task details')} <span className="task-count">{displayed.length}</span></h2>
     <div className="archive-scope-controls"><span role="status">{loading && requestedMode === 'all' ? t('Calculating all archives… Keeping the previous results until complete.') : t(archives.mode === 'all' ? 'Statistics include all {count} archived tasks.' : 'Statistics include only the {count} most recently archived tasks.', { count: archives.included })}</span>
       <div className="task-filters"><button type="button" disabled={loading} onClick={() => loadArchives(error && requestedMode === 'all' ? 'all' : archives.mode === 'all' ? 'recent' : 'all')}>{t(error && requestedMode === 'all' ? 'Retry all archive statistics' : archives.mode === 'all' ? 'Only calculate the latest 30 archives' : 'Calculate all archives')}</button></div>
       {loading && requestedMode === 'all' && <button type="button" className="small-control" onClick={() => loadArchives('recent')}>{t('Return to the latest 30 archives')}</button>}
     </div>
-    {error && <p className="history-error" role="alert">{t('Could not refresh tasks: {error}', { error: i18n.error(error) })}</p>}
-    {period !== activePeriod && <p className="muted-note" role="status">{t('Loading the selected period. Previous results remain labeled with their original period.')}</p>}
-    <div className="period-scope"><strong>{t(periods[activePeriod])}</strong><span>{analysis?.startedAt ? dateTime(analysis.startedAt) : activePeriod === 'lifetime' ? t('All available history') : t('Period unavailable')} – {analysis ? dateTime(analysis.endedAt) : '--'}</span></div>
-    <TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="summary" />
+      </div>
+      <div className="task-data-panel">
     <div className="task-toolbar">
       <input aria-label={t('Search tasks')} placeholder={t('Search tasks or projects…')} value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="task-filters" aria-label={t('Filter tasks')}>{([['active', 'Active'], ['today', 'Today'], ['all', 'All']] as const).map(([v, text]) => <button key={v} type="button" aria-pressed={filter === v} onClick={() => setFilter(v)}>{t(text)}</button>)}</div>
+      <div className="task-filters" aria-label={t('Filter tasks')}>{([['all', 'All'], ['active', 'Active'], ['today', 'Today']] as const).map(([v, text]) => <button key={v} type="button" aria-pressed={filter === v} onClick={() => setFilter(v)}>{t(text)}</button>)}</div>
       <div className="task-filters"><button type="button" aria-pressed={hideArchived} title={t('Only hide archived rows; the selected archive scope still counts toward usage.')} onClick={() => setHideArchived(v => !v)}>{t(hideArchived ? 'Show archived tasks' : 'Hide archived tasks')}</button></div>
       <div className="task-filters"><button type="button" aria-pressed={groupByProject} onClick={() => setGroupByProject(v => !v)}>{t('Group by project')}</button></div>
       <label className="inline-field table-view-choice">{t('Table view')}<select value={view.layout} onChange={e => changeLayout(e.target.value === 'simple' ? 'simple' : 'full')}><option value="full">{t('Full table')}</option><option value="simple">{t('Simple view')}</option></select></label>
@@ -152,7 +170,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
       </div></details>
     </div>
     {!simple && <p className="full-table-hint">{t('Scroll horizontally for more columns, or choose Simple view.')}</p>}
-    <div className="task-table-scroll" tabIndex={0} aria-label={t('Scrollable task table')}><table className="task-table" style={simple ? undefined : { minWidth: visibleColumns.reduce((sum, c) => sum + c.width, 0) }}>
+    <div className="task-table-scroll" tabIndex={0} aria-label={t('Scrollable task table')}><table className="task-table" style={simple ? undefined : { minWidth: `calc(var(--task-name-width, ${columns[0].width}px) + ${visibleColumns.filter(c => c.key !== 'task').reduce((sum, c) => sum + c.width, 0)}px)` }}>
       {!simple && <colgroup>{visibleColumns.map(c => <col key={c.key} style={c.key === 'task' ? undefined : { width: c.width }} />)}</colgroup>}
       <thead><tr>{visibleColumns.map(c => <th key={c.key} scope="col" title={headerDescription(c)} className={`metric-${c.key} ${c.numeric ? 'numeric' : ''} ${c.key === 'task' ? 'sticky-name' : ''}`} aria-sort={sort === c.key ? direction === 'asc' ? 'ascending' : 'descending' : undefined}>
         <button type="button" className="table-sort-button" title={t('Sort {column}: {direction}', { column: columnTitle(c), direction: t(nextDirection(c.key) === 'asc' ? 'Ascending' : 'Descending') })} onClick={() => { setDirection(nextDirection(c.key)); setSort(c.key); }}>{columnHeading(c)} <span className="sort-indicator" aria-hidden="true">{sort === c.key ? direction === 'asc' ? '↑' : '↓' : '↕'}</span></button>{subtitle(c.key) && <small>{subtitle(c.key)}</small>}
@@ -172,8 +190,13 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
       </tbody>)}
     </table></div>
     {!displayed.length && <div className="task-empty">{t(!updatedAt && !error ? 'Loading tasks…' : 'No matching tasks.')}</div>}
-    <TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="trend" />
-    <details className="metric-explanation"><summary>{t('Statistics help and estimation basis')}</summary>
+    <p className="table-footnote">{t('Includes hidden tasks · + partial data · -- unavailable')}</p>
+      </div>
+    </section>
+    <div id="task-trends"><TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="trend" /></div>
+    <details className="metric-explanation" id="estimation-basis" ref={basisRef}><summary>{t('Statistics help and estimation basis')}</summary>
+      <p id="statistics-range-help">{t('Applies to equivalent usage, estimated cost, tokens, summaries and trends. Account quota attribution is only available for the current quota period.')}</p>
+      <p id="comparison-plan-help">{t('Changes only equivalent usage: task and project rows, summary and trend. One {plan} weekly allowance = 100%.', { plan: planLabel })}</p>
       <p>{t('Equivalent usage compares all locally recorded accounts with one {plan} weekly allowance in the selected period. Values may exceed 100%.', { plan: planLabel })}</p>
       <p>{t('All recorded Pro accounts are treated as 20x, as confirmed by the owner. The conversion uses observed weekly quota changes and API-equivalent token costs; it is not an official allowance or bill. Missing logs, other devices, tools and unpriced models can affect the estimate.')}</p>
       {allocation?.observedSince && <p>{t('Attribution observed since {time} · Unattributed quota: {percent}', { time: dateTime(allocation.observedSince), percent: formatUsagePercent(allocation.unattributedPercent ?? null, locale) })}</p>}
@@ -192,6 +215,36 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting' }
       <p>{t('Project and scope totals include hidden rows. Click column headings to sort. + means incomplete data; -- means unavailable.')}</p>
     </details>
   </section>;
+}
+
+export function HistoryPeriodScope({ analysis, allocation, nowMs }: {
+  analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; nowMs: number;
+}) {
+  const { t, locale, windowLabel } = useI18n();
+  const period = analysis?.period ?? 'quota';
+  let timeZone = analysis?.timeZone || 'UTC';
+  try { new Intl.DateTimeFormat(locale, { timeZone }); }
+  catch { timeZone = 'UTC'; }
+  const formatter = new Intl.DateTimeFormat(locale, { timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZoneName: 'shortOffset' });
+  const validTime = (value: string | null | undefined): value is string => Boolean(value && Number.isFinite(Date.parse(value)));
+  const time = (value: string | null | undefined) => validTime(value)
+    ? <time dateTime={value}>{formatter.format(new Date(value)).replace('GMT', 'UTC')}</time> : <span>{t('Unavailable')}</span>;
+  const start = allocation?.windowStartedAt;
+  const end = allocation?.resetsAt;
+  const hasWindow = validTime(start) && validTime(end) && Date.parse(start) < Date.parse(end);
+  return <div className="period-scope">
+    <div className="period-scope-heading"><strong>{t(periods[period])}{period === 'quota' && hasWindow && allocation?.windowLabel ? ` · ${windowLabel(allocation.windowLabel)}` : ''}</strong><span>{t('Time zone: {zone}', { zone: timeZone })}</span></div>
+    <dl className="period-scope-times">
+      {period === 'quota' ? <>
+        <div><dt>{t('Starts')}</dt><dd>{hasWindow ? time(start) : t('Period unavailable')}</dd></div>
+        <div><dt>{t('Ends / resets')}</dt><dd>{hasWindow ? time(end) : t('Period unavailable')}</dd></div>
+      </> : <div><dt>{t('Statistics start')}</dt><dd>{period === 'lifetime' ? t('All available history') : time(analysis?.startedAt)}</dd></div>}
+      <div><dt>{t('Data through')}</dt><dd>{time(analysis?.endedAt)}</dd></div>
+    </dl>
+    {period === 'quota' && <p>{t('The current account’s quota window defines this range; equivalent usage combines local records across accounts.')}</p>}
+    {period === 'quota' && hasWindow && Date.parse(end!) <= nowMs && <p role="status">{t('This quota period has ended. Waiting for the renewed quota window.')}</p>}
+  </div>;
 }
 
 function formatTokenUsageDetails(usage: TokenUsage | null, { t, locale }: I18n): string | undefined {

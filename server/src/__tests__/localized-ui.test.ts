@@ -2,12 +2,14 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HistoryJob, MonitorSnapshot, ThreadNode, TurnSummary, MonitorItem } from '../../../shared/monitor';
+import type { HistoryAnalysis, HistoryJob, HistoryUsageAllocation, MonitorSnapshot, ThreadNode, TurnSummary, MonitorItem } from '../../../shared/monitor';
 import { createI18n, type Language } from '../../../web/src/localization';
 import { DashboardPage, RunDetailPage } from '../../../web/src/App';
 import { ThreadTree } from '../../../web/src/components/ThreadTree';
 import { TranscriptPanel } from '../../../web/src/components/TranscriptPanel';
 import { TurnInspector } from '../../../web/src/components/TurnInspector';
+import { HistoryPeriodScope } from '../../../web/src/components/HistoryPanel';
+import { TaskInsights } from '../../../web/src/components/TaskInsights';
 
 const testState = vi.hoisted(() => ({ language: 'zh' as Language, loading: false, archiveMode: 'recent' as 'recent' | 'all', error: null as string | null }));
 vi.mock('../../../web/src/LanguageContext', () => ({
@@ -157,5 +159,122 @@ describe('full interface language rendering', () => {
     expect(render()).toContain('返回仪表盘');
     testState.language = 'en';
     expect(render()).toContain('Back to dashboard');
+  });
+});
+
+describe('visible statistics account and period scope', () => {
+  const startedAt = '2026-09-23T01:50:54.000Z';
+  const endedAt = '2026-09-23T04:18:10.000Z';
+  const resetsAt = '2026-09-30T01:50:54.000Z';
+  const nowMs = Date.parse(endedAt);
+  const analysis: HistoryAnalysis = {
+    period: 'quota', startedAt, endedAt, timeZone: 'Asia/Hong_Kong',
+    days: [], unpricedTokens: 0, untimedTokens: 0
+  };
+  // Period bounds exist before quota changes have been attributed to tasks.
+  const allocation: HistoryUsageAllocation = {
+    status: 'unavailable', windowStartedAt: startedAt, resetsAt,
+    usedPercent: 18, limitName: 'Overall Codex', windowLabel: 'Weekly', basis: null
+  };
+  const renderScope = (periodAnalysis: HistoryAnalysis | null = analysis,
+    periodAllocation: HistoryUsageAllocation | null = allocation, time = nowMs) =>
+    renderToStaticMarkup(createElement(HistoryPeriodScope, {
+      analysis: periodAnalysis, allocation: periodAllocation, nowMs: time
+    }));
+
+  beforeEach(() => { testState.language = 'en'; });
+
+  it('labels the equivalent summary as cross-account local records in both languages', () => {
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const html = renderToStaticMarkup(createElement(TaskInsights, {
+        jobs: [job], analysis, allocation, periodLabel: 'period', comparisonPlan: 'pro5x', section: 'summary'
+      }));
+      expect(html).toContain(language === 'en' ? 'Pro 5x equivalent usage · Across accounts' : 'Pro 5x 等效消耗 · 跨账号');
+      expect(html).toContain(language === 'en' ? 'Local records' : '本地记录');
+    }
+  });
+
+  it('shows actual quota start and reset separately from the data cutoff even without attribution', () => {
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const html = renderScope();
+      expect(html).toContain(startedAt);
+      expect(html).toContain(resetsAt);
+      expect(html).toContain(endedAt);
+      expect(html).toContain(language === 'en' ? 'Starts' : '开始');
+      expect(html).toContain(language === 'en' ? 'Ends / resets' : '结束／重置');
+      expect(html).toContain(language === 'en' ? 'Data through' : '数据截至');
+      const endLabel = language === 'en' ? 'Ends / resets' : '结束／重置';
+      const cutoffLabel = language === 'en' ? 'Data through' : '数据截至';
+      expect(html).toContain(`<dt>${endLabel}</dt><dd><time dateTime="${resetsAt}"`);
+      expect(html).toContain(`<dt>${cutoffLabel}</dt><dd><time dateTime="${endedAt}"`);
+      expect(html).toContain(language === 'en' ? 'Time zone: Asia/Hong_Kong' : '时区：Asia/Hong_Kong');
+      expect(html).toContain('09:50:54');
+      expect(html).toContain('12:18:10');
+      expect(html).toContain('UTC+8');
+      expect(html).not.toContain(language === 'en' ? 'Period unavailable' : '周期暂不可用');
+    }
+  });
+
+  it('does not attach quota reset bounds to calendar-day or lifetime statistics', () => {
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      for (const period of ['today', '7d', 'lifetime'] as const) {
+        const html = renderScope({ ...analysis, period, startedAt: period === 'lifetime' ? null : startedAt });
+        expect(html).toContain(endedAt);
+        expect(html).not.toContain(resetsAt);
+        expect(html).not.toContain(language === 'en' ? 'Ends / resets' : '结束／重置');
+        if (period === 'lifetime') expect(html).toContain(language === 'en' ? 'All available history' : '全部可用历史');
+      }
+    }
+  });
+
+  it('does not invent quota dates from data cutoff when bounds are missing, invalid or reversed', () => {
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const invalidWindows = [null,
+        { ...allocation, windowStartedAt: null },
+        { ...allocation, resetsAt: null },
+        { ...allocation, windowStartedAt: 'invalid' },
+        { ...allocation, resetsAt: 'invalid' },
+        { ...allocation, windowStartedAt: resetsAt, resetsAt: startedAt },
+        { ...allocation, resetsAt: startedAt }
+      ];
+      for (const window of invalidWindows) {
+        const html = renderScope(analysis, window);
+        expect(html).toContain(language === 'en' ? 'Period unavailable' : '周期暂不可用');
+        expect(html).toContain(endedAt);
+        expect(html).not.toContain('Invalid Date');
+      }
+      expect(renderScope(null, null)).toContain(language === 'en' ? 'Period unavailable' : '周期暂不可用');
+    }
+  });
+
+  it('identifies an expired retained quota window without silently moving its dates', () => {
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const html = renderScope(analysis, allocation, Date.parse(resetsAt));
+      expect(html).toContain(startedAt);
+      expect(html).toContain(resetsAt);
+      expect(html).toContain(createI18n(language).t('This quota period has ended. Waiting for the renewed quota window.'));
+    }
+  });
+
+  it('falls back to UTC for an invalid server time zone instead of breaking the dashboard', () => {
+    const html = renderScope({ ...analysis, timeZone: 'Unknown/Invalid' });
+    expect(html).toContain('Time zone: UTC');
+    expect(html).toContain('01:50:54');
+    expect(html).toContain('04:18:10');
+    expect(html).not.toContain('Unknown/Invalid');
+  });
+
+  it('preserves the real short window when the account has no weekly limit', () => {
+    const shortEnd = '2026-09-23T06:50:54.000Z';
+    const html = renderScope(analysis, { ...allocation, resetsAt: shortEnd, windowLabel: '5h' });
+    expect(html).toContain(shortEnd);
+    expect(html).not.toContain(resetsAt);
+    expect(html).not.toContain('Weekly');
+    expect(html).not.toContain('Period unavailable');
   });
 });

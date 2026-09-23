@@ -4,8 +4,8 @@
 
 [简体中文](README.md) | English
 
-**Latest: [v0.3.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.3.0)** ·
-Persistent calibration, account-aware recovery, and clearer table controls · [Changelog and upgrade notes](CHANGELOG.md)
+**Latest: [v0.4.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.0)** ·
+Redesigned dashboard, clearer cross-account scope and period boundaries · [Changelog and upgrade notes](CHANGELOG.md)
 
 A local dashboard for account quota, recorded tokens, estimated costs, and live
 activity. This customized version builds on
@@ -15,16 +15,16 @@ It is an unofficial community project, not an OpenAI product or billing system.
 
 ## Screenshots
 
-These v0.2.0 screenshots use the real application with fictional sample projects
-and usage. No private account or conversation data is shown. The Activity column
-is hidden using View options; v0.3.0 refines the layout and adds the controls below.
+These v0.4.0 screenshots use the actual application with fictional accounts,
+projects, tasks, and usage. No private data is shown. The full table includes all
+seven columns; optional project grouping is off by default.
 
 ### Dashboard at a glance
 
-Track account quota, compare task usage, and see cross-account 20x equivalents
-alongside estimated cost and tokens.
+Separate current-account quota, cross-account estimates, and task details, with
+explicit period start, end/reset, and data-cutoff labels.
 
-![Codex Monitor English dashboard showing account quota, task statistics and 20x equivalent usage](assets/screenshots/overview-en.jpg)
+![Codex Monitor v0.4.0 English dashboard with account quota, cross-account estimates, period boundaries and task details](assets/screenshots/overview-en.jpg)
 
 ### Project totals
 
@@ -155,21 +155,31 @@ and its limits.
 
 ## Dashboard controls
 
-Statistics settings and scope totals sit above task filters and the table; trends
-and detailed explanations are below. Full table is the default at every width,
+The dashboard separates current-account quota, cross-account estimates, and task
+details. Header navigation jumps to the overview, tasks, and trends. The account
+card shows its source, remaining quota, and reset time. Range and comparison
+controls sit beside the cross-account heading, with separate metric cards below.
+Archive scope controls sit beside the task heading; each task shows its project.
+Trends and detailed explanations are below the table. Full table is the default at every width,
 with horizontal scrolling when necessary. Choose Simple view to show task, one
 selected metric, and status; expanding a task reveals its remaining metrics.
 Only Full table offers column-visibility controls. The view and simple metric are
-remembered. More actions contains refresh intervals and Rebuild statistics.
+remembered. The refresh interval is visible at the top right; More actions contains
+refresh status and Rebuild statistics.
 Zero quota values are muted; pace differences within five percentage points use
 a neutral display.
 
 ## Time ranges and archives
 
 The current quota period is selected by default. Today and Last 7 days follow
-calendar days on the **monitor computer**, whose timezone is shown in the
-estimation panel. Last 7 days includes today and the previous six days. Task
+calendar days on the **monitor computer**. Its timezone is shown beside the range.
+Last 7 days includes today and the previous six days. Task
 lifetime uses all available history **within the selected archive scope**.
+
+The equivalent-usage total is explicitly labeled **Across accounts**, covering
+local records in the selected scope. The current account's quota window defines
+the current-period range. Its start, end/reset, and data cutoff are shown
+separately; the data cutoff is the statistics timestamp, not the period end.
 
 Cost, tokens, 20x equivalents, project totals, trends, and rankings follow the
 selected time range. Previous results keep their original label while the next

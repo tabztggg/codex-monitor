@@ -5,6 +5,62 @@ based on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). Th
 
 这里的版本号用于基于上游项目改进的 tabztggg 版本，不代表上游项目的发布版本。
 
+## v0.3.0 — 2026-09-23
+
+### 简体中文
+
+本版本改进用量数据的连续显示、跨账号校准和表格易用性，并加入 Windows 独立运行脚本与说明。
+
+#### 本次更新
+
+- **账号与数据保留**：显示总体额度所属账号和更新时间。接口短暂失败或 CLI 断连时继续显示明确标注的旧快照与本周期统计；旧额度不参与新的消耗分摊，确认换号或退出后不混用前一账号额度。
+- **校准持续可用**：有效等效消耗校准跨周期和重启保留，后台累积至少 5 个百分点的有效新样本后更新；修复较早周起点账号无法更新、缩小归档范围改变基准以及保存失败不重试的问题。
+- **套餐对比**：支持 Pro 20x、Pro 5x、Plus 标称周额度对比，联动任务、项目、范围合计与趋势，并记住选择。时间范围明确标明影响的指标。
+- **表格与排版**：默认完整表格，提供可记忆的精简视图与指标选择；隐藏列只在完整视图出现。缩短英文表头，重排统计设置、合计、筛选、任务表与说明，改进零值和校准提示。
+- **启动与独立运行**：额度窗口就绪后立即刷新任务数据。Windows 已配置安装可由登录计划任务独立运行，关闭 Codex GUI 不影响 Monitor；支持进程组清理、有限重试及启停管理。
+
+#### 升级说明
+
+1. 停止 Monitor，备份本地配置及 `.cache/`，取得本版本源码后运行 `npm ci`、`npm run build`。
+2. 从源码运行者使用原启动方式。独立安装者还需把新 `dist`、匹配的依赖清单和生产依赖部署到安装目录；仅 `git pull` 或重启不会更新已安装副本。详见 [Windows 独立安装说明](docs/standalone-windows.md)。
+3. 保留 `.cache/quota-calibration.json`、额度归因账本和本地 `standalone.json`。旧校准文件继续兼容；保存失败会在后续正常刷新重试。
+4. 默认仍只读取最近 30 个归档主任务，已观察的校准样本单独保留最多 30 天；这不会触发额外的全归档扫描。
+
+独立运行脚本不是通用一键安装器，需要预先配置安装目录和 Windows 登录计划任务。本次不提供二进制安装包。
+记录中的 Pro 账号仍按 20x 处理，对比套餐只改变标称参考比例；费用和额度均为本地估算，不是官方账单。
+
+#### 验证
+
+- Windows：210 项测试通过、2 项平台相关测试跳过；类型检查与生产构建通过。
+- 中英文、宽窄屏、列开关、视图记忆与实际重启已验证。GitHub Actions 按仓库配置检查 Windows、macOS、Linux；CI 不等于三平台桌面流程全部人工实测。
+
+### English
+
+This release improves continuity of usage data, calibration across accounts, and table usability, and adds Windows standalone runtime helpers and documentation.
+
+#### Changes
+
+- **Account identity and retained data:** show the quota account and update time. Temporary read failures or CLI disconnects keep an explicitly labeled previous snapshot and current-period metrics. Stale quota does not generate new attribution, and confirmed account changes or logout never inherit another account's quota.
+- **Persistent calibration:** keep valid equivalent-usage calibration through resets and restarts while collecting replacement samples. Update after at least five valid percentage points. Fix earlier account-window dates blocking updates, reduced archive scope changing calibration, and failed saves never retrying.
+- **Plan comparisons:** select nominal Pro 20x, Pro 5x, or Plus weekly references across tasks, projects, totals, and trends. The selection is remembered; time-range controls explain which metrics they affect.
+- **Table and layout:** Full table is the default; explicit Simple view and its metric are remembered. Column visibility controls appear only in Full table. Shorter English headers, clearer section order, and improved zero/calibration states make statistics easier to scan.
+- **Startup and standalone runtime:** refresh task statistics when the initial quota window becomes ready. Configured Windows installations run independently through a logon task, with process-group cleanup, bounded retries, and start/stop management.
+
+#### Upgrading
+
+1. Stop Monitor and back up local configuration and `.cache/`. Obtain this version, then run `npm ci` and `npm run build`.
+2. Source users can use their existing launcher. Standalone installations must also receive the new `dist`, matching manifests and production dependencies; pulling or restarting alone does not update the installed copy. See [Windows standalone deployment](docs/standalone-windows.md).
+3. Preserve `.cache/quota-calibration.json`, the attribution ledger, and local `standalone.json`. Existing calibration files remain compatible; failed persistence retries during later refreshes.
+4. The default still reads only the 30 most recently archived principal tasks. Already-observed calibration metadata is retained separately for up to 30 days, without an extra full-archive scan.
+
+The Windows helpers require an already configured installation and logon task; they are not a universal one-click installer. No binary installer is attached.
+Recorded Pro accounts are still assumed to be 20x. Plan selection changes the nominal comparison reference only. Costs and quotas remain local estimates, not official billing.
+
+#### Validation
+
+- Windows: 210 tests passed, 2 platform-specific tests skipped; type checking and production build passed.
+- Chinese/English, wide/narrow layouts, column controls, saved views, and actual restart behavior were checked. Repository CI covers Windows, macOS, and Linux; this is not manual verification of every desktop workflow on all platforms.
+
 ## v0.2.0 — 2026-09-22
 
 ### 简体中文

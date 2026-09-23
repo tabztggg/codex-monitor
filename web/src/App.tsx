@@ -197,7 +197,7 @@ function CodexUsageCard({
   usage: CodexUsageSnapshot;
   nowMs: number;
 }) {
-  const { t, windowLabel, error: errorText } = useI18n();
+  const { t, windowLabel, dateTime, error: errorText } = useI18n();
   const window = overallUsageWindow(usage);
   const pace = window ? quotaPace(window, nowMs) : null;
   const unavailable = usage.status !== "available" || !window;
@@ -206,10 +206,17 @@ function CodexUsageCard({
   const remaining = unavailable || expired ? null : window.remainingPercent;
   const difference = unavailable ? null : pace?.difference ?? null;
   const elapsed = unavailable ? null : pace?.elapsed ?? null;
-  const heading = difference === null ? "Pace unavailable" : difference > 1 ? "Usage is ahead of elapsed time" : difference < -1 ? "Usage is below the proportional pace" : "Usage is in line with elapsed time";
+  const heading = difference === null ? "Pace unavailable" : difference > 5 ? "Usage is ahead of elapsed time" : difference < -5 ? "Usage is below the proportional pace" : "Usage is in line with elapsed time";
   return (
     <section className="surface global-quota" aria-label={t('Overall Codex usage')}>
       <div className="global-quota-heading">{t('Overall Codex usage')}{window ? ` · ${windowLabel(window.label)}` : ""}</div>
+      <div className="quota-account" aria-label={t('Usage account')}>
+        <strong>{t(usage.stale ? 'Last confirmed account' : 'Usage account')}: {usage.account?.email ?? t(usage.account?.type === 'apiKey' ? 'API key account' : 'Unknown account')}</strong>
+        {usage.account?.planType && <span>{usage.account.planType}</span>}
+        <details className="account-source"><summary>{t('CLI account · Details')}</summary><small>{t('Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.')}</small>
+        {usage.updatedAt && <small>{t('Updated at {time}', { time: dateTime(usage.updatedAt) })}</small>}</details>
+      </div>
+      {usage.stale && usage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</p>}
       {unavailable ? <p className="usage-message">{usage.status === "loading" ? t("Loading overall Codex usage…") : usage.error ? `${t('Overall Codex quota is unavailable.')} ${errorText(usage.error)}` : t("Overall Codex quota is unavailable.")}</p> : (
         <div className="global-quota-body">
           <div>
@@ -220,8 +227,8 @@ function CodexUsageCard({
             <h2>{t(heading)}</h2>
             <div className="quota-compare"><span>{t('Quota used')}</span><div className="usage-meter" role="img" aria-label={t('{percent} quota used', { percent: formatPercent(used) })}><span style={{ width: `${clampMeterPercent(used)}%` }} /></div><b>{formatPercent(used)}</b></div>
             <div className="quota-compare"><span>{t('Time elapsed')}</span><div className="usage-meter elapsed" role="img" aria-label={t('{percent} of period elapsed', { percent: formatPercent(elapsed) })}><span style={{ width: `${clampMeterPercent(elapsed)}%` }} /></div><b>{formatPercent(elapsed)}</b></div>
-            <p className={`pace-note ${difference !== null && difference > 1 ? "fast" : ""}`}>
-              {expired ? t("Codex has not reported the new period yet.") : difference === null ? t("The period or usage data is incomplete.") : Math.abs(difference) <= 1 ? t("Consumption follows the proportional pace of the period.") : t(difference > 0 ? '{count} percentage points above the proportional pace.' : '{count} percentage points below the proportional pace.', { count: Math.round(Math.abs(difference)) })}
+            <p className={`pace-note ${difference !== null && difference > 5 ? "fast" : ""}`}>
+              {expired ? t("Codex has not reported the new period yet.") : difference === null ? t("The period or usage data is incomplete.") : Math.abs(difference) <= 5 ? t("Consumption follows the proportional pace of the period.") : t(difference > 0 ? '{count} percentage points above the proportional pace.' : '{count} percentage points below the proportional pace.', { count: Math.round(Math.abs(difference)) })}
             </p>
           </div>
         </div>

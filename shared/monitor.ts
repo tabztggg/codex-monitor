@@ -247,6 +247,9 @@ export interface CodexUsageLimit {
 }
 
 export interface CodexUsageSnapshot {
+  /** Last confirmed account snapshot retained during a failed refresh. */
+  stale?: boolean;
+  account?: { type: string; email: string | null; planType: string | null } | null;
   status: "loading" | "available" | "unavailable" | "error";
   updatedAt: string | null;
   error: string | null;
@@ -305,6 +308,9 @@ export interface HistoryUsageAllocation {
   equivalent20x?: {
     costPerPercentUsd: number | null;
     calibrationQuotaPercent: number;
+    source?: 'current' | 'previous' | 'unavailable';
+    calibratedAt?: string | null;
+    referenceQuotaPercent?: number;
   };
   observedSince?: string | null;
   unattributedPercent?: number | null;

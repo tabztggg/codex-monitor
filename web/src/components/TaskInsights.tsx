@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import type { HistoryAnalysis, HistoryJob, HistoryUsageAllocation } from '../../../shared/monitor';
 import { groupTasksByProject, projectTitle } from '../presentation';
 import { useI18n } from '../LanguageContext';
-import { formatEstimatedCost, formatTokenCount, formatUsagePercent, summarizeTasks } from '../usage-display';
+import { formatEstimatedCost, formatTokenCount, formatUsagePercent, summarizeTasks, comparisonPlans, comparePlanUsage, type ComparisonPlan } from '../usage-display';
 
-export function TaskInsights({ jobs, analysis, allocation, periodLabel }: {
-  jobs: HistoryJob[]; analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; periodLabel: string;
+export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparisonPlan = 'pro20x', section = 'all' }: {
+  jobs: HistoryJob[]; analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; periodLabel: string; comparisonPlan?: ComparisonPlan; section?: 'summary' | 'trend' | 'all';
 }) {
   const { t, locale, language } = useI18n();
+  const planLabel = comparisonPlans[comparisonPlan].label;
+  const equivalentTitle = t('{plan} equivalent usage', { plan: planLabel });
   const [metric, setMetric] = useState<'cost' | 'tokens' | 'equivalent20x'>('cost');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const totals = useMemo(() => summarizeTasks(jobs), [jobs]);
@@ -15,29 +17,30 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel }: {
   const reference = allocation?.equivalent20x?.costPerPercentUsd;
   const days = analysis?.days ?? [];
   const value = (day: typeof days[number]) => metric === 'tokens' ? day.usage.totalTokens
-    : metric === 'cost' ? day.costUsd : day.costUsd !== null && reference ? day.costUsd / reference : null;
+    : metric === 'cost' ? day.costUsd : day.costUsd !== null && reference ? comparePlanUsage(day.costUsd / reference, comparisonPlan) : null;
   const format = (n: number | null, complete = true) => metric === 'tokens' ? formatTokenCount(n, locale, complete)
     : metric === 'cost' ? formatEstimatedCost(n, complete, locale) : formatUsagePercent(n, locale) + (n !== null && !complete ? '+' : '');
   const peak = Math.max(0, ...days.map(day => value(day) ?? 0));
-  const rankValue = (g: typeof groups[number]) => metric === 'cost' ? g.totalEstimatedCostUsd : metric === 'tokens' ? g.totalTokens : g.equivalent20xPercent;
+  const rankValue = (g: typeof groups[number]) => metric === 'cost' ? g.totalEstimatedCostUsd : metric === 'tokens' ? g.totalTokens : comparePlanUsage(g.equivalent20xPercent, comparisonPlan);
   const rankComplete = (g: typeof groups[number]) => metric === 'cost' ? g.totalEstimatedCostIsComplete : metric === 'tokens' ? g.tokensIsComplete : g.equivalent20xIsComplete;
   const rankMax = Math.max(0, ...groups.map(g => rankValue(g) ?? 0));
   const selected = days.find(day => day.date === selectedDay) ?? days.at(-1);
   return <>
-    <section className="scope-summary" aria-label={t('Scope totals')}>
+    {section !== 'trend' && <section className="scope-summary" aria-label={t('Scope totals')}>
       <div className="scope-summary-heading"><strong>{t('Scope totals')}</strong><span>{periodLabel} · {t('{count} tasks', { count: jobs.length })}</span></div>
       <div className="summary-metrics">
-        <div><span>{t('20x equivalent usage')}</span><strong>{formatUsagePercent(totals.equivalent, locale)}{totals.equivalent !== null && !totals.equivalentComplete ? '+' : ''}</strong><small>{t('One 20x week = 100%')}</small></div>
+        <div className="summary-equivalent"><span>{equivalentTitle}</span><strong>{formatUsagePercent(comparePlanUsage(totals.equivalent, comparisonPlan), locale)}{totals.equivalent !== null && !totals.equivalentComplete ? '+' : ''}</strong><small>{totals.equivalent === null ? t(reference ? 'No priced usage in this range' : 'Waiting for calibration') : t('One {plan} week = 100%', { plan: planLabel })}</small></div>
         <div><span>{t('Estimated cost')}</span><strong>{formatEstimatedCost(totals.cost, totals.costComplete, locale)}</strong><small>{t('Selected period · USD')}</small></div>
         <div><span>{t('Total tokens')}</span><strong>{formatTokenCount(totals.tokens, locale, totals.tokensComplete)}</strong><small>{t('Selected period')}</small></div>
       </div>
-      <p>{t('Includes hidden tasks in the selected archive scope. Search and row filters only change the list. + means partial data; -- means unavailable.')}</p>
-    </section>
-    <details className="insights-panel">
+      {allocation?.equivalent20x?.source === 'previous' && <p role="status">{t('Using previous calibration; updating in the background ({count}/5 percentage points).', { count: allocation.equivalent20x.calibrationQuotaPercent })}</p>}
+      <p>{t('Includes hidden tasks · + partial data · -- unavailable')}</p>
+    </section>}
+    {section !== 'summary' && <details className="insights-panel">
       <summary>{t('Daily trend and project ranking')}</summary>
       <div className="insights-content">
         <label className="inline-field">{t('Metric')} <select value={metric} onChange={event => setMetric(event.target.value as typeof metric)}>
-          <option value="cost">{t('Estimated cost')}</option><option value="tokens">{t('Total tokens')}</option><option value="equivalent20x">{t('20x equivalent usage')}</option>
+          <option value="cost">{t('Estimated cost')}</option><option value="tokens">{t('Total tokens')}</option><option value="equivalent20x">{equivalentTitle}</option>
         </select></label>
         <p className="muted-note">{t('The trend shows dates with recorded usage in the selected period. Rankings use the full selected scope, including hidden rows.')}</p>
         {days.length ? <figure className="usage-trend"><figcaption>{t('Daily usage')} · {periodLabel}</figcaption>
@@ -56,6 +59,6 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel }: {
           <div className="ranking-track"><span style={{ width: `${rankMax > 0 ? (rankValue(g) ?? 0) / rankMax * 100 : 0}%` }} /></div>
         </li>)}</ol>
       </div>
-    </details>
+    </details>}
   </>;
 }

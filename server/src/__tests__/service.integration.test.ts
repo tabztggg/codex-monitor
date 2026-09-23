@@ -36,6 +36,19 @@ class FakeCodexClient extends EventEmitter {
 }
 
 describe("MonitorService integration", () => {
+  it('publishes account identity even when account reads emit auth notifications', async () => {
+    const client = new FakeCodexClient();
+    client.request = async (method: string) => {
+      if (method === 'account/read') {
+        client.emit('notification', { method: 'account/updated', params: { authMode: 'chatgpt', planType: 'pro' } });
+        return { account: { type: 'chatgpt', email: 'example@example.com', planType: 'pro' } } as never;
+      }
+      return { rateLimits: { limitId: 'codex', secondary: { usedPercent: 24, windowDurationMins: 10080 } } } as never;
+    };
+    const service = new MonitorService(client as never);
+    await (service as unknown as { refreshCodexUsage(): Promise<void> }).refreshCodexUsage();
+    expect(service.getSnapshot().codexUsage).toMatchObject({ status: 'available', account: { email: 'example@example.com' } });
+  });
   it("maps history entries that use the current app-server source field", async () => {
     const client = new FakeCodexClient();
     const service = new MonitorService(client as never);

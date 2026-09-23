@@ -20,7 +20,7 @@ import {
 import { asRecord, asString, cloneValue, toIsoDate } from "./utils";
 import { userPreview } from "../../shared/session-preview";
 import { QuotaAttribution } from "./quota-attribution";
-import { calibrate20x, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
+import { QuotaCalibration, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
 import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
 import { readProjectResolver } from './project-metadata';
 import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
@@ -59,6 +59,7 @@ type ParsedHistoryJob = HistoryJob & {
   untimedTokens?: number;
   totalUnpricedTokens?: number;
   quotaCalibrationEvents?: QuotaCalibrationEvent[];
+  quotaCalibrationVersion?: 2;
   parentThreadId: string | null;
   isSubagent: boolean;
 };
@@ -121,6 +122,7 @@ const ARCHIVE_CACHE_VERSION = 2;
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
   private readonly attribution: QuotaAttribution;
+  private readonly calibration: QuotaCalibration;
   private readonly archiveCacheFile: string | undefined;
   private archiveCacheDirty = false;
   private readonly identities = new Map<string, ArchiveMetadata>();
@@ -132,6 +134,7 @@ export class HistoryJobReader {
     private readonly archivedRoot = path.join(sessionsRoot, '..', 'archived_sessions')
   ) {
     this.attribution = new QuotaAttribution(ledgerFile);
+    this.calibration = new QuotaCalibration(ledgerFile ? path.join(path.dirname(ledgerFile), 'quota-calibration.json') : undefined);
     this.archiveCacheFile = ledgerFile ? path.join(path.dirname(ledgerFile), 'archived-history.json') : undefined;
     this.loadArchiveCache();
   }
@@ -211,9 +214,7 @@ export class HistoryJobReader {
     const window = args.usageWindow;
     const weekEnd = Date.parse(window?.resetsAt ?? '');
     const weekly = window && weekEnd > nowMs && weekEnd - window.startedAtMs === 604800000;
-    const calibration = weekly
-      ? calibrate20x(parsedJobs.flatMap(job => job.quotaCalibrationEvents ?? []), window.startedAtMs, Math.min(weekEnd, nowMs + 1))
-      : { costPerPercent: null, quotaPercent: 0 };
+    const calibration = this.calibration.resolve(parsedJobs.flatMap(job => job.quotaCalibrationEvents ?? []), weekly ? window.startedAtMs : null, nowMs);
     const key = window ? JSON.stringify([window.limitName, window.windowLabel, window.startedAtMs, window.resetsAt]) : '';
     if (window && args.observeUsage) {
       this.attribution.observe(key, window.usedPercent, consolidated.map(job => ({
@@ -225,7 +226,7 @@ export class HistoryJobReader {
     const ledger = this.attribution.read(key);
     const selectedDays = new Map<string, HistoryUsageDay[]>();
     const selectedStart = periodStart(period, nowMs, window?.startedAtMs ?? null);
-    const allJobs = consolidated.map(({ quotaCalibrationEvents: _events, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
+    const allJobs = consolidated.map(({ quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
       const days = (period === 'quota' ? quotaDailyUsage ?? [] : dailyUsage ?? [])
         .filter(day => (!selectedStart || day.date >= localDay(selectedStart)) && day.date <= localDay(nowMs));
       selectedDays.set(job.id, days);
@@ -276,7 +277,8 @@ export class HistoryJobReader {
       nextCursor: offset + limit < jobs.length ? String(offset + limit) : null,
       archives: { mode: archiveMode, total: selection.total, included: allJobs.filter(job => job.archived).length },
       usageAllocation: {
-        equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent },
+        equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent,
+          source: calibration.source, calibratedAt: calibration.calibratedAt, referenceQuotaPercent: calibration.referenceQuotaPercent },
         ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
         status: ledger ? 'available' : 'unavailable',
         observedSince: ledger?.observedAt ?? null,
@@ -293,7 +295,7 @@ export class HistoryJobReader {
     const cached = this.cache.get(file.path);
     const unchanged = Boolean(cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.job && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.job?.quotaCalibrationVersion === 2 && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -826,6 +828,7 @@ export function parseHistorySessionFile(args: {
   let modelProvider: string | null = null;
   let lastRunUsage: TokenUsage | null = null;
   let previousTokenUsageKey: string | null = null;
+  let tokenCountIndex = 0;
   let totalUsage: TokenUsage | null = null;
   let totalEstimatedCostUsd = 0;
   let totalCostIsComplete = true;
@@ -969,14 +972,14 @@ export function parseHistorySessionFile(args: {
     }
 
     if (payloadType === "token_count") {
+      const sampleId = `${sessionId ?? args.sessionId}:${tokenCountIndex++}`;
       const info = asRecord(payload?.info);
       const increment = normalizeTokenUsage(info?.last_token_usage);
       const cumulative = normalizeTokenUsage(info?.total_token_usage);
       const cumulativeKey = cumulative ? JSON.stringify(cumulative) : null;
       const duplicate = Boolean(increment && cumulativeKey && cumulativeKey === previousTokenUsageKey);
-      if (recordTimestampMs !== null && args.usageWindowStartedAtMs != null &&
-          recordTimestampMs >= args.usageWindowStartedAtMs && recordTimestampMs <= args.nowMs) {
-        quotaCalibrationEvents.push({ at: recordTimestampMs,
+      if (recordTimestampMs !== null && recordTimestampMs <= args.nowMs) {
+        quotaCalibrationEvents.push({ id: sampleId, at: recordTimestampMs,
           cost: duplicate || !increment ? 0 : estimateApiEquivalentCost(increment, activeModel),
           limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
       }
@@ -1061,6 +1064,7 @@ export function parseHistorySessionFile(args: {
   return {
     id: sessionId,
     quotaCalibrationEvents,
+    quotaCalibrationVersion: 2,
     dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
     archived: false,
     parentThreadId,

@@ -29,7 +29,7 @@ export async function loadHistoryPages(args: {
 }
 
 /** Load only the requested archive scope; publish complete pages atomically. */
-export function useTaskHistory(refreshIntervalMs = 30_000, period: HistoryPeriod = 'quota') {
+export function useTaskHistory(refreshIntervalMs = 30_000, period: HistoryPeriod = 'quota', accountReadyKey = '') {
   const [request, setRequest] = useState<{ mode: HistoryArchiveMode; version: number }>({ mode: 'recent', version: 0 });
   const rebuildPending = useRef(false);
   const [state, setState] = useState<{
@@ -67,7 +67,7 @@ export function useTaskHistory(refreshIntervalMs = 30_000, period: HistoryPeriod
     }
     void refresh();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [request, refreshIntervalMs, period]);
+  }, [request, refreshIntervalMs, period, accountReadyKey]);
   return { ...state, requestedMode: request.mode, refreshNow: () => {
     if (state.loading) return;
     setState(previous => ({ ...previous, loading: true, nextRefreshAt: null }));

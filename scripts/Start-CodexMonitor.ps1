@@ -29,6 +29,12 @@ function Repair-ProcessPathEnvironment {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+# An installed copy is owned by Task Scheduler, never by the calling terminal.
+$standaloneRoot = Join-Path $env:LOCALAPPDATA 'Programs\CodexMonitor'
+if (Test-Path -LiteralPath (Join-Path $standaloneRoot 'standalone.json')) {
+  & (Join-Path $standaloneRoot 'Manage-StandaloneMonitor.ps1') -Action Start -NoBrowser:$NoBrowser
+  return
+}
 $port = 4201
 if ($env:PORT) {
   $port = [int]$env:PORT

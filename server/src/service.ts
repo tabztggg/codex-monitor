@@ -7,7 +7,8 @@ import { AutomationController } from "./automation";
 import { HistoryJobReader, type HistoryJobMetadata } from "./history-jobs";
 import { MonitorStore } from "./store";
 import {
-  codexUsageFromRateLimitsRead,
+  readAccountUsage,
+  staleCodexUsage,
   codexUsageFromRateLimitsUpdated,
   emptyCodexUsage
 } from "./usage";
@@ -31,6 +32,8 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   private codexUsage: CodexUsageSnapshot = emptyCodexUsage();
   private codexUsagePollHandle: NodeJS.Timeout | null = null;
   private codexUsageRefreshPromise: Promise<void> | null = null;
+  private usageAccountRevision = 0;
+  private usageIdentityPending = false;
   private historyThreadMetadataCache: {
     refreshedAtMs: number;
     data: Map<string, HistoryJobMetadata>;
@@ -321,23 +324,31 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     });
 
     this.client.on("close", (code) => {
+      this.usageAccountRevision++;
       this.serverState.connected = false;
       this.serverState.initialized = false;
       this.serverState.lastError =
         code === null
           ? "Codex app-server closed."
           : `Codex app-server exited with code ${code}.`;
-      this.codexUsage = emptyCodexUsage("unavailable", this.serverState.lastError);
+      this.usageIdentityPending = true;
+      this.codexUsage = staleCodexUsage(this.codexUsage, this.serverState.lastError);
       this.emitSnapshot();
     });
 
     this.client.on("notification", (message) => {
-      if (message.method === "account/rateLimits/updated") {
-        this.codexUsage = codexUsageFromRateLimitsUpdated(
-          message.params,
-          this.codexUsage
-        );
-        this.observeQuotaUsage();
+      if (message.method === 'account/updated') {
+        // account/read can itself emit this notification. The paired before /
+        // after identity reads validate the account without invalidating themselves.
+        this.usageIdentityPending = true;
+        this.codexUsage = staleCodexUsage(this.codexUsage, 'Account identity is being checked.');
+        void this.refreshCodexUsage();
+      } else if (message.method === "account/rateLimits/updated") {
+        if (this.usageIdentityPending) void this.refreshCodexUsage();
+        else {
+          this.codexUsage = codexUsageFromRateLimitsUpdated(message.params, this.codexUsage);
+          this.observeQuotaUsage();
+        }
       }
       this.store.applyRpcNotification(message);
       this.automation.evaluateAll();
@@ -471,19 +482,21 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
 
   private async refreshCodexUsageInternal(): Promise<void> {
     let nextUsage: CodexUsageSnapshot;
+    const revision = this.usageAccountRevision;
     try {
       await this.client.ensureStarted();
-      const response = await this.client.request("account/rateLimits/read");
-      nextUsage = codexUsageFromRateLimitsRead(response);
+      nextUsage = await readAccountUsage(this.client, this.codexUsage);
     } catch (error) {
-      nextUsage = emptyCodexUsage(
-        "error",
+      nextUsage = staleCodexUsage(
+        this.codexUsage,
         error instanceof Error ? error.message : String(error)
       );
     }
 
+    if (revision !== this.usageAccountRevision) return;
     const unchanged = JSON.stringify(nextUsage) === JSON.stringify(this.codexUsage);
     this.codexUsage = nextUsage;
+    if (nextUsage.status === 'available' && !nextUsage.stale) this.usageIdentityPending = false;
     this.observeQuotaUsage();
     if (unchanged) {
       return;
@@ -493,6 +506,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   }
 
   private observeQuotaUsage(): void {
+    if (this.codexUsage.stale) return;
     const usageWindow = this.getPrimaryUsageWindow();
     if (!usageWindow || Date.parse(usageWindow.resetsAt) <= Date.now()) return;
     try {

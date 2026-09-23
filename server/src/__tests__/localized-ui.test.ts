@@ -33,6 +33,43 @@ const item = { id: 'item', type: 'agentMessage', title: 'Agent message', text: '
 describe('full interface language rendering', () => {
   beforeEach(() => { testState.language = 'zh'; testState.loading = false; testState.archiveMode = 'recent'; testState.error = null; });
 
+  it('puts totals before filters and the task table before secondary analysis', () => {
+    const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
+    expect(html.indexOf('class="statistics-controls"')).toBeLessThan(html.indexOf('class="scope-summary"'));
+    expect(html.indexOf('class="scope-summary"')).toBeLessThan(html.indexOf('class="task-toolbar"'));
+    expect(html.indexOf('class="task-toolbar"')).toBeLessThan(html.indexOf('class="task-table"'));
+    expect(html.indexOf('class="task-table"')).toBeLessThan(html.indexOf('class="insights-panel"'));
+    expect(html).toContain('等待校准');
+    expect(html).toContain('更多操作');
+  });
+
+  it('keeps stale quota visible with the original account and timestamp in both languages', () => {
+    const quota = { id: 'codex', primary: null, secondary: { label: 'Weekly', usedPercent: 20, remainingPercent: 80, windowDurationMins: 10080, resetsAt: '2026-09-29T00:00:00Z' } };
+    const data = { ...snapshot, codexUsage: { status: 'available', stale: true, updatedAt: '2026-09-22T00:00:00Z',
+      account: { type: 'chatgpt', email: 'old@example.com', planType: 'pro' }, limits: [quota], primaryLimit: quota } } as MonitorSnapshot;
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot: data, nowMs: Date.parse('2026-09-22T01:00:00Z'), connectionLabel: 'live' })));
+      expect(html).toContain('80%');
+      expect(html).toContain('old@example.com');
+      expect(html).toContain(language === 'en' ? 'Last confirmed account' : '上次确认的账号');
+      expect(html).toContain(language === 'en' ? 'Retrying automatically.' : '正在自动重试');
+    }
+  });
+
+  it('uses a neutral pace for small differences and warns beyond five points', () => {
+    const duration = 604800000;
+    const start = Date.parse('2026-09-21T00:00:00Z');
+    const render = (usedPercent: number) => {
+      const quota = { id: 'codex', primary: null, secondary: { label: 'Weekly', usedPercent, remainingPercent: 100 - usedPercent, windowDurationMins: 10080, resetsAt: new Date(start + duration).toISOString() } };
+      const data = { ...snapshot, codexUsage: { status: 'available', limits: [quota], primaryLimit: quota } } as MonitorSnapshot;
+      return renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot: data, nowMs: start + duration / 100, connectionLabel: 'live' })));
+    };
+    expect(render(2)).not.toContain('pace-note fast');
+    expect(render(2)).toContain('额度消耗与时间进度基本一致');
+    expect(render(8)).toContain('pace-note fast');
+  });
+
   it('shows full-archive loading, retry and scope controls without relabeling the previous results', () => {
     const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
     testState.loading = true;
@@ -55,6 +92,9 @@ describe('full interface language rendering', () => {
     const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.parse('2026-09-22T02:00:00Z'), connectionLabel: 'live' })));
     const zh = render();
     expect(zh).toContain('Codex 总体用量');
+    expect(zh).toContain('用量所属账号');
+    expect(zh).toContain('账号未知');
+    expect(zh).toContain('Monitor 使用的 Codex CLI 登录账号');
     expect(zh).toContain('估算额度占比');
     expect(zh).toContain('已归档');
     expect(zh).toContain('1万');
@@ -67,7 +107,12 @@ describe('full interface language rendering', () => {
     expect(zh).toContain('当前仅统计最近 30 个归档任务。');
     expect(zh.match(/class="table-sort-button"/g)).toHaveLength(7);
     expect(zh).toContain('20x 等效消耗');
-    expect(zh).toContain('跨账号 · 所选范围');
+    expect(zh).toContain('跨账号 · 本周期');
+    expect(zh).toContain('统计时间范围');
+    expect(zh).toContain('等效消耗对比套餐');
+    expect(zh).toContain('影响等效消耗、估算费用、Token 列');
+    expect(zh).toContain('value="pro5x"');
+    expect(zh).toContain('value="plus"');
     expect(zh).toContain('aria-sort="descending"');
     expect(zh).toContain('按任务排序：升序');
     expect(zh).toContain('value="usage:desc" selected');
@@ -76,7 +121,9 @@ describe('full interface language rendering', () => {
     expect(en).toContain('Overall Codex usage');
     expect(en).toContain('Approx. quota %');
     expect(en).toContain('20x equivalent usage');
-    expect(en).toContain('All accounts · Selected period');
+    expect(en).toContain('All accounts · Current quota period');
+    expect(en).toContain('Equivalent usage comparison');
+    expect(en).toContain('Statistics time range');
     expect(en).toContain('Archived');
     expect(en).toContain('10K');
     expect(en).toContain('Countdown will not shut down this computer');

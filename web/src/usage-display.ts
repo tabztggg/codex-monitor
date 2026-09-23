@@ -1,5 +1,17 @@
 import type { HistoryJob } from '../../shared/monitor';
 
+export const comparisonPlans = { 'pro20x': { label: 'Pro 20x', multiplier: 1 }, 'pro5x': { label: 'Pro 5x', multiplier: 4 }, 'plus': { label: 'Plus', multiplier: 20 } } as const;
+export type ComparisonPlan = keyof typeof comparisonPlans;
+export function isComparisonPlan(value: unknown): value is ComparisonPlan {
+  return typeof value === 'string' && Object.hasOwn(comparisonPlans, value);
+}
+// Compare against a nominal weekly allowance; never alter the source calibration.
+export function comparePlanUsage(value: number | null | undefined, plan: ComparisonPlan): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  const result = value * comparisonPlans[plan].multiplier;
+  return Number.isFinite(result) ? result : null;
+}
+
 export function formatUsagePercent(value: number | null, locale: string): string {
   if (value === null || !Number.isFinite(value)) return '--';
   const digits = value > 0 && value < 0.1 ? 2 : 1;

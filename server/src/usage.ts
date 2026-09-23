@@ -6,6 +6,43 @@ import type {
 } from "../../shared/monitor";
 import { asBoolean, asRecord, asString, cloneValue, isoNow, toIsoDate } from "./utils";
 
+// Only forward display fields, never the raw auth response or credentials.
+export function usageAccount(response: unknown): NonNullable<CodexUsageSnapshot['account']> | null {
+  const account = asRecord(asRecord(response)?.account);
+  const type = asString(account?.type);
+  return type ? { type, email: asString(account?.email), planType: asString(account?.planType) } : null;
+}
+
+export function staleCodexUsage(previous: CodexUsageSnapshot, error: string): CodexUsageSnapshot {
+  return previous.limits.length ? { ...cloneValue(previous), stale: true, error }
+    : emptyCodexUsage('error', error);
+}
+
+export async function readAccountUsage(client: { request(method: string, params?: unknown): Promise<unknown> }, previous?: CodexUsageSnapshot): Promise<CodexUsageSnapshot> {
+  const readAccount = async () => {
+    try { return { ok: true, account: usageAccount(await client.request('account/read', { refreshToken: false })) }; }
+    catch { return { ok: false, account: null }; }
+  };
+  const before = await readAccount();
+  let result: CodexUsageSnapshot;
+  try { result = codexUsageFromRateLimitsRead(await client.request('account/rateLimits/read')); }
+  catch (error) { result = emptyCodexUsage('error', error instanceof Error ? error.message : String(error)); }
+  const after = await readAccount();
+  // An identity change during the request must not relabel old quota data.
+  if (before.ok && after.ok && JSON.stringify(before.account) !== JSON.stringify(after.account)) {
+    return emptyCodexUsage('unavailable', 'Account changed while reading usage. Waiting for the next refresh.');
+  }
+  if (result.status !== 'available' && previous?.limits.length) {
+    const known = [before, after].filter(read => read.ok);
+    // An unreadable identity leaves the retained snapshot explicitly attached to
+    // its old account. A confirmed logout/different account must never reuse it.
+    if (known.every(read => read.account !== null && JSON.stringify(read.account) === JSON.stringify(previous.account))) {
+      return staleCodexUsage(previous, result.error ?? 'Codex did not return rate limit data.');
+    }
+  }
+  return { ...result, account: before.ok && after.ok ? after.account : null };
+}
+
 export function emptyCodexUsage(
   status: CodexUsageSnapshot["status"] = "loading",
   error: string | null = null
@@ -56,8 +93,8 @@ export function codexUsageFromRateLimitsUpdated(
   if (!limit) {
     return {
       ...cloneValue(previous),
-      status: "error",
-      updatedAt,
+      status: previous.limits.length ? previous.status : 'error',
+      stale: previous.limits.length > 0,
       error: "Codex sent malformed rate limit data."
     };
   }
@@ -72,6 +109,7 @@ export function codexUsageFromRateLimitsUpdated(
 
   return {
     status: "available",
+    account: previous.account ?? null,
     updatedAt,
     error: null,
     primaryLimit,

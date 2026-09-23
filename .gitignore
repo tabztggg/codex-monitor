@@ -39,6 +39,8 @@ Thumbs.db
 tmp/
 temp/
 .cache/
+standalone.json
+logs/
 
 # Workstation-specific firewall administration helper
 /scripts/Enable-Cpolar-Port4201.ps1

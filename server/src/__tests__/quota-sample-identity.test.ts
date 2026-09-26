@@ -34,7 +34,7 @@ describe('quota calibration sample identity', () => {
   it('keeps independent fragments of the same task instead of colliding at event zero', () => {
     const first = parse(records([token(start)]));
     const second = parse(records([token(start + 60000, 2000, 15)]));
-    expect(first.quotaCalibrationVersion).toBe(4);
+    expect(first.quotaCalibrationVersion).toBe(5);
     expect(first.quotaCalibrationEvents?.[0].id).toMatch(/^v3:[a-f0-9]{64}$/);
     expect(second.quotaCalibrationEvents?.[0].id).not.toBe(first.quotaCalibrationEvents?.[0].id);
     expect(first.quotaCalibrationEvents?.[0].streamId).toMatch(/^[a-f0-9]{64}$/);
@@ -125,7 +125,7 @@ describe('quota calibration sample identity', () => {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
-  it.each([2, 3])('upgrades version %s cached samples from compact records without rereading archives', oldVersion => {
+  it.each([2, 3, 4])('upgrades version %s cached samples from compact records without rereading archives', oldVersion => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-sample-upgrade-'));
     try {
       const sessions = path.join(root, 'sessions');
@@ -148,7 +148,7 @@ describe('quota calibration sample identity', () => {
       reader.listJobs({ nowMs });
       expect(fs.openSync).not.toHaveBeenCalled();
       const upgraded = JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1];
-      expect(upgraded.job.quotaCalibrationVersion).toBe(4);
+      expect(upgraded.job.quotaCalibrationVersion).toBe(5);
       expect(upgraded.job.quotaCalibrationEvents.map((sample: { id: string }) => sample.id)).toEqual(expectedIds);
       expect(upgraded.job.quotaCalibrationEvents[0].duplicateUsage).toBe(false);
       expect(upgraded.compact).toEqual(compact);

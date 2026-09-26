@@ -6,6 +6,7 @@ import { useTaskHistory } from '../useTaskHistory';
 import { useI18n } from '../LanguageContext';
 import type { I18n, Translate } from '../localization';
 import { TaskInsights } from './TaskInsights';
+import { OfficialTaskUsagePanel } from './OfficialTaskUsagePanel';
 import { formatEstimatedCost, formatTokenCount, formatUsagePercent, comparePlanUsage, comparisonPlans, isComparisonPlan, type ComparisonPlan } from '../usage-display';
 import { parseTableView, tableColumns, taskColumns as columns, type TableView } from '../table-view';
 
@@ -30,9 +31,11 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   useEffect(() => { try { window.localStorage.setItem('codex-monitor-comparison-plan', comparisonPlan); } catch { /* Storage is optional. */ } }, [comparisonPlan]);
   const planLabel = comparisonPlans[comparisonPlan].label;
   const equivalentTitle = t('{plan} equivalent usage', { plan: planLabel });
-  const columnTitle = (c: typeof columns[number]) => c.key === 'equivalent20x' ? equivalentTitle : t(c.title);
-  const columnHeading = (c: typeof columns[number]) => c.key === 'equivalent20x' ? t('{plan} equiv.', { plan: planLabel })
-    : c.key === 'usage' ? t('Quota %') : c.key === 'cost' ? t('Est. cost') : c.key === 'tokens' ? t('Tokens') : columnTitle(c);
+  const columnTitle = (c: typeof columns[number]) => c.key === 'usage' ? equivalentTitle : t(c.title);
+  const sortColumnTitle = (c: typeof columns[number]) => c.key === 'usage' || c.key === 'equivalent20x'
+    ? `${equivalentTitle} · ${t(c.key === 'usage' ? 'Current account' : 'Across accounts')}` : columnTitle(c);
+  const columnHeading = (c: typeof columns[number]) => c.key === 'usage' || c.key === 'equivalent20x' ? t('{plan} equiv.', { plan: planLabel })
+    : c.key === 'cost' ? t('Est. cost') : c.key === 'tokens' ? t('Tokens') : columnTitle(c);
   const [period, setPeriod] = useState<HistoryPeriod>('quota');
   // Retry the initial history read as soon as the account/window becomes ready.
   // Ignore quota percentages and reset timestamp jitter so normal updates still
@@ -67,16 +70,17 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   const changeLayout = (layout: TableView['layout']) => {
     const next = { ...view, layout };
     setView(next);
-    if (!tableColumns(next).some(c => c.key === sort)) {
+    if (!tableColumns(next).some(c => c.key === sort || c.key === 'usage' && sort === 'equivalent20x')) {
       setSort(layout === 'simple' ? next.metric : 'task');
       setDirection(layout === 'simple' ? 'desc' : 'asc');
     }
   };
   const shortPeriod = t(activePeriod === 'quota' ? 'This period' : activePeriod === 'lifetime' ? 'Lifetime' : activePeriod === '7d' ? '7 days' : 'Today');
-  const subtitle = (key: TaskSortColumn) => key === 'usage' ? t('Current account · This period') : key === 'equivalent20x' ? `${t('Across accounts')} · ${shortPeriod}`
+  const pairScope = `${t('Current account · This period')} / ${t('Across accounts')} · ${shortPeriod}`;
+  const subtitle = (key: TaskSortColumn) => key === 'usage' ? (activePeriod === 'quota' ? t('Current account / Across accounts') : pairScope)
     : key === 'cost' ? `${shortPeriod} · USD` : key === 'tokens' ? shortPeriod : null;
-  const headerDescription = (c: typeof columns[number]) => `${columnTitle(c)}${c.key === 'usage' ? ` · ${t('Current account · This period')}`
-    : c.key === 'equivalent20x' ? ` · ${t('All accounts')} · ${t(periods[activePeriod])}` : c.key === 'cost' || c.key === 'tokens' ? ` · ${t(periods[activePeriod])}` : ''}`;
+  const headerDescription = (c: typeof columns[number]) => c.key === 'usage' ? `${equivalentTitle} · ${pairScope}`
+    : `${columnTitle(c)}${c.key === 'cost' || c.key === 'tokens' ? ` · ${t(periods[activePeriod])}` : ''}`;
   const activeIds = useMemo(() => new Set(snapshot.activeSessions.map(s => s.id)), [snapshot.activeSessions]);
   const mergedJobs = useMemo(() => {
     const map = new Map(jobs.map(job => [job.id, job]));
@@ -88,18 +92,22 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
     return [...map.values()].map(job => ({ ...job,
       totalUsage: job.periodMetrics ? job.periodMetrics.usage : job.totalUsage,
       totalEstimatedCostUsd: job.periodMetrics ? job.periodMetrics.costUsd : job.totalEstimatedCostUsd,
-      totalEstimatedCostIsComplete: job.periodMetrics ? job.periodMetrics.costComplete : job.totalEstimatedCostIsComplete,
-      estimatedUsagePercentSinceReset: activePeriod === 'quota' ? job.estimatedUsagePercentSinceReset : null
+      totalEstimatedCostIsComplete: job.periodMetrics ? job.periodMetrics.costComplete : job.totalEstimatedCostIsComplete
     }));
   }, [jobs, snapshot.activeSessions, activePeriod]);
   const displayed = visibleTasks(mergedJobs, activeIds, filter, search, sort, nowMs, hideArchived, language, direction);
   const projectGroups = groupByProject ? groupTasksByProject(mergedJobs, displayed, sort, direction, activeIds, language).filter(g => !search.trim() || g.jobs.length > 0) : [];
   const sections = groupByProject ? projectGroups.map(group => ({ id: group.id, group, jobs: collapsed.has(group.id) ? [] : group.jobs })) : [{ id: 'ungrouped', group: null, jobs: displayed }];
+  const headerSortKey = (key: TaskSortColumn): TaskSortColumn => key === 'usage' && sort === 'equivalent20x' ? 'equivalent20x' : key;
   const nextDirection = (key: TaskSortColumn): SortDirection => sort === key ? direction === 'asc' ? 'desc' : 'asc' : key === 'task' || key === 'status' ? 'asc' : 'desc';
   const seconds = nextRefreshAt ? Math.min(interval / 1000, Math.max(0, Math.ceil((nextRefreshAt - nowMs) / 1000))) : 0;
-  const quotaTitle = activePeriod === 'quota' ? formatUsageAllocationTitle(allocation, i18n) : t('Account attribution is available only for the current quota period.');
-  const groupValue = (g: ProjectTaskGroup, key: TaskSortColumn) => key === 'usage' ? <span className={g.quotaPercent ? 'value-quota' : 'value-muted'}>{formatUsagePercent(g.quotaPercent, locale)}{g.quotaPercent !== null && !g.quotaIsComplete ? '+' : ''}</span>
-    : key === 'equivalent20x' ? <span className={g.equivalent20xPercent ? 'value-equivalent' : 'value-muted'}>{formatUsagePercent(comparePlanUsage(g.equivalent20xPercent, comparisonPlan), locale)}{g.equivalent20xPercent !== null && !g.equivalent20xIsComplete ? '+' : ''}</span>
+  const quotaTitle = t('Current account usage uses the same calibration as cross-account equivalents, counting only this quota period’s records with a matching weekly reset (within 60 seconds). Missing matches and prices are excluded. Matching reset times estimate account identity; they do not prove it. One {plan} week = 100%.', { plan: planLabel });
+  const equivalentPair = (current: number | null | undefined, currentComplete: boolean | undefined, across: number | null | undefined, acrossComplete: boolean | undefined) => <span className="equivalent-pair" title={pairScope}>
+    <span className={current != null ? 'value-quota' : 'value-muted'} title={quotaTitle} aria-label={t('Current account · This period')}>{formatUsagePercent(comparePlanUsage(current ?? null, comparisonPlan), locale)}{current != null && !currentComplete ? '+' : ''}</span>
+    <span className="equivalent-divider"> / </span>
+    <span className={across != null ? 'value-equivalent' : 'value-muted'} aria-label={`${t('Across accounts')} · ${shortPeriod}`} title={across == null ? t(allocation?.equivalent20x?.costPerPercentUsd ? 'Unavailable' : 'Waiting for calibration') : t('One {plan} week = 100%', { plan: planLabel })}>{formatUsagePercent(comparePlanUsage(across ?? null, comparisonPlan), locale)}{across != null && !acrossComplete ? '+' : ''}</span>
+  </span>;
+  const groupValue = (g: ProjectTaskGroup, key: TaskSortColumn) => key === 'usage' ? equivalentPair(g.quotaPercent, g.quotaIsComplete, g.equivalent20xPercent, g.equivalent20xIsComplete)
     : key === 'cost' ? formatEstimatedCost(g.totalEstimatedCostUsd, g.totalEstimatedCostIsComplete, locale)
     : key === 'tokens' ? formatTokenCount(g.totalTokens, locale, g.tokensIsComplete)
     : key === 'activity' ? <time dateTime={g.updatedAt} title={dateTime(g.updatedAt)}>{relativeActivity(g.updatedAt, nowMs, language)}</time> : null;
@@ -107,9 +115,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
     const projectLabel = job.project?.missing ? t('Unknown project · {id}', { id: job.project.id.slice(0, 8) }) : job.project?.name ?? t('No project');
     if (key === 'task') return <div className="task-identity"><span className={`task-icon ${job.archived ? 'archived' : activeIds.has(job.id) ? 'active' : ''}`} aria-hidden="true">{job.archived ? '▤' : '▥'}</span><div><button type="button" className="task-title-button" aria-expanded={expanded === job.id} aria-controls={`task-detail-${job.id}`} title={taskTitle(job, language)} onClick={e => { e.stopPropagation(); setExpanded(expanded === job.id ? null : job.id); }}>{taskTitle(job, language)}</button><small className="task-project" title={projectLabel}>{projectLabel}</small></div></div>;
     if (key === 'status') return <span className={`task-state ${activeIds.has(job.id) ? 'active' : ''}`} title={job.archivedAt ? t('Archived at {time}', { time: dateTime(job.archivedAt) }) : undefined}>{t(job.archived ? 'Archived' : activeIds.has(job.id) ? 'Active' : 'Finished')}</span>;
-    if (key === 'usage') return <span className={job.estimatedUsagePercentSinceReset ? 'value-quota' : 'value-muted'} title={quotaTitle}>{formatUsagePercent(job.estimatedUsagePercentSinceReset, locale)}</span>;
-    if (key === 'equivalent20x' && job.estimated20xPercent == null) return <span className="value-muted metric-pending">{t(allocation?.equivalent20x?.costPerPercentUsd ? 'Unavailable' : 'Waiting for calibration')}</span>;
-    if (key === 'equivalent20x') return <span className={job.estimated20xPercent ? 'value-equivalent' : 'value-muted'} title={t('One {plan} week = 100%', { plan: planLabel })}>{formatUsagePercent(comparePlanUsage(job.estimated20xPercent, comparisonPlan), locale)}{job.estimated20xPercent != null && !job.estimated20xIsComplete ? '+' : ''}</span>;
+    if (key === 'usage') return equivalentPair(job.currentAccountEquivalentPercent, job.currentAccountEquivalentIsComplete, job.estimated20xPercent, job.estimated20xIsComplete);
     if (key === 'cost') return <span title={formatEstimatedCostTitle(job, t)}>{formatEstimatedCost(job.totalEstimatedCostUsd, job.totalEstimatedCostIsComplete, locale)}</span>;
     if (key === 'tokens') return <span title={formatTokenUsageDetails(job.totalUsage, i18n)}>{formatTokenCount(job.totalUsage?.totalTokens ?? null, locale, job.periodMetrics?.tokensComplete !== false)}</span>;
     return <time dateTime={job.updatedAt} title={dateTime(job.updatedAt)}>{relativeActivity(job.updatedAt, nowMs, language)}</time>;
@@ -151,6 +157,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       {loading && requestedMode === 'all' && <button type="button" className="small-control" onClick={() => loadArchives('recent')}>{t('Return to the latest 30 archives')}</button>}
     </div>
       </div>
+      <p className="muted-note">{t('Current account %: {account} · This quota period · One {plan} week = 100% · Estimated by matching weekly reset times.', { account: allocation?.currentAccount?.email ?? t('Unknown'), plan: planLabel })}</p>
       <div className="task-data-panel">
     <div className="task-toolbar">
       <input aria-label={t('Search tasks')} placeholder={t('Search tasks or projects…')} value={search} onChange={e => setSearch(e.target.value)} />
@@ -162,18 +169,18 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       <details className="view-settings"><summary>{t('View options')}</summary><div className="view-settings-content">
         <label className="inline-field">{t('Density')}<select value={view.density} onChange={e => setView(v => ({ ...v, density: e.target.value === 'compact' ? 'compact' : 'comfortable' }))}><option value="comfortable">{t('Comfortable')}</option><option value="compact">{t('Compact')}</option></select></label>
         {!simple && <fieldset><legend>{t('Visible columns')}</legend>{columns.map(c => <label key={c.key}><input type="checkbox" checked={shown(c.key)} disabled={c.key === 'task'} onChange={e => {
-          const checked = e.target.checked; setView(v => ({ ...v, hidden: checked ? v.hidden.filter(k => k !== c.key) : [...v.hidden, c.key] }));
-          if (!checked && sort === c.key) { setSort('task'); setDirection('asc'); }
+          const checked = e.target.checked; const keys: TaskSortColumn[] = c.key === 'usage' ? ['usage', 'equivalent20x'] : [c.key]; setView(v => ({ ...v, hidden: checked ? v.hidden.filter(k => !keys.includes(k)) : [...v.hidden, ...keys] }));
+          if (!checked && keys.includes(sort)) { setSort('task'); setDirection('asc'); }
         }} />{columnTitle(c)}</label>)}</fieldset>}
         {simple && <p className="view-mode-help">{t('Simple view shows one metric. Expand a task for all metrics, or select Full table to choose columns.')}</p>}
-        <label className="inline-field">{t('Sort tasks')}<select aria-label={t('Sort tasks')} value={`${sort}:${direction}`} onChange={e => { const [key, dir] = e.target.value.split(':') as [TaskSortColumn, SortDirection]; setSort(key); setDirection(dir); }}>{visibleColumns.flatMap(c => (['asc', 'desc'] as const).map(dir => <option key={`${c.key}:${dir}`} value={`${c.key}:${dir}`}>{t('{column} · {direction}', { column: columnTitle(c), direction: t(dir === 'asc' ? 'Ascending' : 'Descending') })}</option>))}</select></label>
+        <label className="inline-field">{t('Sort tasks')}<select aria-label={t('Sort tasks')} value={`${sort}:${direction}`} onChange={e => { const [key, dir] = e.target.value.split(':') as [TaskSortColumn, SortDirection]; setSort(key); setDirection(dir); }}>{visibleColumns.flatMap(c => c.key === 'usage' ? [c, { ...c, key: 'equivalent20x' as const }] : [c]).flatMap(c => (['asc', 'desc'] as const).map(dir => <option key={`${c.key}:${dir}`} value={`${c.key}:${dir}`}>{t('{column} · {direction}', { column: sortColumnTitle(c), direction: t(dir === 'asc' ? 'Ascending' : 'Descending') })}</option>))}</select></label>
       </div></details>
     </div>
     {!simple && <p className="full-table-hint">{t('Scroll horizontally for more columns, or choose Simple view.')}</p>}
     <div className="task-table-scroll" tabIndex={0} aria-label={t('Scrollable task table')}><table className="task-table" style={simple ? undefined : { minWidth: `calc(var(--task-name-width, ${columns[0].width}px) + ${visibleColumns.filter(c => c.key !== 'task').reduce((sum, c) => sum + c.width, 0)}px)` }}>
       {!simple && <colgroup>{visibleColumns.map(c => <col key={c.key} style={c.key === 'task' ? undefined : { width: c.width }} />)}</colgroup>}
-      <thead><tr>{visibleColumns.map(c => <th key={c.key} scope="col" title={headerDescription(c)} className={`metric-${c.key} ${c.numeric ? 'numeric' : ''} ${c.key === 'task' ? 'sticky-name' : ''}`} aria-sort={sort === c.key ? direction === 'asc' ? 'ascending' : 'descending' : undefined}>
-        <button type="button" className="table-sort-button" title={t('Sort {column}: {direction}', { column: columnTitle(c), direction: t(nextDirection(c.key) === 'asc' ? 'Ascending' : 'Descending') })} onClick={() => { setDirection(nextDirection(c.key)); setSort(c.key); }}>{columnHeading(c)} <span className="sort-indicator" aria-hidden="true">{sort === c.key ? direction === 'asc' ? '↑' : '↓' : '↕'}</span></button>{subtitle(c.key) && <small>{subtitle(c.key)}</small>}
+      <thead><tr>{visibleColumns.map(c => <th key={c.key} scope="col" title={headerDescription(c)} className={`metric-${c.key} ${c.numeric ? 'numeric' : ''} ${c.key === 'task' ? 'sticky-name' : ''}`} aria-sort={sort === headerSortKey(c.key) ? direction === 'asc' ? 'ascending' : 'descending' : undefined}>
+        <button type="button" className="table-sort-button" title={t('Sort {column}: {direction}', { column: sortColumnTitle({ ...c, key: headerSortKey(c.key) }), direction: t(nextDirection(headerSortKey(c.key)) === 'asc' ? 'Ascending' : 'Descending') })} onClick={() => { setDirection(nextDirection(headerSortKey(c.key))); setSort(headerSortKey(c.key)); }}>{columnHeading(c)} <span className="sort-indicator" aria-hidden="true">{sort === headerSortKey(c.key) ? direction === 'asc' ? '↑' : '↓' : '↕'}</span></button>{subtitle(c.key) && <small>{subtitle(c.key)}</small>}
       </th>)}</tr></thead>
       {sections.map(section => <tbody key={section.id} data-project-id={section.group?.id}>
         {section.group && <tr className="project-group-row">{visibleColumns.map(c => c.key === 'task' ? <th className="sticky-name" key={c.key} scope="rowgroup"><button type="button" className="project-group-button" title={projectTitle(section.group, language)} aria-expanded={!collapsed.has(section.id)} onClick={() => setCollapsed(old => { const next = new Set(old); if (next.has(section.id)) next.delete(section.id); else next.add(section.id); return next; })}><span aria-hidden="true">{collapsed.has(section.id) ? '▸' : '▾'}</span> {projectTitle(section.group!, language)}</button><small>{t('{shown} shown / {total} total tasks', { shown: section.group!.jobs.length, total: section.group!.totalTasks })}</small></th> : <td className={c.numeric ? `metric-${c.key} numeric ${c.key === 'usage' || c.key === 'equivalent20x' ? 'task-share' : ''}` : undefined} key={c.key}>{groupValue(section.group!, c.key)}</td>)}</tr>}
@@ -183,6 +190,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
             <div className="task-detail-links"><a href={`codex://threads/${encodeURIComponent(job.id)}`}>{t('Open in Codex ↗')}</a>{snapshot.runs.filter(run => run.rootThreadId === job.id).map(run => <Link key={run.id} to={`/runs/${run.id}`}>{t('View live transcript and run')}</Link>)}</div>
             <h4>{taskTitle(job, language)}</h4>
             {(simple || view.hidden.length > 0) && <dl className="expanded-metrics">{columns.filter(c => c.key !== 'task').map(c => <Fragment key={c.key}><dt>{columnTitle(c)}</dt><dd>{taskValue(job, c.key)}</dd></Fragment>)}</dl>}
+            <OfficialTaskUsagePanel key={`${job.id}-${accountReadyKey}`} threadId={job.id} />
             <h4>{t('Task preview')}</h4><pre>{job.preview ?? t('No transcript preview available.')}</pre>
             <dl><dt>{t('Path')}</dt><dd>{job.cwd ?? t('Unavailable')}</dd><dt>{t('Source')}</dt><dd>{label(job.sourceKind)}</dd><dt>{t('Runs')}</dt><dd>{job.runCount}</dd><dt>{t('Total tokens')}</dt><dd>{formatTokenUsageDetails(job.totalUsage, i18n) ?? t('Unavailable')}</dd></dl><p>{formatEstimatedCostTitle(job, t)}</p><p>{quotaTitle}</p>
           </div>}</td></tr>
@@ -195,12 +203,11 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
     </section>
     <div id="task-trends"><TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="trend" /></div>
     <details className="metric-explanation" id="estimation-basis" ref={basisRef}><summary>{t('Statistics help and estimation basis')}</summary>
-      <p id="statistics-range-help">{t('Applies to equivalent usage, estimated cost, tokens, summaries and trends. Account quota attribution is only available for the current quota period.')}</p>
-      <p id="comparison-plan-help">{t('Changes only equivalent usage: task and project rows, summary and trend. One {plan} weekly allowance = 100%.', { plan: planLabel })}</p>
+      <p id="statistics-range-help">{t('The time range controls cross-account equivalents, cost, tokens, summaries and trends. Current account % always uses the current quota period.')}</p>
+      <p id="comparison-plan-help">{t('Plan comparison changes both current-account and cross-account equivalents, including project totals. One {plan} weekly allowance = 100%.', { plan: planLabel })}</p>
       <p>{t('Equivalent usage compares all locally recorded accounts with one {plan} weekly allowance in the selected period. Values may exceed 100%.', { plan: planLabel })}</p>
       <p>{t('All recorded Pro accounts are treated as 20x, as confirmed by the owner. The conversion uses observed weekly quota changes and API-equivalent token costs; it is not an official allowance or bill. Missing logs, other devices, tools and unpriced models can affect the estimate.')}</p>
-      <p>{t('Equivalent usage divides the selected-period cost by the calibration reference. Account quota attribution only allocates increases observed since monitoring began; earlier usage in the same task can be unattributed. The two estimates are not interchangeable, even for one account.')}</p>
-      {allocation?.observedSince && <p>{t('Attribution observed since {time} · Unattributed quota: {percent}', { time: dateTime(allocation.observedSince), percent: formatUsagePercent(allocation.unattributedPercent ?? null, locale) })}</p>}
+      <p>{quotaTitle}</p>
       {!allocation?.equivalent20x?.costPerPercentUsd && <p>{t('Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>}
       <p>{t('Nominal comparison: Pro 20x : Pro 5x : Plus = 20 : 5 : 1. The same usage is multiplied by 1, 4 or 20 from the calibrated 20x estimate. This does not change the recorded account tier or represent an official bill.')}</p>
       <dl className="estimation-facts">
@@ -212,7 +219,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
         <dt>{t('Daily boundary time zone')}</dt><dd>{analysis?.timeZone ?? '--'}</dd>
         <dt>{t('Last successful refresh')}</dt><dd>{updatedAt ? dateTime(new Date(updatedAt).toISOString()) : '--'}</dd>
       </dl>
-      <p>{t('Today and Last 7 days use calendar days on the monitor computer. Current quota period follows the account reset window. Account quota attribution is only available for that period; no historical account totals are fabricated.')}</p>
+      <p>{t('Today and Last 7 days use calendar days on the monitor computer. Current quota period follows the account reset window. Current account % stays on that quota period when another time range is selected.')}</p>
       <p>{t('Project and scope totals include hidden rows. Click column headings to sort. + means incomplete data; -- means unavailable.')}</p>
     </details>
   </section>;
@@ -274,30 +281,4 @@ function formatEstimatedCostTitle(job: HistoryJob, t: Translate): string {
   }
 
   return t('API-equivalent cost for recorded usage in the selected period. This is an estimate, not a ChatGPT subscription charge, and excludes tool-call fees.');
-}
-
-function formatUsageAllocationTitle(
-  allocation: HistoryUsageAllocation | null,
-  i18n: I18n
-): string {
-  const { t, dateTime, windowLabel } = i18n;
-  if (
-    !allocation ||
-    allocation.status !== "available" ||
-    !allocation.windowStartedAt ||
-    !allocation.resetsAt
-  ) {
-    return t("Approximate per-task usage is unavailable because Codex did not expose the current primary quota limit and reset period.");
-  }
-
-  const limit = t(allocation.limitName ?? "Overall Codex");
-  const window = allocation.windowLabel
-    ? windowLabel(allocation.windowLabel)
-    : "";
-  const basis =
-    allocation.basis === "apiEquivalentCost"
-      ? "API-equivalent cost of priced usage"
-      : "available local activity";
-
-  return t('Estimated share of {limit} {window} quota attributed to this task during observation. Each quota increase is allocated using {basis}, then accumulated. Earlier allocations are preserved. Pre-observation consumption and increments with missing or unpriced usage remain unattributed. -- means no allocation yet or unavailable data, not zero consumption. This is an estimate, not an official OpenAI per-task measurement. Resets at {time}.', { limit, window, basis: t(basis), time: dateTime(allocation.resetsAt) });
 }

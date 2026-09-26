@@ -17,24 +17,34 @@ afterEach(() => vi.unstubAllGlobals());
 const keys = (raw: string | null) => tableColumns(parseTableView(raw)).map(c => c.key);
 
 describe('saved task table preferences', () => {
+  it('merges either visible legacy metric and persists hiding the combined column', () => {
+    for (const hidden of [[], ['usage'], ['equivalent20x']]) {
+      expect(keys(JSON.stringify({ hidden }))).toContain('usage');
+      expect(keys(JSON.stringify({ hidden }))).not.toContain('equivalent20x');
+    }
+    const hiddenPair = parseTableView(JSON.stringify({ hidden: ['usage', 'equivalent20x'] }));
+    expect(tableColumns(hiddenPair).map(c => c.key)).not.toContain('usage');
+    expect(parseTableView(JSON.stringify(hiddenPair))).toEqual(hiddenPair);
+    expect(keys(JSON.stringify({ layout: 'simple', metric: 'equivalent20x' }))).toEqual(['task', 'usage', 'status']);
+  });
   it('keeps every column visible by default and safely handles invalid saved data', () => {
     for (const raw of [null, '{', 'null', '[]', '42', '{"layout":"unsupported","metric":"task","hidden":"tokens"}']) {
       const view = parseTableView(raw);
       expect(view).toEqual({ density: 'comfortable', hidden: [], layout: 'full', metric: 'cost' });
-      expect(tableColumns(view)).toHaveLength(7);
+      expect(tableColumns(view)).toHaveLength(6);
     }
   });
 
   it('migrates legacy column choices without allowing hidden task names or unknown columns', () => {
     const raw = JSON.stringify({ density: 'compact', hidden: ['tokens', 'task', 'unknown', 'tokens', 'usage'] });
-    expect(parseTableView(raw)).toEqual({ density: 'compact', hidden: ['usage', 'tokens'], layout: 'full', metric: 'cost' });
-    expect(keys(raw)).toEqual(['task', 'status', 'equivalent20x', 'cost', 'activity']);
+    expect(parseTableView(raw)).toEqual({ density: 'compact', hidden: ['tokens'], layout: 'full', metric: 'cost' });
+    expect(keys(raw)).toEqual(['task', 'status', 'usage', 'cost', 'activity']);
   });
 
   it('restores the explicit simple metric and preserves full-table choices when switching back', () => {
     const view = parseTableView(JSON.stringify({ layout: 'simple', metric: 'tokens', hidden: ['tokens', 'status'], density: 'compact' }));
     expect(keys(JSON.stringify(view))).toEqual(['task', 'tokens', 'status']);
-    expect(tableColumns({ ...view, layout: 'full' }).map(c => c.key)).toEqual(['task', 'usage', 'equivalent20x', 'cost', 'activity']);
+    expect(tableColumns({ ...view, layout: 'full' }).map(c => c.key)).toEqual(['task', 'usage', 'cost', 'activity']);
     expect(parseTableView(JSON.stringify(view))).toEqual(view);
   });
 });
@@ -51,10 +61,12 @@ describe('explicit table layouts', () => {
     const html = renderView({});
     expect(html).toContain('full-table');
     expect(html).toContain('value="full" selected');
-    expect(tableHeader(html).match(/scope="col"/g)).toHaveLength(7);
+    expect(tableHeader(html).match(/scope="col"/g)).toHaveLength(6);
     expect(html).toContain('<legend>Visible columns</legend>');
     expect(tableHeader(html)).toContain('Pro 20x equiv.');
-    expect(tableHeader(html)).toContain('All accounts · Current quota period');
+    expect(tableHeader(html)).toContain('Current account / Across accounts');
+    expect(html).toContain('value="usage:desc"');
+    expect(html).toContain('value="equivalent20x:desc"');
     expect(html).not.toContain('table-metric-choice');
   });
 
@@ -72,8 +84,8 @@ describe('explicit table layouts', () => {
   });
 
   it('honors saved hidden columns on a narrow full table and sorts a visible column', () => {
-    const html = renderView({ layout: 'full', hidden: ['tokens', 'usage'] });
-    expect(tableHeader(html).match(/scope="col"/g)).toHaveLength(5);
+    const html = renderView({ layout: 'full', hidden: ['tokens', 'usage', 'equivalent20x'] });
+    expect(tableHeader(html).match(/scope="col"/g)).toHaveLength(4);
     expect(tableHeader(html)).not.toContain('metric-tokens');
     expect(tableHeader(html)).not.toContain('metric-usage');
     expect(html).toContain('value="task:asc" selected');

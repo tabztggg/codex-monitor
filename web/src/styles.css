@@ -882,7 +882,7 @@ a {
 .task-table th small { display: block; font-size: 10px; font-weight: 400; margin-top: 1px; line-height: 1.5; }
 .task-table thead th { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px var(--line); padding: 9px 12px; white-space: normal; }
 .task-table thead th + th { border-left: 1px solid var(--line); }
-.task-table thead .metric-equivalent20x { color: var(--accent-blue); }
+.task-table thead :is(.metric-usage, .metric-equivalent20x) { color: var(--accent-blue); }
 .task-table .sticky-name { position: sticky; left: 0; z-index: 2; background: var(--surface); box-shadow: 1px 0 var(--line); }
 .task-table thead .sticky-name { z-index: 6; background: var(--surface-raised); }
 .task-table tbody th.sticky-name { background: var(--surface-soft); }
@@ -890,6 +890,7 @@ a {
 .task-table .numeric { text-align: right; font-variant-numeric: tabular-nums; }
 .table-sort-button { padding: 0; border: 0; min-height: 25px; background: transparent; color: inherit; font: inherit; text-align: inherit; cursor: pointer; white-space: normal; line-height: 1.5; }
 .table-sort-button:hover, .task-table th[aria-sort] .table-sort-button { color: var(--ink); }
+.task-table thead :is(.metric-usage, .metric-equivalent20x) .table-sort-button { color: inherit; }
 .sort-indicator { color: var(--muted); font-size: 10px; }
 .task-table th[aria-sort] .sort-indicator { color: var(--accent-blue); }
 .task-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -905,8 +906,7 @@ a {
 .task-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .task-state.active { color: var(--good); }
 .task-share { font-weight: 600; font-size: 14px; }
-.value-quota { color: var(--ink); }
-.value-equivalent { color: var(--accent-blue); }
+.value-quota, .value-equivalent { color: var(--accent-blue); }
 .value-muted { color: var(--muted); font-weight: 400; }
 .metric-pending { font-size: 11px; }
 .project-group-row th, .project-group-row td { background: var(--surface-soft); border-top: 1px solid var(--line); padding: 12px; }
@@ -1039,3 +1039,22 @@ a {
   .estimation-facts dd { margin-bottom: 8px; }
   .monitor-footer { flex-direction: column; gap: 10px; }
 }
+.official-task-usage {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid rgba(124, 181, 255, .2);
+  border-radius: 12px;
+  background: rgba(124, 181, 255, .04);
+  max-width: 1100px;
+  white-space: normal;
+}
+.official-usage-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.official-usage-total > strong { font-size: 28px; color: #7cb5ff; font-variant-numeric: tabular-nums; }
+.official-usage-breakdowns { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 24px; }
+.official-usage-breakdowns h5 { margin: 0 0 10px; font-size: 14px; }
+.official-usage-breakdowns ul { list-style: none; margin: 0; padding: 0; }
+.official-usage-breakdowns li { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
+.official-usage-breakdowns li span { overflow-wrap: anywhere; }
+.official-usage-breakdowns li strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.equivalent-pair { display: inline-flex; align-items: baseline; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.equivalent-divider { color: var(--muted); padding: 0 7px; font-weight: 400; }

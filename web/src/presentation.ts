@@ -110,9 +110,10 @@ export function groupTasksByProject(allJobs: HistoryJob[], displayedJobs: Histor
     if (job.totalUsage && Number.isFinite(job.totalUsage.totalTokens)) group.totalTokens = (group.totalTokens ?? 0) + job.totalUsage.totalTokens;
       else group.tokensIsComplete = false;
       if (job.periodMetrics?.tokensComplete === false) group.tokensIsComplete = false;
-    const quota = job.estimatedUsagePercentSinceReset;
-    if (quota !== null && Number.isFinite(quota)) group.quotaPercent = (group.quotaPercent ?? 0) + quota;
+    const quota = job.currentAccountEquivalentPercent;
+    if (typeof quota === 'number' && Number.isFinite(quota)) group.quotaPercent = (group.quotaPercent ?? 0) + quota;
     else group.quotaIsComplete = false;
+    if (job.currentAccountEquivalentIsComplete === false) group.quotaIsComplete = false;
     if (typeof job.estimated20xPercent === 'number' && Number.isFinite(job.estimated20xPercent)) {
       group.equivalent20xPercent = (group.equivalent20xPercent ?? 0) + job.estimated20xPercent;
       if (!job.estimated20xIsComplete) group.equivalent20xIsComplete = false;
@@ -148,7 +149,7 @@ export function visibleTasks(jobs: HistoryJob[], activeIds: Set<string>, filter:
     .sort((a, b) => {
       const delta = sort === 'task' ? compareText(taskTitle(a, language), taskTitle(b, language), direction, language)
         : sort === 'status' ? compareNumber(statusRank(a, activeIds), statusRank(b, activeIds), direction)
-        : sort === 'usage' ? compareNumber(a.estimatedUsagePercentSinceReset, b.estimatedUsagePercentSinceReset, direction)
+        : sort === 'usage' ? compareNumber(a.currentAccountEquivalentPercent, b.currentAccountEquivalentPercent, direction)
         : sort === 'equivalent20x' ? compareNumber(a.estimated20xPercent, b.estimated20xPercent, direction)
         : sort === 'cost' ? compareNumber(a.totalEstimatedCostUsd, b.totalEstimatedCostUsd, direction)
         : sort === 'tokens' ? compareNumber(a.totalUsage?.totalTokens, b.totalUsage?.totalTokens, direction)

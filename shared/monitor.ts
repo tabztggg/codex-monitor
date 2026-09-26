@@ -23,6 +23,7 @@ export const HISTORY_JOB_SORT_KEYS = [
   "last24HoursCostUsd",
   "last24HoursTokens",
   "estimatedUsagePercentSinceReset",
+  "currentAccountEquivalentPercent",
   "lastRunDurationMs",
   "totalDurationMs",
   "lastRunTokens",
@@ -300,11 +301,15 @@ export interface HistoryJob {
   sinceResetEstimatedCostUsd: number | null;
   sinceResetUnpricedTokens?: number;
   estimatedUsagePercentSinceReset: number | null;
+  /** Current weekly-window records, using the same reference as cross-account equivalents. */
+  currentAccountEquivalentPercent?: number | null;
+  currentAccountEquivalentIsComplete?: boolean;
   estimated20xPercent?: number | null;
   estimated20xIsComplete?: boolean;
 }
 
 export interface HistoryUsageAllocation {
+  currentAccount?: CodexUsageSnapshot['account'];
   equivalent20x?: {
     costPerPercentUsd: number | null;
     calibrationQuotaPercent: number;
@@ -552,4 +557,24 @@ export function deriveThreadRuntimeStatus(
 
 export function emptyThreadRuntimeStatus(): ThreadRuntimeStatus {
   return deriveThreadRuntimeStatus({ type: "notLoaded", activeFlags: [] });
+}
+/** Official provider task-lifetime totals; never a selected-period estimate. */
+export interface OfficialUsageGroup {
+  model: string | null;
+  effort: string | null;
+  speed: string | null;
+  weeklyPercent: number | null;
+}
+export interface OfficialUsageData {
+  weeklyPercent: number | null;
+  credits: number | null;
+  dataAsOf: string | null;
+  fetchedAt: string;
+  groups: OfficialUsageGroup[];
+}
+export interface OfficialTaskUsage {
+  data: OfficialUsageData | null;
+  account: string | null;
+  stale: boolean;
+  refreshing: boolean;
 }

@@ -1,5 +1,9 @@
 # Codex Monitor
 
+This workstation now starts Monitor from a Codex `SessionStart` hook and stops its process tree when the desktop app exits. It uses no Windows startup entry, task or service. The hook needs a one-time trust review in Codex; opening the home screen alone does not trigger it, and minimizing to the tray is not an application exit.
+
+Expand a task to view official lifetime quota usage and model, effort and speed breakdowns, including subtasks, with the query account and data cutoff. These totals are separate from current-period estimates. This uses the local Codex ChatGPT login and the desktop app's private query endpoint (which may change), plus a read-only thread index (Node.js 22.13+ recommended). It fetches only expanded tasks, caches for five minutes, and retains the same account's last good data on failure. `.cache/official-usage` contains no login credentials. It does not overwrite calibration parameters.
+
 **See where your Codex usage goes — by task, project, and time range.**
 
 [简体中文](README.md) | English
@@ -24,7 +28,7 @@ Screenshots show the actual v0.4.0 interface with fictional accounts, tasks and 
 
 ## Features
 
-- **Task statistics:** recorded tokens, estimated costs and approximate current-account quota attribution.
+- **Task statistics:** recorded tokens, estimated costs, and one equivalent-usage column showing current account / across accounts. Project totals use the same pair; either value can be used for sorting.
 - **Cross-account comparison:** express local usage as Pro 20x, Pro 5x or Plus weekly allowances; totals can exceed 100%.
 - **Projects and trends:** optional project grouping with totals, daily trends and rankings; Today, Last 7 days, Current quota period or Task lifetime.
 - **Archives:** read unarchived tasks and the 30 most recently archived root tasks, including attributable children. Choose **Calculate all archives** to read more.
@@ -60,19 +64,20 @@ Open **[http://127.0.0.1:4201](http://127.0.0.1:4201)**. Keep the terminal runni
 These commands simulate shutdown actions without shutting down the computer. The dashboard needs no separate API key.
 If Codex is not found, set `CODEX_MONITOR_CODEX_PATH` to its executable.
 
-For independent operation, logon startup and installed-copy updates, see [standalone Windows deployment](docs/standalone-windows.md).
+For console-free background operation, logon startup, desktop shortcuts and installed-copy updates, see [standalone Windows deployment](docs/standalone-windows.md).
 
 ## Understand the numbers
 
 | Metric | Meaning |
 | --- | --- |
 | Account quota | Quota for Monitor's current Codex CLI account, which may differ from the desktop app account. |
-| Approx. quota % | Observed account-quota increases allocated to tasks; current account and quota period only. |
+| Plan equivalents · Current account | Replaces Quota %. The same calibration and display format as cross-account equivalents, limited to this quota period's records with matching weekly reset times. |
 | Plan equivalent usage | Estimated usage from included local records across accounts; one selected plan's weekly allowance equals 100%. |
 | Estimated cost / tokens | Recorded tokens and their API-equivalent USD value using a built-in price table, not a subscription bill. |
 
 The equivalent estimator assumes recorded **Pro accounts are all 20x**; logs cannot reliably distinguish 5x from 20x.
-Pro 20x, Pro 5x and Plus display the same estimate multiplied by 1, 4 and 20. The selector does not verify or change account tiers.
+Pro 20x, Pro 5x and Plus multiply both equivalent columns by 1, 4 and 20. The selector does not verify or change account tiers.
+Current account % always covers the current quota period; project rows sum their tasks. Logs lack reliable account IDs, so reset-time matching (within 60 seconds) is only an estimate. Accounts with the same reset time cannot be distinguished. Missing matches or prices produce partial or unavailable values.
 Missing logs, other-device usage and unpriced models affect accuracy.
 
 `--` means unavailable or unattributed, not zero; `+` indicates partial data.

@@ -11,16 +11,17 @@ import { TurnInspector } from '../../../web/src/components/TurnInspector';
 import { HistoryPeriodScope } from '../../../web/src/components/HistoryPanel';
 import { TaskInsights } from '../../../web/src/components/TaskInsights';
 
-const testState = vi.hoisted(() => ({ language: 'zh' as Language, loading: false, archiveMode: 'recent' as 'recent' | 'all', error: null as string | null }));
+const testState = vi.hoisted(() => ({ language: 'zh' as Language, loading: false, archiveMode: 'recent' as 'recent' | 'all', error: null as string | null, period: 'quota' as 'quota' | 'today' }));
 vi.mock('../../../web/src/LanguageContext', () => ({
   useI18n: () => ({ ...createI18n(testState.language), setLanguage: () => {} }),
   LanguageSwitch: () => null
 }));
-vi.mock('../../../web/src/useTaskHistory', () => ({ useTaskHistory: () => ({ jobs: [job], allocation: null, updatedAt: Date.parse('2026-09-22T00:00:00Z'), error: testState.error, archives: { mode: testState.archiveMode, total: 100, included: testState.archiveMode === 'all' ? 100 : 30 }, loading: testState.loading, requestedMode: testState.loading || testState.error ? 'all' : testState.archiveMode, loadArchives: () => {} }) }));
+vi.mock('../../../web/src/useTaskHistory', () => ({ useTaskHistory: () => ({ jobs: [job], allocation: null, analysis: { period: testState.period }, updatedAt: Date.parse('2026-09-22T00:00:00Z'), error: testState.error, archives: { mode: testState.archiveMode, total: 100, included: testState.archiveMode === 'all' ? 100 : 30 }, loading: testState.loading, requestedMode: testState.loading || testState.error ? 'all' : testState.archiveMode, loadArchives: () => {} }) }));
 
 const job = { id: 'task', name: '用户任务 Original', archived: true, archivedAt: '2026-09-21T00:00:00Z',
   project: { id: 'project', name: '用户项目 Original' }, updatedAt: '2026-09-21T00:00:00Z',
   estimatedUsagePercentSinceReset: 2, totalEstimatedCostUsd: 42, totalEstimatedCostIsComplete: true,
+  currentAccountEquivalentPercent: 6.7, currentAccountEquivalentIsComplete: false,
   totalUsage: { totalTokens: 10000, inputTokens: 9000, cachedInputTokens: 0, outputTokens: 1000, reasoningOutputTokens: 0 } } as HistoryJob;
 const snapshot = { runs: [], activeSessions: [], threads: {}, turns: {}, items: {}, pendingRequests: {},
   server: { connected: true, initialized: true, lastError: null, stderrTail: [] },
@@ -33,7 +34,43 @@ const turn = { id: 'turn', status: 'completed', startedAt: '2026-09-22T02:00:00Z
 const item = { id: 'item', type: 'agentMessage', title: 'Agent message', text: 'User input 原始对话文字', toolName: 'custom_tool' } as MonitorItem;
 
 describe('full interface language rendering', () => {
-  beforeEach(() => { testState.language = 'zh'; testState.loading = false; testState.archiveMode = 'recent'; testState.error = null; });
+  it('shows both equivalents in one cell without losing partial, zero, or missing values', () => {
+    const original = { current: job.currentAccountEquivalentPercent, across: job.estimated20xPercent, complete: job.estimated20xIsComplete };
+    try {
+      job.currentAccountEquivalentPercent = 0;
+      job.estimated20xPercent = 125.6;
+      job.estimated20xIsComplete = false;
+      const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
+      const html = render();
+      const table = html.slice(html.indexOf('<table'), html.indexOf('</table>'));
+      expect(table).toContain('class="equivalent-pair"');
+      expect(table).toContain('0.0%+');
+      expect(table).toContain('125.6%+');
+      expect(table).toContain('class="equivalent-divider"> / </span>');
+      expect(table).not.toContain('class="metric-equivalent20x');
+      job.estimated20xPercent = null;
+      expect(render()).toContain('等待校准');
+      expect(render()).toContain('0.0%+');
+    } finally {
+      job.currentAccountEquivalentPercent = original.current;
+      job.estimated20xPercent = original.across;
+      job.estimated20xIsComplete = original.complete;
+    }
+  });
+  beforeEach(() => { testState.language = 'zh'; testState.loading = false; testState.archiveMode = 'recent'; testState.error = null; testState.period = 'quota'; });
+
+  it('replaces observed allocation with current-account equivalents and retains them outside the quota range', () => {
+    for (const period of ['quota', 'today'] as const) {
+      testState.period = period;
+      const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
+      const table = html.slice(html.indexOf('<table'), html.indexOf('</table>'));
+      expect(table).toContain('当前账号占比');
+      expect(table).toContain('6.7%+');
+      expect(table).not.toContain('>2.0%');
+      expect(table).toContain('当前账号 · 本周期');
+      expect(html).toContain('按周额度重置时间匹配估算');
+    }
+  });
 
   it('puts totals before filters and the task table before secondary analysis', () => {
     const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
@@ -97,7 +134,7 @@ describe('full interface language rendering', () => {
     expect(zh).toContain('用量所属账号');
     expect(zh).toContain('账号未知');
     expect(zh).toContain('Monitor 使用的 Codex CLI 登录账号');
-    expect(zh).toContain('估算额度占比');
+    expect(zh).toContain('当前账号占比');
     expect(zh).toContain('已归档');
     expect(zh).toContain('1万');
     expect(zh).toContain('倒计时不会让这台电脑真正关机');
@@ -107,12 +144,12 @@ describe('full interface language rendering', () => {
     expect(zh).toContain('用户项目 Original'); // The separate project ranking is available even with table grouping off.
     expect(zh).toContain('统计所有归档');
     expect(zh).toContain('当前仅统计最近 30 个归档任务。');
-    expect(zh.match(/class="table-sort-button"/g)).toHaveLength(7);
+    expect(zh.match(/class="table-sort-button"/g)).toHaveLength(6);
     expect(zh).toContain('20x 等效消耗');
     expect(zh).toContain('跨账号 · 本周期');
     expect(zh).toContain('统计时间范围');
     expect(zh).toContain('等效消耗对比套餐');
-    expect(zh).toContain('影响等效消耗、估算费用、Token 列');
+    expect(zh).toContain('时间范围影响跨账号等效消耗、费用、Token');
     expect(zh).toContain('value="pro5x"');
     expect(zh).toContain('value="plus"');
     expect(zh).toContain('aria-sort="descending"');
@@ -121,22 +158,22 @@ describe('full interface language rendering', () => {
     testState.language = 'en';
     const en = render();
     expect(en).toContain('Overall Codex usage');
-    expect(en).toContain('Approx. quota %');
+    expect(en).toContain('20x equivalent usage · Current account');
     expect(en).toContain('20x equivalent usage');
-    expect(en).toContain('All accounts · Current quota period');
+    expect(en).toContain('Current account / Across accounts');
     expect(en).toContain('Equivalent usage comparison');
     expect(en).toContain('Statistics time range');
     expect(en).toContain('Archived');
     expect(en).toContain('10K');
     expect(en).toContain('Countdown will not shut down this computer');
     expect(en).toContain('用户任务 Original');
-    expect(en).not.toContain('估算额度占比');
+    expect(en).not.toContain('当前账号占比');
     expect(en).toContain('Calculate all archives');
     expect(en).toContain('aria-pressed="false">Group by project');
     expect(en).not.toContain('class="project-group-row"');
     expect(en).toContain('Statistics include only the 30 most recently archived tasks.');
     expect(en).toContain('Sort Task: Ascending');
-    expect(en).toContain('Sort Approx. quota %: Ascending');
+    expect(en).toContain('Sort Pro 20x equivalent usage · Current account: Ascending');
   });
 
   it('localizes the task tree, transcript labels and inspector while preserving original messages', () => {

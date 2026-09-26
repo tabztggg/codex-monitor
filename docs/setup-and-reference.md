@@ -151,25 +151,25 @@ cache-write, and output costs, with the implemented context multipliers.
 Prices are not fetched dynamically. Unknown models remain unpriced and tool
 fees are excluded. These are API-equivalent estimates, not subscription bills.
 
-### Current-account quota attribution
+### Current-account equivalents
 
 The header selects the overall Codex bucket, preferring its weekly window and
-excluding Spark. Task attribution uses that same window.
+excluding Spark. **Current account %** replaces the former observed-quota
+allocation column. It divides matched task costs by the same saved Pro 20x
+calibration used for cross-account equivalents. It always covers the current
+weekly period, even when another time range is selected. Plan comparison scales
+both columns; project totals include hidden task rows.
 
-Each observed quota increase is distributed using recorded task-cost increments,
-then accumulated. Repeated rounded readings retain pending usage. Earlier
-allocations do not shrink merely because another task works. Pre-observation
-consumption and increases without sufficient priced usage remain unattributed.
+Rollouts lack reliable account IDs. Records are matched by weekly reset time,
+allowing 60 seconds of timestamp drift; records from other windows are excluded.
+This is an account-identity estimate: accounts sharing the same reset time cannot
+be distinguished. Missing windows, unpriced models and untimed usage make the
+result incomplete (`+`), or unavailable (`--`) when no priced subtotal exists.
+No current-week usage is zero only when the records establish that absence.
+The current account label comes from the same quota snapshot as the calculation.
 
-The ledger persists in `.cache/quota-attribution.json`. Quota polling continues
-while the server runs even with the browser closed. Small reset-time drift
-within the same limit and duration is tolerated; an actual new window or lower
-usage reading starts a new baseline. Newly included historical archives establish
-a baseline instead of receiving later quota increases for their old usage.
-
-This attribution is only shown for the current quota period. Other ranges show
-`--`, without fabricating historical account attribution. A known task with no
-period usage can show zero; one with usage awaiting attribution shows `--`.
+The old `.cache/quota-attribution.json` ledger is preserved for compatibility;
+its observed increment allocation no longer drives the table column.
 
 ### Pro 20x equivalents
 

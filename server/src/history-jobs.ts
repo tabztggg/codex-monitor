@@ -21,7 +21,7 @@ import {
 import { asRecord, asString, cloneValue, toIsoDate } from "./utils";
 import { userPreview } from "../../shared/session-preview";
 import { QuotaAttribution } from "./quota-attribution";
-import { QuotaCalibration, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
+import { QuotaCalibration, equivalent20x, currentAccountEquivalent, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
 import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
 import { readProjectResolver } from './project-metadata';
 import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
@@ -60,7 +60,7 @@ type ParsedHistoryJob = HistoryJob & {
   untimedTokens?: number;
   totalUnpricedTokens?: number;
   quotaCalibrationEvents?: QuotaCalibrationEvent[];
-  quotaCalibrationVersion?: 4;
+  quotaCalibrationVersion?: 5;
   parentThreadId: string | null;
   isSubagent: boolean;
 };
@@ -150,6 +150,7 @@ export class HistoryJobReader {
     metadataById?: Map<string, HistoryJobMetadata> | null;
     nowMs?: number;
     usageWindow?: UsageWindow | null;
+    account?: HistoryUsageAllocation['currentAccount'];
     observeUsage?: boolean;
     archiveMode?: HistoryArchiveMode;
     period?: HistoryPeriod;
@@ -248,8 +249,12 @@ export class HistoryJobReader {
         unpricedTokens: unpriced, untimedTokens
       };
       const attributed = ledger?.attributed[job.id] ?? 0;
+      const accountEquivalent = currentAccountEquivalent(_events ?? [], window, nowMs,
+        calibration.costPerPercent, Boolean(job.totalUsage), untimedTokens);
       return { ...job,
         periodMetrics,
+        currentAccountEquivalentPercent: accountEquivalent.percent,
+        currentAccountEquivalentIsComplete: accountEquivalent.complete,
         estimated20xPercent: available && periodMetrics.usage ? equivalent20x({ ...job, sinceResetUsage: periodMetrics.usage, sinceResetEstimatedCostUsd: periodMetrics.costUsd }, calibration.costPerPercent) : null,
         estimated20xIsComplete: periodMetrics.costComplete,
         estimatedUsagePercentSinceReset: !ledger ? null : attributed > 0 ? attributed :
@@ -279,6 +284,7 @@ export class HistoryJobReader {
       nextCursor: offset + limit < jobs.length ? String(offset + limit) : null,
       archives: { mode: archiveMode, total: selection.total, included: allJobs.filter(job => job.archived).length },
       usageAllocation: {
+        currentAccount: args.account ?? null,
         equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent,
           source: calibration.source, calibratedAt: calibration.calibratedAt, referenceQuotaPercent: calibration.referenceQuotaPercent },
         ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
@@ -297,7 +303,7 @@ export class HistoryJobReader {
     const cached = this.cache.get(file.path);
     const unchanged = Boolean(cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.job?.quotaCalibrationVersion === 4 && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.job?.quotaCalibrationVersion === 5 && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -606,6 +612,7 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
       ...newer,
       dailyUsage: mergeDays(existing.dailyUsage, job.dailyUsage),
       quotaDailyUsage: mergeDays(existing.quotaDailyUsage, job.quotaDailyUsage),
+      quotaCalibrationEvents: [...existing.quotaCalibrationEvents ?? [], ...job.quotaCalibrationEvents ?? []],
       untimedTokens: (existing.untimedTokens ?? 0) + (job.untimedTokens ?? 0),
       totalUnpricedTokens: (existing.totalUnpricedTokens ?? 0) + (job.totalUnpricedTokens ?? 0),
       archived: existing.archived && job.archived,
@@ -678,6 +685,7 @@ function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] 
     target.updatedAt = latestIso(target.updatedAt, job.updatedAt);
     target.dailyUsage = mergeDays(target.dailyUsage, job.dailyUsage);
     target.quotaDailyUsage = mergeDays(target.quotaDailyUsage, job.quotaDailyUsage);
+    target.quotaCalibrationEvents = [...target.quotaCalibrationEvents ?? [], ...job.quotaCalibrationEvents ?? []];
     target.untimedTokens = (target.untimedTokens ?? 0) + (job.untimedTokens ?? 0);
     target.totalUnpricedTokens = (target.totalUnpricedTokens ?? 0) + (job.totalUnpricedTokens ?? 0);
     target.totalEstimatedCostUsd = addNullableNumbers(
@@ -990,7 +998,7 @@ export function parseHistorySessionFile(args: {
           calibrationStreamId ??= createHash('sha256').update(sessionId ?? args.sessionId ?? '').digest('hex');
           quotaCalibrationEvents.push({ id: sampleId, streamId: calibrationStreamId, at: recordTimestampMs,
             duplicateUsage: duplicate,
-            cost: duplicate || !increment ? 0 : estimateApiEquivalentCost(increment, activeModel),
+            cost: duplicate ? 0 : increment ? estimateApiEquivalentCost(increment, activeModel) : cumulative?.totalTokens ? null : 0,
             limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
         }
       }
@@ -1075,7 +1083,7 @@ export function parseHistorySessionFile(args: {
   return {
     id: sessionId,
     quotaCalibrationEvents,
-    quotaCalibrationVersion: 4,
+    quotaCalibrationVersion: 5,
     dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
     archived: false,
     parentThreadId,
@@ -1292,6 +1300,8 @@ function sortValue(job: HistoryJob, sortKey: HistoryJobSortKey): number | null {
       return job.last24HoursEstimatedCostUsd;
     case "estimatedUsagePercentSinceReset":
       return job.estimatedUsagePercentSinceReset;
+    case "currentAccountEquivalentPercent":
+      return job.currentAccountEquivalentPercent ?? null;
     case "runCount":
       return job.runCount;
     case "updatedAt":

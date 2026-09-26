@@ -6,6 +6,7 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import { isAllowedBrowserOrigin, parseAllowedBrowserOrigins } from "./http-security";
 import { MonitorService } from "./service";
+import { OfficialUsageReader } from './official-usage';
 
 const host = process.env.CODEX_MONITOR_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? "4201");
@@ -16,6 +17,7 @@ const isAllowedOrigin = (origin: string | undefined) =>
 
 const app = express();
 const service = new MonitorService();
+const officialUsage = new OfficialUsageReader();
 
 app.use((request, response, next) => {
   if (!isAllowedOrigin(request.headers.origin)) {
@@ -124,6 +126,12 @@ app.get("/api/history/threads", async (request, response) => {
       error: error instanceof Error ? error.message : String(error)
     });
   }
+});
+
+app.get('/api/history/jobs/:id/official-usage', async (request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  try { response.json(await officialUsage.read(request.params.id)); }
+  catch { response.status(503).json({ error: 'Official usage unavailable' }); }
 });
 
 app.get("/api/history/jobs", async (request, response) => {

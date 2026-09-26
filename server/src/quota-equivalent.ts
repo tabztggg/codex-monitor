@@ -260,3 +260,41 @@ export function equivalent20x(job: HistoryJob, costPerPercent: number | null): n
   const cost = job.sinceResetEstimatedCostUsd;
   return cost !== null && Number.isFinite(cost) && cost >= 0 ? cost / costPerPercent : null;
 }
+
+/** Rollouts do not identify the account: a matching weekly reset is an estimate,
+ * not proof of identity. Never assign missing-window records to the current account.
+ */
+export function currentAccountEquivalent(
+  events: QuotaCalibrationEvent[],
+  window: { startedAtMs: number; resetsAt: string } | null | undefined,
+  now: number,
+  costPerPercent: number | null,
+  hasUsage: boolean,
+  untimedTokens = 0
+): { percent: number | null; complete: boolean } {
+  const end = Date.parse(window?.resetsAt ?? '');
+  if (!window || end <= now || end - window.startedAtMs !== 604800000 ||
+      costPerPercent === null || !Number.isFinite(costPerPercent) || costPerPercent <= 0 || !hasUsage) {
+    return { percent: null, complete: false };
+  }
+  // Consolidated parent/child logs and overlapping fragments can repeat samples.
+  // Prefer the full log's proven duplicate over a fragment's apparent increment.
+  const unique = new Map<string | QuotaCalibrationEvent, QuotaCalibrationEvent>();
+  for (const event of events) {
+    const key = event.id ?? event;
+    if (!unique.get(key)?.duplicateUsage) unique.set(key, event);
+  }
+  let cost = 0;
+  let complete = untimedTokens === 0;
+  for (const event of unique.values()) {
+    if (event.at < window.startedAtMs || event.at > now || event.at >= end || event.duplicateUsage) continue;
+    if (!event.limit) {
+      if (event.cost === null || event.cost > 0) complete = false;
+      continue;
+    }
+    if (Math.abs(event.limit.resetsAt - end) > 60000) continue;
+    if (event.cost === null || !Number.isFinite(event.cost) || event.cost < 0) complete = false;
+    else cost += event.cost;
+  }
+  return { percent: cost > 0 || complete ? cost / costPerPercent : null, complete };
+}

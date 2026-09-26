@@ -1,5 +1,8 @@
 # Standalone Windows deployment
 
+当前跟随 Codex 的运行方式见文末「跟随 Codex 桌面运行」。下述计划任务为旧部署参考，不是当前默认配置。
+Current Codex lifecycle setup is documented at the end of this page; the scheduled-task setup below is a legacy option.
+
 [English README](../README.en.md) · [中文说明](#中文说明)
 
 This page documents the per-user deployment configured on the maintainer's
@@ -12,7 +15,8 @@ under `scripts/` must be copied into a configured installation before use.
 
 The installed copy lives in `%LOCALAPPDATA%\Programs\CodexMonitor`. It contains
 its own `dist`, production dependencies, `.cache`, `logs`, `standalone.json`,
-`Run-StandaloneMonitor.ps1`, and `Manage-StandaloneMonitor.ps1`.
+`Run-StandaloneMonitor.ps1`, `Manage-StandaloneMonitor.ps1`,
+`StandaloneMonitorRuntime.cs`, and the compiled `Run-StandaloneMonitor.exe` host.
 
 Node.js and an authenticated Codex CLI supporting `codex app-server` remain
 required. Their executable paths and the Codex data directory are recorded in
@@ -36,11 +40,21 @@ The configured behavior is:
 | Account | Interactive user session, limited privileges. |
 | Duplicate starts | Ignore a new start while the task is already running. |
 | Runtime limit | No scheduled runtime limit. |
+| Console windows | The task runs a GUI-subsystem host; all service children use no-console creation. |
 | Service exit recovery | The installed launcher waits one minute and retries, up to three times per launch. |
 
 This is a **logon startup task**. Running before a user signs in or continuing
 after sign-out is outside this installation's guarantees; it is not registered
 as a Windows service. Closing the Codex GUI does not request a monitor stop.
+
+The task action is `Run-StandaloneMonitor.exe`, with the quoted full path to
+`Run-StandaloneMonitor.ps1` as its only argument and the installation folder as
+its working directory. The host and runner own nested Windows process groups,
+so stopping the task also stops its children. A PowerShell task action with
+`-WindowStyle Hidden` can still open Windows Terminal before the script runs.
+Build the host from the checkout with `scripts/Build-StandaloneMonitorHost.ps1`;
+it uses the Windows .NET Framework compiler and outputs the executable under
+`.cache/standalone-host/`. Deploy it together with the runner and runtime source.
 
 Recovery is implemented by the installed launcher, not Task Scheduler's
 `RestartOnFailure` setting. Each attempt owns a Windows process group; exiting
@@ -54,7 +68,7 @@ Separately, the Node backend limits restarts of its Codex app-server child with 
 and writes each failure's delay to `stderr.log`. This applies while Node remains
 running; it does not replace the launcher's three-retry limit for Node exits.
 
-Use the desktop shortcut to start the monitor. The Start menu also contains
+Use the desktop shortcut to start the monitor without a console window. The Start menu also contains
 **Stop** and **Restart** shortcuts. The previous Startup shortcut and the source checkout's Windows
 launcher both delegate to the same installed task, avoiding a second instance.
 The source launcher detects the installation through `standalone.json`.
@@ -105,6 +119,7 @@ Look under `%LOCALAPPDATA%\Programs\CodexMonitor\logs`:
 | `stderr.log` | Current backend errors and diagnostics. |
 | `stdout.1.log`–`stdout.3.log`, `stderr.1.log`–`stderr.3.log` | Output from previous launches, rotated at startup. |
 | `lifecycle.jsonl` | Startup, process exits, retry attempts, and runner errors. |
+| `host-*.log`, `instance-*.log` | Current startup host and PowerShell diagnostics. |
 
 Also inspect **Codex Monitor** in Task Scheduler and its last run result. A
 healthy HTTP endpoint confirms the monitor is reachable; account data still
@@ -142,13 +157,20 @@ Monitor 由 Windows 计划任务 **Codex Monitor** 管理，在当前用户登�
 停止任务也会取消等待中的重试。最外层启动器被终止时，需要手动启动或下次登录。
 它可以在关闭 Codex 桌面窗口和原启动终端后继续运行。
 
+计划任务入口为不创建控制台的 `Run-StandaloneMonitor.exe`，参数是带引号的
+`Run-StandaloneMonitor.ps1` 完整路径，工作目录为安装目录。后续 PowerShell、Node
+和 Codex 子进程也禁用控制台窗口创建。仅设置 `-WindowStyle Hidden` 仍可能唤起
+Windows Terminal。源码中运行 `scripts/Build-StandaloneMonitorHost.ps1` 可使用
+Windows 自带的 .NET Framework 编译器构建入口程序；将输出的 EXE、启动脚本和
+`StandaloneMonitorRuntime.cs` 一起部署。`host-*.log`、`instance-*.log` 保留启动诊断。
+
 Node 后端内部的 Codex app-server 子进程另有 5/10/20/40/60 秒重启退避，初始化成功后
 稳定运行 30 秒才恢复初始间隔，每次失败的等待时间写入 `stderr.log`。此机制适用于 Node
 仍在运行时，不替代外层启动器对 Node 退出的三次重试限制。
 这是**登录自启**，不承诺未登录或注销后继续运行，也没有注册为 Windows 服务。
 
 Node.js 和已登录、支持 `codex app-server` 的 Codex CLI 仍然必需；Monitor 自己启动
-所需的 CLI 进程。当前安装保持关机模拟模式。通过桌面快捷方式启动，开始菜单还提供
+所需的 CLI 进程。当前安装保持关机模拟模式。桌面快捷方式启动时不显示命令窗口，开始菜单还提供
 Stop / Restart 快捷方式，或使用上面的 PowerShell 命令。旧 Startup 快捷方式和源码中的
 Windows 启动器都会转到同一个已安装任务，避免重复启动。Stop 只停止当前实例，
 不会取消下次登录自启。
@@ -168,3 +190,10 @@ Windows 启动器都会转到同一个已安装任务，避免重复启动。Sto
 备份并重新部署 `dist`、匹配的依赖清单和所需生产依赖，再启动验证。保留本地配置、
 `.cache`、日志及管理脚本，除非更新明确要求更换。仅修改源码、执行 `git pull`、
 重新构建或重启，都不会自动替换已安装的应用文件。
+# 跟随 Codex 桌面运行
+
+本机当前改用 `CodexMonitorCompanion.exe`，通过用户级 `~/.codex/hooks.json` 的 `SessionStart`（`startup|resume`）触发。桌面和开始菜单启动入口均保持原样；进入/恢复任务后才启动 Monitor。只打开首页不触发，应用留在托盘时仍视为运行。
+
+使用 `scripts/Build-CodexMonitorCompanion.ps1` 构建，将程序放在已有 Monitor 安装目录。钩子命令为安装路径下的 `CodexMonitorCompanion.exe --hook`，首次在 Codex 的钩子设置中审阅并信任。命令只接受桌面进程祖先，普通独立 CLI 不启动 Monitor；互斥锁防止多个任务重复启动。它通过操作系统等待桌面主进程退出，然后关闭自己拥有的 Monitor 进程树。
+
+本机旧 Windows 计划任务和独立 Monitor 桌面启动入口已撤销；程序、配置、统计缓存与恢复备份保留。以下为旧独立部署方式的参考，不代表本机仍启用。

@@ -5,9 +5,9 @@ import { groupTasksByProject, limitArchivedTasks, visibleTasks, type TaskSortCol
 const now = Date.parse('2026-09-22T00:00:00Z');
 const active = new Set(['a']);
 const jobs = [
-  { id: 'a', name: 'Task 10', archived: false, updatedAt: '2026-09-02T00:00:00Z', estimatedUsagePercentSinceReset: 1, totalEstimatedCostUsd: 30, totalUsage: { totalTokens: 100 } },
-  { id: 'b', name: 'task 2', archived: false, updatedAt: '2026-09-03T00:00:00Z', estimatedUsagePercentSinceReset: 3, totalEstimatedCostUsd: 10, totalUsage: { totalTokens: 300 } },
-  { id: 'c', name: 'Task 1', archived: true, updatedAt: '2026-09-01T00:00:00Z', estimatedUsagePercentSinceReset: 2, totalEstimatedCostUsd: 20, totalUsage: { totalTokens: 200 } }
+  { id: 'a', name: 'Task 10', archived: false, updatedAt: '2026-09-02T00:00:00Z', currentAccountEquivalentPercent: 1, totalEstimatedCostUsd: 30, totalUsage: { totalTokens: 100 } },
+  { id: 'b', name: 'task 2', archived: false, updatedAt: '2026-09-03T00:00:00Z', currentAccountEquivalentPercent: 3, totalEstimatedCostUsd: 10, totalUsage: { totalTokens: 300 } },
+  { id: 'c', name: 'Task 1', archived: true, updatedAt: '2026-09-01T00:00:00Z', currentAccountEquivalentPercent: 2, totalEstimatedCostUsd: 20, totalUsage: { totalTokens: 200 } }
 ] as HistoryJob[];
 const order = (data: HistoryJob[], column: TaskSortColumn, direction: SortDirection) =>
   visibleTasks(data, active, 'all', '', column, now, false, 'en', direction).map(job => job.id);
@@ -26,18 +26,18 @@ describe('task column sorting', () => {
 
   it.each<TaskSortColumn>(['usage', 'cost', 'tokens', 'activity'])('keeps missing and invalid %s after measured zero in both directions', column => {
     const data = [
-      { id: 'unknown', name: 'Unknown', updatedAt: 'invalid', estimatedUsagePercentSinceReset: null, totalEstimatedCostUsd: null, totalUsage: null },
-      { id: 'invalid', name: 'Invalid', updatedAt: 'invalid', estimatedUsagePercentSinceReset: NaN, totalEstimatedCostUsd: Infinity, totalUsage: { totalTokens: NaN } },
-      { id: 'zero', name: 'Zero', updatedAt: '1970-01-01T00:00:00Z', estimatedUsagePercentSinceReset: 0, totalEstimatedCostUsd: 0, totalUsage: { totalTokens: 0 } },
-      { id: 'high', name: 'High', updatedAt: '2026-01-01T00:00:00Z', estimatedUsagePercentSinceReset: 2, totalEstimatedCostUsd: 2, totalUsage: { totalTokens: 2 } }
+      { id: 'unknown', name: 'Unknown', updatedAt: 'invalid', currentAccountEquivalentPercent: null, totalEstimatedCostUsd: null, totalUsage: null },
+      { id: 'invalid', name: 'Invalid', updatedAt: 'invalid', currentAccountEquivalentPercent: NaN, totalEstimatedCostUsd: Infinity, totalUsage: { totalTokens: NaN } },
+      { id: 'zero', name: 'Zero', updatedAt: '1970-01-01T00:00:00Z', currentAccountEquivalentPercent: 0, totalEstimatedCostUsd: 0, totalUsage: { totalTokens: 0 } },
+      { id: 'high', name: 'High', updatedAt: '2026-01-01T00:00:00Z', currentAccountEquivalentPercent: 2, totalEstimatedCostUsd: 2, totalUsage: { totalTokens: 2 } }
     ] as HistoryJob[];
     expect(order(data, column, 'asc')).toEqual(['zero', 'high', 'invalid', 'unknown']);
     expect(order(data, column, 'desc')).toEqual(['high', 'zero', 'invalid', 'unknown']);
   });
 
   it('sorts raw quota fractions instead of rounded display percentages and breaks equal values consistently', () => {
-    const data = jobs.map(job => ({ ...job, estimatedUsagePercentSinceReset: 1.001, totalEstimatedCostUsd: 5, updatedAt: jobs[0].updatedAt }));
-    data[1].estimatedUsagePercentSinceReset = 1.002;
+    const data = jobs.map(job => ({ ...job, currentAccountEquivalentPercent: 1.001, totalEstimatedCostUsd: 5, updatedAt: jobs[0].updatedAt }));
+    data[1].currentAccountEquivalentPercent = 1.002;
     expect(order(data, 'usage', 'asc')).toEqual(['a', 'c', 'b']);
     expect(order([...data].reverse(), 'usage', 'desc')).toEqual(['b', 'a', 'c']);
   });
@@ -62,10 +62,10 @@ describe('project sorting', () => {
   const beta = { id: 'beta', name: 'Beta' };
   const gamma = { id: 'gamma', name: 'Gamma' };
   const data = [
-    { ...jobs[0], project: alpha, estimatedUsagePercentSinceReset: 2, totalEstimatedCostUsd: 5, totalUsage: { totalTokens: 40 } },
-    { ...jobs[2], id: 'archive', project: alpha, updatedAt: '2026-09-03T00:00:00Z', estimatedUsagePercentSinceReset: 5, totalEstimatedCostUsd: 15, totalUsage: { totalTokens: 60 } },
-    { ...jobs[1], project: beta, updatedAt: '2026-09-04T00:00:00Z', estimatedUsagePercentSinceReset: 9, totalEstimatedCostUsd: 12, totalUsage: { totalTokens: 150 } },
-    { ...jobs[2], project: gamma, updatedAt: 'invalid', estimatedUsagePercentSinceReset: null, totalEstimatedCostUsd: null, totalUsage: null }
+    { ...jobs[0], project: alpha, currentAccountEquivalentPercent: 2, totalEstimatedCostUsd: 5, totalUsage: { totalTokens: 40 } },
+    { ...jobs[2], id: 'archive', project: alpha, updatedAt: '2026-09-03T00:00:00Z', currentAccountEquivalentPercent: 5, totalEstimatedCostUsd: 15, totalUsage: { totalTokens: 60 } },
+    { ...jobs[1], project: beta, updatedAt: '2026-09-04T00:00:00Z', currentAccountEquivalentPercent: 9, totalEstimatedCostUsd: 12, totalUsage: { totalTokens: 150 } },
+    { ...jobs[2], project: gamma, updatedAt: 'invalid', currentAccountEquivalentPercent: null, totalEstimatedCostUsd: null, totalUsage: null }
   ] as HistoryJob[];
 
   it('reports partial lifetime totals without treating unknowns as zero or hiding incomplete price estimates', () => {

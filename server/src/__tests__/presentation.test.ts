@@ -34,11 +34,11 @@ describe('task presentation', () => {
     const a = { id: 'a', name: 'Project A' };
     const b = { id: 'b', name: 'Project B' };
     const jobs = [
-      { id: 'a1', project: a, archived: false, updatedAt: '2026-09-01T00:00:00Z', estimatedUsagePercentSinceReset: 1.2345 },
-      { id: 'a2', project: a, archived: true, updatedAt: '2026-09-02T00:00:00Z', estimatedUsagePercentSinceReset: 2.3456 },
-      { id: 'a3', project: a, archived: true, updatedAt: '2026-09-03T00:00:00Z', estimatedUsagePercentSinceReset: null },
-      { id: 'b1', project: b, archived: false, updatedAt: '2026-09-04T00:00:00Z', estimatedUsagePercentSinceReset: 0 },
-      { id: 'loose', project: null, archived: true, updatedAt: '2026-09-05T00:00:00Z', estimatedUsagePercentSinceReset: null }
+      { id: 'a1', project: a, archived: false, updatedAt: '2026-09-01T00:00:00Z', currentAccountEquivalentPercent: 1.2345 },
+      { id: 'a2', project: a, archived: true, updatedAt: '2026-09-02T00:00:00Z', currentAccountEquivalentPercent: 2.3456 },
+      { id: 'a3', project: a, archived: true, updatedAt: '2026-09-03T00:00:00Z', currentAccountEquivalentPercent: null },
+      { id: 'b1', project: b, archived: false, updatedAt: '2026-09-04T00:00:00Z', currentAccountEquivalentPercent: 0 },
+      { id: 'loose', project: null, archived: true, updatedAt: '2026-09-05T00:00:00Z', currentAccountEquivalentPercent: null }
     ] as HistoryJob[];
     const before = structuredClone(jobs);
     const groups = groupTasksByProject(jobs, [jobs[0], jobs[3]], 'usage');
@@ -54,8 +54,8 @@ describe('task presentation', () => {
 
   it('uses project IDs instead of merging projects with identical names, and supports project-name search', () => {
     const jobs = [
-      { id: 'one', project: { id: 'p1', name: 'Same project name' }, name: 'First task', updatedAt: '2026-09-01T00:00:00Z', estimatedUsagePercentSinceReset: 2 },
-      { id: 'two', project: { id: 'p2', name: 'Same project name' }, name: 'Second task', updatedAt: '2026-09-02T00:00:00Z', estimatedUsagePercentSinceReset: 3 }
+      { id: 'one', project: { id: 'p1', name: 'Same project name' }, name: 'First task', updatedAt: '2026-09-01T00:00:00Z', currentAccountEquivalentPercent: 2 },
+      { id: 'two', project: { id: 'p2', name: 'Same project name' }, name: 'Second task', updatedAt: '2026-09-02T00:00:00Z', currentAccountEquivalentPercent: 3 }
     ] as HistoryJob[];
     expect(groupTasksByProject(jobs, jobs, 'usage').map(group => group.quotaPercent)).toEqual([3, 2]);
     expect(visibleTasks(jobs, new Set(), 'all', 'same project', 'usage', Date.now())).toHaveLength(2);
@@ -66,7 +66,7 @@ describe('task presentation', () => {
       archivedAt: new Date(Date.UTC(2026, 8, 1, index)).toISOString(),
       // Reverse activity order: the limit must use archive actions, not activity or usage.
       updatedAt: new Date(Date.UTC(2026, 8, 1, 35 - index)).toISOString(),
-      estimatedUsagePercentSinceReset: 35 - index
+      currentAccountEquivalentPercent: 35 - index
     })) as HistoryJob[];
     const unarchived = Array.from({ length: 40 }, (_, index) => ({ id: `active-${index}`, archived: false })) as HistoryJob[];
     const jobs = [...archives, ...unarchived];
@@ -87,15 +87,15 @@ describe('task presentation', () => {
   });
   it('shows archives by default and hides only their rows without changing recorded usage', () => {
     const jobs = [
-      { id: 'active', archived: false, updatedAt: '2026-09-07T10:00:00Z', estimatedUsagePercentSinceReset: 3 },
-      { id: 'archived', archived: true, updatedAt: '2026-09-05T10:00:00Z', estimatedUsagePercentSinceReset: 7 }
+      { id: 'active', archived: false, updatedAt: '2026-09-07T10:00:00Z', currentAccountEquivalentPercent: 3 },
+      { id: 'archived', archived: true, updatedAt: '2026-09-05T10:00:00Z', currentAccountEquivalentPercent: 7 }
     ] as HistoryJob[];
     const before = structuredClone(jobs);
     const now = Date.parse('2026-09-07T12:00:00Z');
     expect(visibleTasks(jobs, new Set(), 'all', '', 'usage', now).map(job => job.id)).toEqual(['archived', 'active']);
     expect(visibleTasks(jobs, new Set(), 'all', '', 'usage', now, true)).toEqual([jobs[0]]);
     expect(jobs).toEqual(before);
-    expect(visibleTasks(jobs, new Set(), 'all', '', 'usage', now, false).map(job => job.estimatedUsagePercentSinceReset)).toEqual([7, 3]);
+    expect(visibleTasks(jobs, new Set(), 'all', '', 'usage', now, false).map(job => job.currentAccountEquivalentPercent)).toEqual([7, 3]);
   });
   it('preserves authored titles and hides internal-context previews', () => {
     expect(taskTitle({ id: '123456789', name: 'Revisar el capítulo', preview: '<instructions>text</instructions>' })).toBe('Revisar el capítulo');
@@ -107,9 +107,9 @@ describe('task presentation', () => {
   });
   it('filters before sorting and keeps unknown usage below measured zero', () => {
     const jobs = [
-      { id: 'a', name: 'Active', updatedAt: '2026-09-05T10:00:00Z', estimatedUsagePercentSinceReset: null },
-      { id: 'b', name: 'Today', updatedAt: '2026-09-07T10:00:00Z', estimatedUsagePercentSinceReset: 0 },
-      { id: 'c', name: 'Old', updatedAt: '2026-09-05T10:00:00Z', estimatedUsagePercentSinceReset: 9 }
+      { id: 'a', name: 'Active', updatedAt: '2026-09-05T10:00:00Z', currentAccountEquivalentPercent: null },
+      { id: 'b', name: 'Today', updatedAt: '2026-09-07T10:00:00Z', currentAccountEquivalentPercent: 0 },
+      { id: 'c', name: 'Old', updatedAt: '2026-09-05T10:00:00Z', currentAccountEquivalentPercent: 9 }
     ] as HistoryJob[];
     const now = new Date(2026, 8, 7, 12).getTime();
     expect(visibleTasks(jobs, new Set(['a']), 'today', '', 'usage', now).map(j => j.id)).toEqual(['b', 'a']);

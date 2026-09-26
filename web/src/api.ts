@@ -7,6 +7,7 @@ import type {
   HistoryJobSortKey,
   HistoryThreadListResponse,
   MonitorSnapshot,
+  OfficialTaskUsage,
   RunSnapshot,
   SortDirection
 } from "../../shared/monitor";
@@ -30,6 +31,9 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 }
 
 export const api = {
+  fetchOfficialTaskUsage(id: string, signal?: AbortSignal): Promise<OfficialTaskUsage> {
+    return jsonFetch(`/api/history/jobs/${encodeURIComponent(id)}/official-usage`, { signal });
+  },
   fetchSnapshot(signal?: AbortSignal): Promise<MonitorSnapshot> {
     return jsonFetch<MonitorSnapshot>("/api/snapshot", { signal });
   },

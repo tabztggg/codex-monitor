@@ -202,6 +202,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       ...args,
       forceRefresh: args.forceRefresh === true && !args.cursor,
       metadataById,
+      account: this.codexUsage.account,
       usageWindow: this.getPrimaryUsageWindow()
     });
   }

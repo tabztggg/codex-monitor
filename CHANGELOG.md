@@ -10,6 +10,15 @@ Windows 独立安装还需部署新构建与依赖；v0.4.2 还需更新启动�
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 Standalone Windows installations also need the new build, dependencies and, for v0.4.2, the updated runner.
 
+## v0.4.3 — 2026-09-26
+
+- 当前账号与跨账号等效消耗合并为一列，保留分别排序和项目汇总；统一估算基准。
+- 展开任务可查看官方累计用量及模型、推理强度、速度分布；按账号缓存，读取失败保留旧值。
+- 增加 Windows 无窗口启动器和跟随 Codex 退出的运行方式。自动启动需在 Codex 中信任 SessionStart Hook；仅打开首页不会触发。
+- 验证：293 项测试通过、2 项跳过；类型检查与构建通过。
+
+English: Combine current/cross-account estimates, add cached official lifetime usage details, and support windowless launch with the Codex desktop lifecycle. SessionStart hooks require user trust and a task start/resume.
+
 ## v0.4.2 — 2026-09-23
 
 - 修复 cpolar／反向代理白屏及实时连接被拒绝，支持配置精确的 HTTP／HTTPS 来源。

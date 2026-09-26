@@ -327,6 +327,7 @@ function defaultSpawnProcess(): ProcessHandle {
   try {
     child = spawn(executable, ["app-server"], {
       shell: false,
+      windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       cwd: process.cwd(),
       env: process.env

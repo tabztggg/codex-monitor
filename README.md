@@ -11,7 +11,7 @@
 
 ![Codex Monitor 中文界面：账号额度、跨账号估算与任务明细](assets/screenshots/overview-zh.jpg)
 
-截图为 v0.4.0 真实界面，使用虚构账号、任务和用量。
+截图为 v0.4.4 真实界面，使用虚构账号、任务和用量。
 
 <details>
 <summary>更多截图：项目汇总、每日趋势</summary>

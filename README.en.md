@@ -15,7 +15,7 @@ This is an unofficial community project, not an OpenAI product or billing system
 
 ![Codex Monitor English dashboard: account quota, cross-account estimates and task details](assets/screenshots/overview-en.jpg)
 
-Screenshots show the actual v0.4.0 interface with fictional accounts, tasks and usage.
+Screenshots show the actual v0.4.4 interface with fictional accounts, tasks and usage.
 
 <details>
 <summary>More screenshots: project totals and daily trends</summary>

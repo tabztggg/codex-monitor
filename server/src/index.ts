@@ -7,6 +7,7 @@ import { WebSocketServer } from "ws";
 import { isAllowedBrowserOrigin, parseAllowedBrowserOrigins } from "./http-security";
 import { MonitorService } from "./service";
 import { OfficialUsageReader } from './official-usage';
+import { installServiceControl } from './service-control';
 
 const host = process.env.CODEX_MONITOR_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? "4201");
@@ -35,6 +36,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+installServiceControl(app, process.env.CODEX_MONITOR_MANAGED === '1', code => process.exit(code));
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });

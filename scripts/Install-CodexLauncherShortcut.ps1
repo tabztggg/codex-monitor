@@ -5,7 +5,7 @@ $desktop = [Environment]::GetFolderPath("Desktop")
 $programs = [Environment]::GetFolderPath("Programs")
 $desktopShortcutPath = Join-Path $desktop "Codex with Monitor.lnk"
 $startMenuShortcutPath = Join-Path $programs "Codex.lnk"
-$launcherPath = Join-Path $repoRoot "Codex With Monitor.cmd"
+$launcherPath = Join-Path $repoRoot "scripts\legacy\Codex With Monitor.cmd"
 $iconLocation = "$env:SystemRoot\System32\shell32.dll,220"
 
 $package = Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue |

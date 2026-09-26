@@ -1,6 +1,6 @@
 # Codex Monitor
 
-This workstation now starts Monitor from a Codex `SessionStart` hook and stops its process tree when the desktop app exits. It uses no Windows startup entry, task or service. The hook needs a one-time trust review in Codex; opening the home screen alone does not trigger it, and minimizing to the tray is not an application exit.
+Windows deployment: run `powershell -File scripts/Install-StandaloneMonitor.ps1` after building. It installs a desktop shortcut and a windowless logon task, independent of Codex. The previous Monitor hook is backed up and removed.
 
 Expand a task to view official lifetime quota usage and model, effort and speed breakdowns, including subtasks, with the query account and data cutoff. These totals are separate from current-period estimates. This uses the local Codex ChatGPT login and the desktop app's private query endpoint (which may change), plus a read-only thread index (Node.js 22.13+ recommended). It fetches only expanded tasks, caches for five minutes, and retains the same account's last good data on failure. `.cache/official-usage` contains no login credentials. It does not overwrite calibration parameters.
 
@@ -11,7 +11,7 @@ Expand a task to view official lifetime quota usage and model, effort and speed 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor).
 This is an unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.2](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.2)** · Fixes cpolar blank pages and reduces repeated requests during outages. See the [changelog](CHANGELOG.md).
+**[v0.4.4](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.4)** · Multi-account usage, service controls and simplified Windows deployment. See the [changelog](CHANGELOG.md).
 
 ![Codex Monitor English dashboard: account quota, cross-account estimates and task details](assets/screenshots/overview-en.jpg)
 
@@ -36,6 +36,8 @@ Screenshots show the actual v0.4.0 interface with fictional accounts, tasks and 
 - **Incremental refresh:** reuse unchanged logs; refresh every 30 seconds, 1, 2, 5 or 10 minutes. Outages retain existing data and retries gradually slow down.
 
 ## Quick start
+
+On Windows, double-click **Codex Monitor.vbs** in the repository root (Node.js and Codex required). First launch installs dependencies, builds, deploys, creates a desktop shortcut, and enables logon startup. Later launches open the dashboard and restore a missing shortcut. Update with `wscript.exe "Codex Monitor.vbs" deploy`. Helpers are in `scripts/`; legacy entries are in `scripts/legacy/`.
 
 Requires **Node.js >=20 (22+ recommended)**, npm and an authenticated Codex installation supporting `codex app-server`.
 
@@ -104,3 +106,11 @@ Develop with `npm run dev`; check with `npm test`, `npx tsc --noEmit` and `npm r
 
 The original application was created by [manuelsh](https://github.com/manuelsh/codex-monitor); this version focuses on usability and usage analysis.
 This repository currently has no `LICENSE` file and does not claim MIT/Apache licensing. Check applicable upstream permissions before use or redistribution.
+
+### Service controls
+
+The Windows managed launcher enables Restart/Stop under the top-right Service menu. Local and remote controls require no password; anyone who can access the page can restart or stop Monitor. Stop affects Monitor only, not Windows or Codex. A stopped server cannot restart itself from its offline webpage: use the desktop shortcut or remote desktop. The shortcut opens an existing instance or starts one without a console; it runs independently of Codex. Deployment automatically creates the shortcut and enables logon startup.
+
+### Multiple account usage
+
+Use the quota card dropdown or previous/next buttons to view recorded accounts. Monitor retains the last confirmed usage per email across restarts, without credentials. Other accounts show the recording time, not live usage. An account appears after Monitor reads its usage while logged in. This view does not change your login or task statistics.

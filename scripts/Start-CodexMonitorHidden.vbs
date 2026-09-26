@@ -23,7 +23,7 @@ command = Chr(34) & shell.ExpandEnvironmentStrings("%SystemRoot%") & _
   Chr(34) & script & Chr(34) & command
 result = shell.Run(command, 0, True)
 If result <> 0 Then
-  MsgBox "Codex Monitor could not start. Check the installed logs and Windows task.", _
+  MsgBox "Codex Monitor could not start. Check the installed logs.", _
     vbExclamation, "Codex Monitor"
 End If
 WScript.Quit result

@@ -102,12 +102,12 @@ explicitly after source changes or when frontend output is missing.
 Its entry points are:
 
 ```powershell
-& '.\Codex Monitor.cmd'
-& '.\Codex Monitor.cmd' -NoBrowser
-& '.\Codex With Monitor.cmd' -Cli
+wscript.exe '.\Codex Monitor.vbs'
+wscript.exe '.\Codex Monitor.vbs' nobrowser
+& '.\scripts\legacy\Codex With Monitor.cmd' -Cli
 ```
 
-`Install Desktop Shortcut.cmd` creates a monitor shortcut. The separate Codex
+`scripts/legacy/Install Desktop Shortcut.cmd` creates a monitor shortcut. The separate Codex
 launcher shortcut starts the monitor and then Codex. For login startup, place
 a shortcut to a reviewed launcher in `shell:startup`; this is per-machine setup,
 not something installed by cloning the repository. `-NoBrowser` avoids opening

@@ -76,7 +76,8 @@ internal static class CodexMonitorCompanion {
       if (!MonitorProcessGroup.Contains(monitor.Handle)) throw new InvalidOperationException("Monitor did not inherit its lifetime group.");
       File.AppendAllText(Path.Combine(root, "logs", "companion.log"), DateTimeOffset.Now.ToString("o") +
         " desktop=" + desktop.Id + " monitor=" + monitor.Id + Environment.NewLine);
-      desktop.WaitForExit(); // OS wait; no recurring process scan or network poll.
+      // Also release the singleton after an explicit service stop.
+      while (!desktop.WaitForExit(1000) && !monitor.HasExited) { }
       if (!monitor.HasExited) monitor.Kill();
       monitor.WaitForExit();
     }

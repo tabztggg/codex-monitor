@@ -1058,3 +1058,11 @@ a {
 .official-usage-breakdowns li strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .equivalent-pair { display: inline-flex; align-items: baseline; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .equivalent-divider { color: var(--muted); padding: 0 7px; font-weight: 400; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.service-controls { position: relative; display: flex; align-items: center; gap: 8px; }
+.service-control-button { color: var(--text); white-space: nowrap; }
+.service-control-button:disabled { opacity: .5; cursor: not-allowed; }
+.service-control-status { position: absolute; right: 0; top: calc(100% + 8px); width: 260px; padding: 10px 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; line-height: 1.5; }.quota-account-switcher { display: flex; gap: 6px; align-items: center; margin-top: 12px; min-width: 0; }
+.quota-account-switcher select { flex: 1; min-width: 0; width: 0; text-overflow: ellipsis; }
+.quota-account-switcher button { flex-shrink: 0; padding-inline: 10px; }
+.quota-account-switcher button:disabled { opacity: .4; cursor: default; }

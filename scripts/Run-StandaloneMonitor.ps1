@@ -34,8 +34,11 @@ try {
       Write-Lifecycle 'instance-started' @{ instancePid = $monitorProcess.Id; attempt = $attempt }
       $monitorProcess.WaitForExit()
       Write-Lifecycle 'instance-exited' @{ instancePid = $monitorProcess.Id; exitCode = $monitorProcess.ExitCode; attempt = $attempt }
+      $instanceExitCode = $monitorProcess.ExitCode
       $monitorProcess.Dispose()
       $monitorProcess = $null
+      if ($instanceExitCode -eq 0) { exit 0 }
+      if ($instanceExitCode -eq 42) { $attempt = -1; continue }
       if ($attempt -lt 3) {
         Write-Lifecycle 'retry-scheduled' @{ nextAttempt = $attempt + 1; delaySeconds = 60 }
         Start-Sleep -Seconds 60
@@ -47,6 +50,7 @@ try {
   $config = Get-Content -LiteralPath (Join-Path $installRoot 'standalone.json') -Raw | ConvertFrom-Json
   Set-Location -LiteralPath $installRoot
   $env:NODE_ENV = 'production'
+  $env:CODEX_MONITOR_MANAGED = '1'
   $env:CODEX_MONITOR_DRY_RUN = '1'
   $env:PORT = [string]$config.port
   $env:CODEX_MONITOR_HOST = [string]$config.hostAddress

@@ -1,13 +1,14 @@
+param([string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'Programs\CodexMonitor'))
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktop "Codex Monitor.lnk"
-$installedLauncher = Join-Path $env:LOCALAPPDATA 'Programs\CodexMonitor\Start-CodexMonitorHidden.vbs'
+$installedLauncher = Join-Path $InstallRoot 'Start-CodexMonitorHidden.vbs'
 $launcherPath = if (Test-Path -LiteralPath $installedLauncher) {
   $installedLauncher
 } else {
-  Join-Path $PSScriptRoot 'Start-CodexMonitorHidden.vbs'
+  Join-Path $repoRoot 'Codex Monitor.vbs'
 }
 $iconPath = Join-Path $repoRoot "assets\codex-monitor.ico"
 
@@ -24,5 +25,8 @@ if (Test-Path -LiteralPath $iconPath) {
 }
 $shortcut.Description = "Start Codex Monitor"
 $shortcut.Save()
+$saved = $shell.CreateShortcut($shortcutPath)
+if (-not (Test-Path -LiteralPath $shortcutPath) -or $saved.Arguments -ne $shortcut.Arguments -or
+    $saved.TargetPath -ne $shortcut.TargetPath) { throw 'Desktop shortcut verification failed.' }
 
 Write-Host "Created $shortcutPath"

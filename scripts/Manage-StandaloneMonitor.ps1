@@ -4,41 +4,39 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'standalone.json') -Raw | ConvertFrom-Json
-$task = Get-ScheduledTask -TaskName $config.taskName -ErrorAction Stop
-$runner = Join-Path $PSScriptRoot 'Run-StandaloneMonitor.ps1'
-if ($task.Actions.Count -ne 1 -or $task.Actions[0].WorkingDirectory -ne $PSScriptRoot -or
-    -not $task.Actions[0].Arguments.Contains('"' + $runner + '"')) {
-  throw 'The task does not belong to this Monitor installation.'
-}
 $url = 'http://' + $config.hostAddress + ':' + $config.port
-if ($Action -eq 'Status') {
-  Get-ScheduledTaskInfo -TaskName $config.taskName | Select-Object LastRunTime, LastTaskResult
-  Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 5
-  exit 0
+function Read-Control {
+  try { Invoke-RestMethod -Uri "$url/api/service" -TimeoutSec 2 } catch { $null }
 }
+$control = Read-Control
+if ($Action -eq 'Status') { Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 5; exit 0 }
 if ($Action -in @('Stop', 'Restart')) {
-  Stop-ScheduledTask -TaskName $config.taskName
-  $stopped = $false
-  for ($attempt = 0; $attempt -lt 20; $attempt++) {
-    $running = (Get-ScheduledTask -TaskName $config.taskName).State -eq 'Running'
-    $listener = Get-NetTCPConnection -LocalPort $config.port -State Listen -ErrorAction SilentlyContinue |
-      Where-Object { $_.LocalAddress -in @($config.hostAddress, '0.0.0.0', '::') }
-    if (-not $running -and -not $listener) { $stopped = $true; break }
-    Start-Sleep -Milliseconds 250
-  }
-  if (-not $stopped) { throw 'Monitor task did not stop or its port is still occupied. No other process was stopped.' }
+  if (-not $control.enabled) { throw 'Local service control is unavailable.' }
+  $requestAction = if ($Action -eq 'Stop') { 'stop' } else { 'restart' }
+  Invoke-RestMethod -Uri "$url/api/service" -Method Post -ContentType 'application/json' -Body (@{action=$requestAction} | ConvertTo-Json -Compress) | Out-Null
+  if ($Action -eq 'Stop') { exit 0 }
 }
-if ($Action -eq 'Stop') { exit 0 }
-Start-ScheduledTask -TaskName $config.taskName
-$ready = $false
-$startupTimer = [Diagnostics.Stopwatch]::StartNew()
-# An existing task may currently be in its one-minute recovery delay.
-while ($startupTimer.Elapsed.TotalSeconds -lt 90) {
+if ($Action -eq 'Start' -and -not $control.enabled) {
+  $startupMutex = New-Object Threading.Mutex($false, 'Local\CodexMonitor.ManualStart')
+  if (-not $startupMutex.WaitOne(0)) { $startupMutex.Dispose(); exit 0 }
   try {
-    $snapshot = Invoke-RestMethod -Uri "$url/api/snapshot" -TimeoutSec 2
-    if ($snapshot.activeShutdown.dryRun -eq $true) { $ready = $true; break }
-  } catch { }
+    if (-not (Read-Control).enabled) {
+      $task = Get-ScheduledTask -TaskName $config.taskName -ErrorAction Stop
+      $expected = Join-Path $PSScriptRoot 'Run-StandaloneMonitor.exe'
+      if ($task.Actions.Count -ne 1 -or $task.Actions[0].Execute -ne $expected) { throw 'Unexpected Monitor startup task.' }
+      Start-ScheduledTask -TaskName $config.taskName
+      for ($attempt=0; $attempt -lt 40; $attempt++) {
+        if ((Read-Control).enabled) { break }
+        Start-Sleep -Milliseconds 500
+      }
+    }
+  } finally { $startupMutex.ReleaseMutex(); $startupMutex.Dispose() }
+}
+$ready = $false
+for ($attempt=0; $attempt -lt 40; $attempt++) {
+  $next=Read-Control
+  if ($next.enabled -and ($Action -ne 'Restart' -or $next.instance -ne $control.instance)) { $ready=$true; break }
   Start-Sleep -Milliseconds 500
 }
-if (-not $ready) { throw "Monitor did not become ready. Check $PSScriptRoot\logs and the Windows task result." }
+if (-not $ready) { throw 'Monitor did not become ready. Check the installed logs.' }
 if (-not $NoBrowser) { Start-Process $url }

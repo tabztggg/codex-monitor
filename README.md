@@ -7,7 +7,7 @@
 本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。
 这是非官方社区项目，不是 OpenAI 官方产品或计费系统。
 
-**[v0.4.2](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.2)** · 修复 cpolar 白屏，减少断线时的重复请求。查看[更新日志](CHANGELOG.md)。
+**[v0.4.4](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.4)** · 多账号用量、网页服务控制与 Windows 一键部署。见[更新日志](CHANGELOG.md)。
 
 ![Codex Monitor 中文界面：账号额度、跨账号估算与任务明细](assets/screenshots/overview-zh.jpg)
 
@@ -34,7 +34,9 @@
 
 ## 快速开始
 
-本机可通过 Codex 的 `SessionStart` 钩子运行 `CodexMonitorCompanion.exe --hook`：进入或恢复任务时启动 Monitor，桌面主进程退出时关闭全部 Monitor 子进程。它无需 Windows 自启动、计划任务或服务；首次需在 Codex 中审阅并信任钩子。只打开首页不会触发，关闭到托盘也不等于退出应用。详见[运行方式](docs/standalone-windows.md)。
+Windows 双击仓库根目录 **Codex Monitor.vbs**（需先安装 Node.js 和 Codex）。首次运行自动安装依赖、构建、部署，创建桌面快捷方式并启用登录自启动；后续直接打开网页并补回缺失的快捷方式。更新部署：`wscript.exe "Codex Monitor.vbs" deploy`。辅助脚本统一在 `scripts/`，旧入口在 `scripts/legacy/`。
+
+Windows 部署运行 `powershell -File scripts/Install-StandaloneMonitor.ps1`：自动创建桌面快捷方式、注册当前用户登录后无窗口自启动。Monitor 独立运行，关闭 Codex 不会关闭 Monitor；旧 Monitor Hook 会备份并移除。详见[部署说明](docs/standalone-windows.md)。
 
 官方明细使用本机 Codex 的 ChatGPT 登录及桌面端同源查询接口，需要可读取线程索引的 Node.js（建议 22.13+）。这是非公开稳定接口，可能变更或延迟；仅展开时读取、缓存 5 分钟，失败保留同账号旧值，不覆盖本地校准参数。缓存位于 `.cache/official-usage`，不含登录凭据。
 
@@ -105,3 +107,13 @@ cpolar / 反向代理需显式设置 `CODEX_MONITOR_ALLOWED_ORIGINS`；Windows �
 
 原项目由 [manuelsh](https://github.com/manuelsh/codex-monitor) 创建，本版本主要改进易用性和用量分析。
 本仓库目前没有 `LICENSE` 文件，不声明 MIT / Apache 许可；使用和分发前请核对适用的上游许可。
+
+### 服务管理
+
+使用 Windows 托管启动器时，右上角「服务」菜单支持重启、关闭 Monitor（不会关闭电脑或 Codex）。本机和 cpolar 访问均无需口令；任何可访问页面的人都能重启或关闭 Monitor。
+
+桌面快捷方式可重新启动并打开网页；已有服务时只打开网页。关闭服务后网页不能自行唤醒它，需要本机快捷方式或远程桌面。部署脚本自动创建桌面入口和登录自启动；关闭 Codex 不影响 Monitor。
+
+### 多账号用量
+
+用量卡片支持下拉选择及左右按钮快速切换。Monitor 自动保存已读取账号的最近额度记录，服务重启后保留；不保存登录凭据。其他账号显示记录时间，不会后台登录或冒充实时数据。尚未读取过的账号需登录后读取一次；仅切换顶部额度卡片，不改变任务统计。记录按账号邮箱区分。

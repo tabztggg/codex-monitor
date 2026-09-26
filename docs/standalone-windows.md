@@ -1,12 +1,11 @@
 # Standalone Windows deployment
 
-当前跟随 Codex 的运行方式见文末「跟随 Codex 桌面运行」。下述计划任务为旧部署参考，不是当前默认配置。
-Current Codex lifecycle setup is documented at the end of this page; the scheduled-task setup below is a legacy option.
+运行 `npm ci`、`npm run build` 后执行 `powershell -File scripts/Install-StandaloneMonitor.ps1`。自动部署、创建桌面快捷方式并启用 Windows 登录后无窗口自启动；保留配置与缓存，备份并移除旧 Monitor Hook。关闭 Codex 不影响 Monitor。
 
 [English README](../README.en.md) · [中文说明](#中文说明)
 
 This page documents the per-user deployment configured on the maintainer's
-Windows machine. The repository currently has no general one-click installer
+Windows machine. The deployment script is scripts/Install-StandaloneMonitor.ps1; the following describes
 for this deployment. Downloading the repository alone does not register its
 scheduled task, configured installed copy, or shortcuts. The management scripts
 under `scripts/` must be copied into a configured installation before use.
@@ -190,10 +189,10 @@ Windows 启动器都会转到同一个已安装任务，避免重复启动。Sto
 备份并重新部署 `dist`、匹配的依赖清单和所需生产依赖，再启动验证。保留本地配置、
 `.cache`、日志及管理脚本，除非更新明确要求更换。仅修改源码、执行 `git pull`、
 重新构建或重启，都不会自动替换已安装的应用文件。
-# 跟随 Codex 桌面运行
+## 网页服务管理
 
-本机当前改用 `CodexMonitorCompanion.exe`，通过用户级 `~/.codex/hooks.json` 的 `SessionStart`（`startup|resume`）触发。桌面和开始菜单启动入口均保持原样；进入/恢复任务后才启动 Monitor。只打开首页不触发，应用留在托盘时仍视为运行。
+右上角「服务」提供重启／关闭 Monitor，不关闭 Windows 或 Codex。托管启动器使用退出码 42 请求立即重启，0 表示主动关闭、不重试；意外失败仍有限重试。
 
-使用 `scripts/Build-CodexMonitorCompanion.ps1` 构建，将程序放在已有 Monitor 安装目录。钩子命令为安装路径下的 `CodexMonitorCompanion.exe --hook`，首次在 Codex 的钩子设置中审阅并信任。命令只接受桌面进程祖先，普通独立 CLI 不启动 Monitor；互斥锁防止多个任务重复启动。它通过操作系统等待桌面主进程退出，然后关闭自己拥有的 Monitor 进程树。
+本机和公网操作均无需口令；所有可访问页面的人都能重启或关闭 Monitor。关闭后需要桌面快捷方式、远程桌面或下一次 Windows 登录重新启动，离线网页不能自行唤醒服务。
 
-本机旧 Windows 计划任务和独立 Monitor 桌面启动入口已撤销；程序、配置、统计缓存与恢复备份保留。以下为旧独立部署方式的参考，不代表本机仍启用。
+重复部署会备份旧程序，保留 `standalone.json` 与 `.cache`，更新计划任务及桌面快捷方式。`-SkipDependencies` 仅用于已有匹配依赖的安装；默认执行 `npm ci --omit=dev`。开机自启动指当前用户登录后启动，登录前不运行。

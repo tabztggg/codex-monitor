@@ -273,6 +273,12 @@ export interface HistoryProject {
   missing?: boolean;
 }
 
+export interface AccountUsageEntry {
+  id: string;
+  current: boolean;
+  usage: CodexUsageSnapshot;
+}
+
 export interface HistoryJob {
   periodMetrics?: HistoryPeriodMetrics;
   id: string;
@@ -380,6 +386,7 @@ export interface MonitorSnapshot {
   activeShutdown: ActiveShutdownState;
   globalAutomation: GlobalAutomation;
   codexUsage: CodexUsageSnapshot;
+  accountUsages?: AccountUsageEntry[];
 }
 
 export interface RunSnapshot {

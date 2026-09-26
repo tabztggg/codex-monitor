@@ -2,10 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Link, Route, Routes, useParams } from "react-router-dom";
 import type {
   CodexUsageSnapshot,
+  AccountUsageEntry,
   MonitorSnapshot,
   ThreadNode
 } from "../../shared/monitor";
 import { api } from "./api";
+import { ServiceControls } from './components/ServiceControls';
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ThreadTree } from "./components/ThreadTree";
 import { TranscriptPanel } from "./components/TranscriptPanel";
@@ -102,7 +104,7 @@ export default function App() {
             <a className="dashboard-nav-link" href="/#task-details">{t('Task details')}</a>
             <a className="dashboard-nav-link" href="/#task-trends">{t('Trends & methodology')}</a>
           </nav>
-          <div className="topbar-actions"><LanguageSwitch /></div>
+          <div className="topbar-actions"><ServiceControls /><LanguageSwitch /></div>
         </header>
 
         {error ? <div className="banner banner-error">{t('Unable to load data.')} {errorText(error)}</div> : null}
@@ -141,7 +143,7 @@ export function DashboardPage({
         snapshot={snapshot}
         nowMs={nowMs}
         connectionLabel={connectionLabel}
-        overviewSlot={<CodexUsageCard usage={snapshot.codexUsage} nowMs={nowMs} />}
+        overviewSlot={<CodexUsageCard usage={snapshot.codexUsage} accounts={snapshot.accountUsages ?? []} nowMs={nowMs} />}
       />
       <footer className="monitor-footer">
         <details className="secondary-controls">
@@ -224,15 +226,28 @@ function AutomationCard({
 }
 
 function CodexUsageCard({
-  usage,
+  usage: liveUsage,
+  accounts,
   nowMs
 }: {
   usage: CodexUsageSnapshot;
+  accounts: AccountUsageEntry[];
   nowMs: number;
 }) {
   const { t, locale, windowLabel, dateTime, error: errorText } = useI18n();
+  const [selected, setSelected] = useState('');
+  const otherAccounts = accounts.filter(account => !account.current);
+  const selectedAccount = otherAccounts.find(account => account.id === selected);
+  const historical = Boolean(selectedAccount);
+  const usage = selectedAccount?.usage ?? liveUsage;
+  const options = ['', ...otherAccounts.map(account => account.id)];
+  const activeSelection = selectedAccount ? selected : '';
+  function stepAccount(direction: number) {
+    const index = options.indexOf(activeSelection);
+    setSelected(options[(index + direction + options.length) % options.length]);
+  }
   const window = overallUsageWindow(usage);
-  const pace = window ? quotaPace(window, nowMs) : null;
+  const pace = window ? quotaPace(window, historical ? Date.parse(usage.updatedAt!) : nowMs) : null;
   const unavailable = usage.status !== "available" || !window;
   const expired = pace?.expired;
   const used = unavailable || expired ? null : window.usedPercent;
@@ -250,13 +265,21 @@ function CodexUsageCard({
       <div className="global-quota-grid">
         <div className="quota-account-column">
           <div className="global-quota-heading">
-            <h2>{t('Current account quota')}</h2>
+            <h2>{t(historical ? 'Recorded account quota' : 'Current account quota')}</h2>
             {window && <span className="quota-window-badge">{windowLabel(window.label)}</span>}
+          </div>
+          <div className="quota-account-switcher">
+            <button className="small-control" aria-label={t('Previous account')} disabled={options.length < 2} onClick={() => stepAccount(-1)}>‹</button>
+            <select className="small-control" aria-label={t('View account usage')} value={activeSelection} onChange={event => setSelected(event.target.value)}>
+              <option value="">{t('Current login')} · {liveUsage.account?.email ?? t('Unknown account')}</option>
+              {otherAccounts.map(account => <option key={account.id} value={account.id}>{account.usage.account?.email} · {t('Last recorded')}</option>)}
+            </select>
+            <button className="small-control" aria-label={t('Next account')} disabled={options.length < 2} onClick={() => stepAccount(1)}>›</button>
           </div>
           <div className="quota-account" aria-label={t('Usage account')}>
             <strong>{usage.account?.email ?? t(usage.account?.type === 'apiKey' ? 'API key account' : 'Unknown account')}</strong>
             {usage.account?.planType && <span>{usage.account.planType}</span>}
-            {usage.stale && <span className="quota-account-stale">{t('Last confirmed account')}</span>}
+            {(usage.stale || historical) && <span className="quota-account-stale">{t('Last confirmed account')}</span>}
             <details className="account-source">
               <summary>{t('CLI account · Details')}</summary>
               <small>{t('Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.')}</small>
@@ -284,13 +307,15 @@ function CodexUsageCard({
             </details>
           </div>
           <div className="quota-reset-block">
-            <span className="quota-reset-label">{t('Next reset')}</span>
-            <strong className="quota-reset">{expired ? t("Waiting for the renewed quota") : formatResetLabel(resetAt, nowMs, t)}</strong>
+            <span className="quota-reset-label">{t(historical ? 'Recorded reset time' : 'Next reset')}</span>
+            <strong className="quota-reset">{historical ? t('Last recorded') : expired ? t("Waiting for the renewed quota") : formatResetLabel(resetAt, nowMs, t)}</strong>
             {resetAt && <time className="quota-reset-at" dateTime={resetAt}>{resetDate}</time>}
           </div>
         </>}
       </div>
-      {usage.stale && usage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</p>}
+      {historical && usage.updatedAt && <p className="muted-note" role="status">{t('Recorded at {time}. This account is not being refreshed; switching this view does not change your login.', { time: dateTime(usage.updatedAt) })}</p>}
+      {!historical && usage.stale && usage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</p>}
+      <p className="muted-note">{t('Accounts appear after Monitor reads their usage while logged in. This selector changes only the quota card, not task statistics.')}</p>
     </section>
   );
 }

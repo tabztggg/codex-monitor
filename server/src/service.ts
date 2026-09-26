@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { AccountUsageHistory } from './account-usage';
 import path from "node:path";
 import { deriveThreadRuntimeStatus, type ActiveSession, type ArmAutomationRequest, type ArmGlobalAutomationRequest, type CodexUsageSnapshot, type HistoryJobListResponse, type HistoryThreadListResponse, type MonitorSnapshot, type RunSnapshot, type ServerConnectionState } from "../../shared/monitor";
 import { ActiveSessionTracker } from "./active-sessions";
@@ -30,6 +31,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   private activeSessionPollHandle: NodeJS.Timeout | null = null;
   private activeSessionRefreshPromise: Promise<void> | null = null;
   private codexUsage: CodexUsageSnapshot = emptyCodexUsage();
+  private readonly accountUsageHistory = new AccountUsageHistory(path.resolve('.cache/account-usage.json'));
   private codexUsagePollHandle: NodeJS.Timeout | null = null;
   private codexUsageRefreshPromise: Promise<void> | null = null;
   private usageAccountRevision = 0;
@@ -82,7 +84,8 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
 
     return {
       ...snapshot,
-      codexUsage: cloneValue(this.codexUsage)
+      codexUsage: cloneValue(this.codexUsage),
+      accountUsages: this.accountUsageHistory.list(this.codexUsage)
     };
   }
 
@@ -348,6 +351,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
         if (this.usageIdentityPending) void this.refreshCodexUsage();
         else {
           this.codexUsage = codexUsageFromRateLimitsUpdated(message.params, this.codexUsage);
+          this.accountUsageHistory.record(this.codexUsage);
           this.observeQuotaUsage();
         }
       }
@@ -497,6 +501,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     if (revision !== this.usageAccountRevision) return;
     const unchanged = JSON.stringify(nextUsage) === JSON.stringify(this.codexUsage);
     this.codexUsage = nextUsage;
+    this.accountUsageHistory.record(nextUsage);
     if (nextUsage.status === 'available' && !nextUsage.stale) this.usageIdentityPending = false;
     this.observeQuotaUsage();
     if (unchanged) {

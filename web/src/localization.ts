@@ -4,6 +4,20 @@ export type Translate = (message: string, params?: Params) => string;
 
 // English messages are also the fallback for raw external diagnostics.
 export const chinese: Record<string, string> = {
+  'Recorded account quota': '账号额度记录', 'Current login': '当前登录', 'Last recorded': '最近记录',
+  'Previous account': '上一个账号', 'Next account': '下一个账号', 'View account usage': '查看账号用量',
+  'Recorded reset time': '记录中的重置时间',
+  'Recorded at {time}. This account is not being refreshed; switching this view does not change your login.': '记录时间：{time}。此账号未实时刷新，切换查看不会改变登录账号。',
+  'Accounts appear after Monitor reads their usage while logged in. This selector changes only the quota card, not task statistics.': '账号登录并被 Monitor 读取用量后会自动保存。此切换仅影响额度卡片，不改变任务统计。',
+
+  'Service': '服务', 'Restart service': '重启服务', 'Stop service': '关闭服务',
+  'Restart Monitor service?': '确定重启 Monitor 服务？',
+  'Stop Monitor? Use the desktop shortcut to start it again.': '确定关闭 Monitor？关闭后可通过桌面快捷方式重新启动。',
+  'Monitor stopped. Use the desktop shortcut to start it again.': '已发送关闭指令，请通过桌面快捷方式重新启动。',
+  'Restarting Monitor…': '正在重启 Monitor…',
+  'Restart not confirmed. Try the desktop shortcut.': '尚未确认重启完成，请尝试桌面快捷方式。',
+  'Service action not confirmed. Refresh to check its state.': '尚未确认操作结果，请刷新检查服务状态。',
+  'Available with a managed launcher.': '需使用托管启动器运行 Monitor。',
   'Current account / Across accounts': '当前账号 / 跨账号',
   'Official lifetime usage': '官方累计用量',
   'Task lifetime, including subtasks. One full weekly allowance of the query account = 100%. Not this quota period; independent of the plan comparison selector.': '任务累计，包含子任务。以查询账号的一份完整周额度为 100%。不是本周期用量，不受套餐对比选项影响。',

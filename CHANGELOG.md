@@ -10,6 +10,16 @@ Windows 独立安装还需部署新构建与依赖；v0.4.2 还需更新启动�
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 Standalone Windows installations also need the new build, dependencies and, for v0.4.2, the updated runner.
 
+## v0.4.4 — 2026-09-26
+
+- 多账号用量下拉选择、左右切换，保留各账号最近记录并标注时间，不改变登录账号。
+- 语言按钮左侧新增重启、关闭服务按钮；本机及公网均无需口令，可访问页面的人都能操作。
+- Windows 改为独立登录自启动，取消跟随 Codex；部署自动创建并校验桌面快捷方式。
+- 根目录统一为 `Codex Monitor.vbs`，首次自动部署，旧入口移到 `scripts/legacy/`。
+- 验证：297 项测试通过、2 项跳过；类型检查、构建及本机重启／关闭／快捷启动通过。Windows 重启后自启动尚未实测。
+
+English: Add recorded-account switching and password-free service controls; simplify Windows deployment with a single root launcher, verified desktop shortcut and independent logon startup. Historical accounts show saved snapshots, not live readings.
+
 ## v0.4.3 — 2026-09-26
 
 - 当前账号与跨账号等效消耗合并为一列，保留分别排序和项目汇总；统一估算基准。

@@ -128,19 +128,19 @@ describe('archived task history', () => {
     expect(result.data.find(job => job.id === 'active')?.name).toBe('Active title');
   });
 
-  it('rebuilds summaries saved by the old identity parser even when logs have not changed', () => {
+  it.each([1, 2])('rebuilds version %i summaries saved by older parsers even when logs have not changed', version => {
     writeSession(archives, 'recoverable', 123);
     new HistoryJobReader(sessions, ledger).listJobs({ nowMs });
     const cacheFile = path.join(root, 'cache', 'archived-history.json');
     const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-    cache.version = 1;
+    cache.version = version;
     cache.entries[0][1].job.id = 'incorrect-parent';
     cache.entries[0][1].job.isSubagent = true;
     fs.writeFileSync(cacheFile, JSON.stringify(cache));
     const result = new HistoryJobReader(sessions, ledger).listJobs({ nowMs });
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toMatchObject({ id: 'recoverable', totalUsage: { totalTokens: 123 } });
-    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(2);
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(3);
   });
 
   it('retries a transient read error without requiring a log modification or restart', () => {
@@ -154,7 +154,7 @@ describe('archived task history', () => {
       return realOpen(...args);
     });
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(reader.listJobs({ nowMs }).total).toBe(0);
+    expect(() => reader.listJobs({ nowMs })).toThrow('Could not read local task statistics');
     vi.mocked(fs.openSync).mockRestore();
     expect(reader.listJobs({ nowMs: nowMs + 60_000 }).data[0])
       .toMatchObject({ id: 'recoverable', totalUsage: { totalTokens: 123 } });

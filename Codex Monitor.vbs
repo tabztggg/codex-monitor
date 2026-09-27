@@ -1,5 +1,5 @@
 Option Explicit
-Dim shell, files, root, command, result, i, powershell, script
+Dim shell, files, root, command, result, i, powershell, script, errorFile, errorStream, errorText
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 root = files.GetParentFolderName(WScript.ScriptFullName)
@@ -23,5 +23,17 @@ For i = 0 To WScript.Arguments.Count - 1
   End Select
 Next
 result = shell.Run(command, 0, True)
-If result <> 0 Then MsgBox "Codex Monitor could not complete the requested action. See .cache\desktop-entry.log or .cache\bootstrap.log in the repository for details.", vbExclamation, "Codex Monitor"
+If result <> 0 Then
+  errorText = ""
+  errorFile = files.BuildPath(root, ".cache\install-error.txt")
+  If files.FileExists(errorFile) Then
+    On Error Resume Next
+    Set errorStream = files.OpenTextFile(errorFile, 1, False, -1)
+    errorText = Left(errorStream.ReadAll, 1800)
+    errorStream.Close
+    On Error GoTo 0
+  End If
+  MsgBox "Codex Monitor could not complete the requested action." & vbCrLf & errorText & vbCrLf & _
+    "Logs: .cache\desktop-entry.log or .cache\bootstrap.log in the repository.", vbExclamation, "Codex Monitor"
+End If
 WScript.Quit result

@@ -11,7 +11,7 @@ const commitPattern = /^[0-9a-f]{40}$/;
 const versionPattern = /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/;
 interface RemoteVersion { version: string; commit: string }
 interface CachedVersion {
-  repository: string; currentCommit: string | null; remote: RemoteVersion | null;
+  repository: string; currentCommit: string | null; currentVersion: string; remote: RemoteVersion | null;
   updateAvailable: boolean | null; checkedAt: number | null; attemptedAt: number; failed: boolean;
 }
 interface Options {
@@ -19,6 +19,18 @@ interface Options {
   deployment: { version: string; commit: string | null; localChanges: boolean };
   now?: () => number;
   fetch?: typeof fetch;
+}
+
+// ZIP installations have no Git identity. Compare only unambiguous stable
+// versions; equal versions cannot establish whether their commits are equal.
+function compareStableVersions(remote: string, installed: string): number | null {
+  const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+  if (!stable.test(remote) || !stable.test(installed)) return null;
+  const left = remote.split('.').map(BigInt), right = installed.split('.').map(BigInt);
+  for (let index = 0; index < 3; index++) {
+    if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+  }
+  return 0;
 }
 
 // Separate from updater state/health reads. All clients share one bounded metadata
@@ -38,6 +50,7 @@ export class RepositoryVersionChecker {
       const validTime = (time: unknown) => typeof time === 'number' && Number.isFinite(time) && time > 0 && time <= this.now();
       const remote = value.remote;
       if (value.repository === REPOSITORY && value.currentCommit === options.deployment.commit
+        && value.currentVersion === options.deployment.version
         && (typeof value.updateAvailable === 'boolean' || value.updateAvailable === null)
         && validTime(value.attemptedAt) && typeof value.failed === 'boolean'
         && ((remote === null && value.checkedAt === null && value.failed)
@@ -91,6 +104,10 @@ export class RepositoryVersionChecker {
       remote = { version: manifest.version, commit };
       checkedAt = this.now();
       updateAvailable = currentCommit === commit ? false : null;
+      if (!currentCommit) {
+        const order = compareStableVersions(manifest.version, this.options.deployment.version);
+        updateAvailable = order === null || order === 0 ? null : order > 0;
+      }
       if (currentCommit && currentCommit !== commit) {
         const comparison = await this.json(`https://api.github.com/repos/${REPOSITORY}/compare/${currentCommit}...${commit}?per_page=1`) as { status?: string; ahead_by?: number; behind_by?: number };
         if (comparison.status === 'ahead' && comparison.ahead_by! > 0 && comparison.behind_by === 0) updateAvailable = true;
@@ -99,9 +116,11 @@ export class RepositoryVersionChecker {
         // A divergent or unknown revision is not evidence of an available upgrade.
       }
       const time = this.now();
-      this.cached = { repository: REPOSITORY, currentCommit, remote, updateAvailable, checkedAt: time, attemptedAt: time, failed: false };
+      this.cached = { repository: REPOSITORY, currentCommit, currentVersion: this.options.deployment.version,
+        remote, updateAvailable, checkedAt: time, attemptedAt: time, failed: false };
     } catch {
-      this.cached = { repository: REPOSITORY, currentCommit, remote, updateAvailable, checkedAt, attemptedAt: this.now(), failed: true };
+      this.cached = { repository: REPOSITORY, currentCommit, currentVersion: this.options.deployment.version,
+        remote, updateAvailable, checkedAt, attemptedAt: this.now(), failed: true };
     }
     try {
       mkdirSync(path.dirname(this.file), { recursive: true });

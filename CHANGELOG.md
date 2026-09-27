@@ -10,6 +10,17 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.11 — 2026-09-27
+
+- 首页新增实时 Token：1／5／20 分钟和 1 小时切换，仅保留内存数据；统一总览卡片与排行布局。
+- 修复分叉重复计量、读取失败丢失统计、Token 缺项及累计缺口；历史请求超时保留旧值。
+- Windows 安装先暂存、失败回滚，与网页更新互斥；完善依赖下载诊断和代理支持，修复 ZIP 版本检测。
+- 限制超长日志内存开销，活动状态未知时阻止空闲关机；修复过期更新提示和辅助说明。
+
+验证：592 项测试通过、2 项跳过；类型检查、构建与本机部署通过。首页截图使用虚构数据。
+
+English: Add memory-only live token windows and refresh the overview. Fix fork accounting, incomplete reports and failed-read recovery. Harden Windows installs with staging, rollback and download diagnostics; handle oversized logs and unknown activity safely.
+
 ## v0.4.10 — 2026-09-27
 
 - Windows 一键安装自动补齐 Node.js/npm、Git、PowerShell 7 和 Codex CLI；复用已有环境，缺失时安装官方工具到用户目录，开机启动与网页更新沿用同一路径。

@@ -48,7 +48,7 @@ describe.skipIf(process.platform !== 'win32')('Windows dependency bootstrap (Pow
     });
     expect(JSON.parse(await readFile(path.join(root, 'scripts/result.json'), 'utf8'))).toEqual({ deploy: true, noBrowser: true, major: 7 });
     expect(existsSync(path.join(root, '.cache/bootstrap.log'))).toBe(true);
-  });
+  }, 20_000); // Allow the child exec's 15-second deadline before fixture cleanup.
 
   it('reuses compatible configured tools offline and passes their paths to child builds', async () => {
     const result = await run(`

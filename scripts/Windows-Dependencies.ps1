@@ -65,24 +65,108 @@ function Test-MonitorTool([string]$Executable, [string]$Kind) {
   return $false
 }
 
-function Get-MonitorDownload([string]$Uri, [string]$OutFile) {
+function Protect-MonitorDownloadText([string]$Text) {
+  # Exceptions can include redirect/proxy URLs. Keep their host/path, not userinfo
+  # or query tokens. Do not include response bodies, headers or command arguments.
+  return [regex]::Replace($Text, '(?i)https?://[^\s"''<>]+', {
+    param($match)
+    try {
+      $url = [Uri]$match.Value
+      return $url.GetLeftPart([UriPartial]::Authority).Replace($url.UserInfo + '@','') + $url.AbsolutePath
+    } catch { return '[redacted URL]' }
+  })
+}
+
+function Get-MonitorDownloadProxy {
+  $value = $env:CODEX_MONITOR_DOWNLOAD_PROXY
+  if ([string]::IsNullOrWhiteSpace($value)) { return '' }
+  $proxy = $null
+  if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref]$proxy) -or
+      $proxy.Scheme -notin @('http','https') -or -not $proxy.Host -or $proxy.Port -le 0 -or
+      $proxy.UserInfo -or $proxy.Query -or $proxy.Fragment -or $proxy.AbsolutePath -ne '/') {
+    throw 'Invalid CODEX_MONITOR_DOWNLOAD_PROXY. Use an HTTP/HTTPS proxy address without credentials, a path, query or fragment.'
+  }
+  return $proxy.AbsoluteUri
+}
+
+function Get-MonitorDownload([string]$Uri, [string]$OutFile, [string]$Dependency = 'Windows dependency') {
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-  $parameters = @{Uri=$Uri;UseBasicParsing=$true;TimeoutSec=300;Headers=@{'User-Agent'='Codex-Monitor-Installer'}}
-  if ($OutFile) { $parameters.OutFile = $OutFile }
+  $address = [Uri]$Uri
+  # Do not print query strings or credentials in diagnostic URLs.
+  $displayUrl = $address.GetLeftPart([UriPartial]::Authority).Replace($address.UserInfo + '@','') + $address.AbsolutePath
+  Write-Host "Downloading $Dependency`: $displayUrl"
+  $parameters = @{Uri=$Uri;UseBasicParsing=$true;TimeoutSec=300;ErrorAction='Stop';Headers=@{'User-Agent'='Codex-Monitor-Installer'}}
+  if ($OutFile) { $parameters.OutFile = $OutFile; $parameters.PassThru = $true }
   $oldProgress = $ProgressPreference
-  try { $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest @parameters } finally { $ProgressPreference = $oldProgress }
+  $proxy = ''
+  try {
+    $ProgressPreference = 'SilentlyContinue'
+    $proxy = Get-MonitorDownloadProxy
+    if ($proxy) { $parameters.Proxy = $proxy }
+    $response = Invoke-WebRequest @parameters
+    if ($OutFile) {
+      # 5.1 can return successfully after a truncated response. For uncompressed
+      # archives check the declared size before SHA256 verification/extraction.
+      $expectedLength = [long]0
+      $encoding = [string]$response.Headers['Content-Encoding']
+      if ((-not $encoding -or $encoding -eq 'identity') -and
+          [long]::TryParse([string]$response.Headers['Content-Length'], [ref]$expectedLength) -and
+          (Get-Item -LiteralPath $OutFile).Length -ne $expectedLength) {
+        throw 'Incomplete dependency download: file size differs from Content-Length. Rerun Install after restoring the connection.'
+      }
+      return
+    }
+    # Windows PowerShell returns bytes for application/octet-stream, even when
+    # the payload is JSON or SHASUMS256.txt. Never stringify a byte array.
+    $content = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+    return [pscustomobject]@{Content=$content.TrimStart([char]0xFEFF);StatusCode=[int]$response.StatusCode}
+  } catch {
+    $record = $_
+    $failure = $record.Exception
+    $chain = @()
+    $socketCode = $null
+    $failureResponse = $null
+    $exception = $failure
+    while ($exception) {
+      $chain += $exception.GetType().FullName + ': ' + (Protect-MonitorDownloadText $exception.Message)
+      if ($exception -is [Net.Sockets.SocketException]) {
+        $socketCode = $exception.NativeErrorCode
+        $chain += "SocketErrorCode=$($exception.SocketErrorCode); NativeErrorCode=$socketCode"
+      }
+      if (-not $failureResponse -and $exception.Response) { $failureResponse = $exception.Response }
+      $exception = $exception.InnerException
+    }
+    $status = if ($failureResponse -and $failureResponse.StatusCode) { [int]$failureResponse.StatusCode } else { 0 }
+    $rateRemaining = ''
+    if ($status -eq 403 -and $address.Host -eq 'api.github.com') {
+      try { $rateRemaining = @($failureResponse.Headers.GetValues('X-RateLimit-Remaining'))[0] } catch { }
+    }
+    $hint = 'Check this URL from the failing machine and verify its network, proxy and trusted certificates.'
+    if ($socketCode -eq 10013) {
+      $hint = 'Socket access denied (WSAEACCES/10013). Check the failing machine''s outbound process rules, security-software logs and proxy configuration. This is not a folder-write error. The installer did not retry or change security settings.'
+    } elseif ($status -eq 403 -and $address.Host -eq 'api.github.com' -and $rateRemaining -eq '0') {
+      $hint = 'GitHub API rate limit reached. Wait for the limit to reset before rerunning Install.'
+    } elseif ($status -eq 403) { $hint = 'The server or proxy denied the request (403). Check its access policy.' }
+    elseif ($status -eq 407) { $hint = 'The configured proxy requires authentication (407).' }
+    elseif ($status -eq 429) { $hint = 'The server is rate limiting requests (429). Wait before rerunning Install.' }
+    $statusText = if ($status) { "HTTP $status" } else { $failure.GetType().Name }
+    $proxyMode = if ($proxy) { 'CODEX_MONITOR_DOWNLOAD_PROXY' } else { 'PowerShell default (OS/inherited environment)' }
+    $details = $chain -join "`n"
+    $stack = Protect-MonitorDownloadText ([string]$record.ScriptStackTrace)
+    throw "Dependency download failed: $displayUrl`nDependency: $Dependency`nPowerShell $($PSVersionTable.PSVersion); $statusText; Proxy: $proxyMode`n$details`n$hint`nScriptStackTrace:`n$stack"
+  } finally { $ProgressPreference = $oldProgress }
 }
 
 function Get-MonitorArchive([ValidateSet('node','git','powershell')][string]$Kind, [ValidateSet('x64','arm64')][string]$Architecture) {
   if ($Kind -eq 'node') {
     $base = 'https://nodejs.org/download/release/latest-v24.x/'
-    $sums = (Get-MonitorDownload ($base + 'SHASUMS256.txt')).Content
+    $sums = (Get-MonitorDownload ($base + 'SHASUMS256.txt') -Dependency 'Node.js checksum list').Content
     $match = [regex]::Match([string]$sums, '(?m)^([a-fA-F0-9]{64})\s+(node-v24\.\d+\.\d+-win-' + $Architecture + '\.zip)\s*$')
     if (-not $match.Success) { throw 'Official Node.js LTS checksum was not found.' }
     return @{Url=$base+$match.Groups[2].Value;Hash=$match.Groups[1].Value;Folder=([IO.Path]::GetFileNameWithoutExtension($match.Groups[2].Value));Executable='node.exe'}
   }
   $repository = if ($Kind -eq 'git') { 'git-for-windows/git' } else { 'PowerShell/PowerShell' }
-  $release = (Get-MonitorDownload "https://api.github.com/repos/$repository/releases/latest").Content | ConvertFrom-Json
+  $release = (Get-MonitorDownload "https://api.github.com/repos/$repository/releases/latest" -Dependency "$Kind release metadata").Content | ConvertFrom-Json
   $suffix = if ($Architecture -eq 'x64') { '64-bit' } else { 'arm64' }
   $pattern = if ($Kind -eq 'git') { '^MinGit-[\d.]+-' + $suffix + '\.zip$' } else { '^PowerShell-7\.[\d.]+-win-' + $Architecture + '\.zip$' }
   $assets = @($release.assets | Where-Object { $_.name -match $pattern })
@@ -140,7 +224,7 @@ function Install-MonitorArchive([string]$Kind) {
   New-Item -ItemType Directory -Path $stage | Out-Null
   Write-Host "Downloading official $Kind package..."
   $archive = Join-Path $stage 'package.zip'
-  Get-MonitorDownload $package.Url $archive | Out-Null
+  Get-MonitorDownload $package.Url $archive -Dependency "$Kind archive" | Out-Null
   $unpacked = Join-Path $stage 'unpacked'
   Expand-MonitorArchive $archive $package.Hash $unpacked
   $source = if ($package.Folder) { Join-Path $unpacked $package.Folder } else { $unpacked }

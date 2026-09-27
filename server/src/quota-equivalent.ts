@@ -5,9 +5,10 @@ import path from 'node:path';
 type SavedCalibration = { version: 1; costPerPercent: number; quotaPercent: number; windowStart: number; updatedAt: number };
 const SAMPLE_RETENTION_MS = 30 * 86400000;
 const SAVE_INTERVAL_MS = 30000;
-// v3 records use content identities and per-stream quota observations. Old
-// sample keys cannot safely coexist with them; retain only the old reference.
-const SAMPLE_VERSION = 3;
+// v4 excludes inherited fork usage and rejects incomplete token costs. Retain
+// the old displayed reference, but never train with samples from older parsers.
+const SAMPLE_VERSION = 4;
+const CALIBRATION_POLICY = 3;
 
 /** Keep the last usable reference across resets, reduced archive scopes and restarts. */
 export class QuotaCalibration {
@@ -33,15 +34,15 @@ export class QuotaCalibration {
         if (value?.version !== 1 || !Number.isFinite(value.costPerPercent) || value.costPerPercent <= 0 ||
             !Number.isFinite(value.quotaPercent) || value.quotaPercent < 5 ||
             !validTimestamp(value.windowStart) || !validTimestamp(value.updatedAt) || value.updatedAt < value.windowStart) throw new Error('Invalid calibration');
-        this.currentPolicy = value.calibrationPolicy === 2;
+        this.currentPolicy = value.calibrationPolicy === CALIBRATION_POLICY;
         this.saved = { version: 1, costPerPercent: value.costPerPercent, quotaPercent: value.quotaPercent,
           windowStart: value.windowStart, updatedAt: value.updatedAt };
         // Version 1 files without samples remain valid references. Do not replace
         // them from a potentially narrower selection until fresh samples qualify.
         if (value.sampleVersion === SAMPLE_VERSION && Array.isArray(value.samples) && value.samples.every(validSample)) {
           for (const event of value.samples) this.samples.set(sampleKey(event), event);
-          this.referenceSamplesKnown = value.referenceSamplesKnown === true;
-        }
+          this.referenceSamplesKnown = this.currentPolicy && value.referenceSamplesKnown === true;
+        } else this.dirty = true;
       } catch (error) { console.warn('Saved quota calibration unavailable:', String(error)); }
     }
   }
@@ -115,7 +116,8 @@ export class QuotaCalibration {
     try {
       mkdirSync(path.dirname(this.file), { recursive: true });
       writeFileSync(this.file + '.tmp', JSON.stringify({ ...this.saved,
-        calibrationPolicy: 2, sampleVersion: SAMPLE_VERSION, samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
+        calibrationPolicy: this.currentPolicy ? CALIBRATION_POLICY : 0, sampleVersion: SAMPLE_VERSION,
+        samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
       renameSync(this.file + '.tmp', this.file);
       this.dirty = false;
       this.referenceDirty = this.saveFailed = false;

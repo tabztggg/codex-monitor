@@ -4,16 +4,19 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'standalone.json') -Raw | ConvertFrom-Json
-$url = 'http://' + $config.hostAddress + ':' + $config.port
+$address = [string]$config.hostAddress
+if ($address -eq '0.0.0.0') { $address = '127.0.0.1' }
+if ($address -in @('::', '[::]')) { $address = '::1' }
+$url = ([UriBuilder]::new('http', $address, [int]$config.port)).Uri.AbsoluteUri.TrimEnd('/')
 function Read-Control {
-  try { Invoke-RestMethod -Uri "$url/api/service" -TimeoutSec 2 } catch { $null }
+  try { Invoke-RestMethod -Uri "$url/api/service" -TimeoutSec 2 -NoProxy } catch { $null }
 }
 $control = Read-Control
-if ($Action -eq 'Status') { Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 5; exit 0 }
+if ($Action -eq 'Status') { Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 5 -NoProxy; exit 0 }
 if ($Action -in @('Stop', 'Restart')) {
   if (-not $control.enabled) { throw 'Local service control is unavailable.' }
   $requestAction = if ($Action -eq 'Stop') { 'stop' } else { 'restart' }
-  Invoke-RestMethod -Uri "$url/api/service" -Method Post -ContentType 'application/json' -Body (@{action=$requestAction} | ConvertTo-Json -Compress) | Out-Null
+  Invoke-RestMethod -Uri "$url/api/service" -Method Post -ContentType 'application/json' -Body (@{action=$requestAction} | ConvertTo-Json -Compress) -TimeoutSec 10 -MaximumRetryCount 0 -NoProxy | Out-Null
   if ($Action -eq 'Stop') { exit 0 }
 }
 if ($Action -eq 'Start' -and -not $control.enabled) {

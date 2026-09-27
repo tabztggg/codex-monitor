@@ -45,6 +45,8 @@ The installed runner enables shutdown simulation with
 `CODEX_MONITOR_DRY_RUN=1`. Local addresses and executable paths belong in the
 installation configuration; do not commit that file or its logs and caches.
 
+If activity logs cannot be read, idle-shutdown monitoring pauses its countdown without disarming the rule. Recovery starts a fresh idle check; an unknown activity state is never treated as zero running tasks. Normal log records have an 8 MiB allocation limit. Larger, structurally verified tool outputs are streamed without retaining their bodies, preserving their timestamps; oversized statistics records or ambiguous types still report a failure and preserve the previous result. Unchanged rejected files are not rescanned repeatedly.
+
 ## Startup and management
 
 Task Scheduler owns the process tree through the task named **Codex Monitor**.
@@ -105,6 +107,8 @@ task result and checks the monitor's HTTP health endpoint. Stopping the current
 instance does not remove the task's next-logon startup trigger. Use Task
 Scheduler to disable that trigger when persistent automatic startup is unwanted.
 
+Management requests bypass proxies and map wildcard listeners (`0.0.0.0` / `::`) to loopback addresses. The listening address itself is unchanged.
+
 ## Reverse proxy or tunnel
 
 The optional `allowedOrigins` array in the installed `standalone.json` declares
@@ -142,6 +146,21 @@ healthy HTTP endpoint confirms the monitor is reachable; account data still
 requires a working, authenticated Codex CLI. Logs can contain local paths or
 task information, so redact them before sharing.
 
+## Download network troubleshooting
+
+Download errors in `.cache/install-error.txt` include the dependency, original URL, HTTP status, nested exception types, socket error code and script call stack. Query strings and URL credentials are omitted. Socket access denied (`WSAEACCES / 10013`) does not identify a particular antivirus or firewall and is not a directory-write error; check the failing machine's outbound process rules, security-software records and proxy configuration. [Microsoft socket error definitions](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2)
+
+If that machine requires a known HTTP/HTTPS proxy, set it explicitly before starting the installer. Replace the example with your actual proxy address; no embedded username/password is accepted:
+
+```powershell
+$env:CODEX_MONITOR_DOWNLOAD_PROXY = 'http://127.0.0.1:7890'
+wscript.exe "Install Codex Monitor.vbs"
+```
+
+This process-only override applies to the installer's Node/Git/PowerShell downloads. It does not change Windows settings, npm proxy settings or Monitor's runtime. Without it, PowerShell keeps its normal proxy selection. Socket permission errors stop immediately; the installer does not switch download clients or disable certificate checks.
+
+中文：网络错误请提供 `.cache/install-error.txt`。若网络需要代理，可按上例指定真实地址后启动安装；变量只影响当前进程及本次启动，不永久改系统设置。该入口仅控制 Node、Git、PowerShell 下载，npm 仍使用自己的代理配置。`10013` 需在故障电脑上查明拦截来源，不能靠反复安装或强制管理员运行认定解决。
+
 ## Uninstall / 卸载
 
 Double-click **Uninstall Codex Monitor.vbs** in the source root. It stops only this installation's host, removes its verified scheduled task and current-user Desktop/Startup/Start-menu links, then deletes known application files. Configuration (`standalone.json`), usage caches (`.cache`), logs, backups and unrecognized files remain in `%LOCALAPPDATA%\Programs\CodexMonitor`. Codex, Node.js, PowerShell and the source checkout are kept. Reinstall with **Install Codex Monitor.vbs** to reuse your data.
@@ -155,6 +174,10 @@ pwsh -File scripts/Uninstall-StandaloneMonitor.ps1 -WhatIf
 双击根目录 **Uninstall Codex Monitor.vbs**，停止 Monitor 并清除应用文件、对应登录计划任务及桌面／启动文件夹／开始菜单内确认属于它的快捷方式。默认保留配置、用量缓存、日志、备份和未知文件；不卸载 Codex、Node.js、PowerShell，也不删除源码。重装自动复用保留的数据。卸载仅支持当前用户标准安装目录；若检测到更新正在进行、目录链接或同名外部任务，会停止并给出日志提示。上面的 `-WhatIf` 命令仅预演，不执行卸载。
 
 ## Updating the installed copy
+
+Local source installation/repair also stages all runtime files and production dependencies before stopping the existing service. Replacement failures restore the old runtime, configuration and task registration, including the previous running state and a health check. A dependency download failure during preparation leaves the old service running. Local installation and web update preparation share a Windows file lock; the persisted update status protects the handoff to the updater. An incomplete rollback reports its backup path instead of claiming recovery.
+
+For a source ZIP without a deployed Git SHA, web upgrade detection compares stable version numbers. A newer version enables Update; equal versions remain unverified because the commits are unknown. Use the root update entry to explicitly install the latest `main` in that case. Git-based installations retain commit comparison, including changes with the same version number.
 
 Double-click **Update Codex Monitor.vbs** in the repository root for a console-free update. It starts the installed Monitor (deploying first if needed), submits one update request, and opens the dashboard to show progress. Repeated clicks reuse an active update; a lost response is checked without repeating the request. Startup/request errors appear in `.cache/desktop-entry.log` in the source checkout. Installations predating web updates need one manual source deployment first. To request an update without opening a browser, use `wscript.exe "Update Codex Monitor.vbs" nobrowser`.
 

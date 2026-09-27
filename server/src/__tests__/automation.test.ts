@@ -4,6 +4,86 @@ import { MonitorStore } from "../store";
 describe("AutomationController", () => {
   afterEach(() => vi.useRealTimers());
 
+  it('keeps an unknown activity source armed and requires the full settle after recovery', async () => {
+    vi.useFakeTimers();
+    const runCommand = vi.fn(async () => {});
+    const controller = new AutomationController(new MonitorStore(), { dryRun: false, runCommand });
+    controller.evaluateActiveSessions(0, false);
+    controller.armGlobalNoActiveSessions({ settleDelayMs: 1000 });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(controller.getGlobalAutomation()).toMatchObject({ policy: { enabled: true }, state: { status: 'armed', settlesAt: null } });
+    expect(runCommand).not.toHaveBeenCalled();
+    controller.evaluateActiveSessions(0, true);
+    await vi.advanceTimersByTimeAsync(900);
+    controller.evaluateActiveSessions(0, false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(runCommand).not.toHaveBeenCalled();
+    controller.evaluateActiveSessions(0, true);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(runCommand).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith('shutdown.exe', ['/s', '/t', '60']);
+  });
+
+  it.each([false, true])('cancels a global shutdown on source loss, including in flight (%s)', async inFlight => {
+    vi.useFakeTimers();
+    let finishSchedule!: () => void;
+    const calls: string[] = [];
+    const controller = new AutomationController(new MonitorStore(), {
+      dryRun: false,
+      runCommand: async (_file, args) => {
+        calls.push(args.join(' '));
+        if (inFlight && args[0] === '/s') await new Promise<void>(resolve => { finishSchedule = resolve; });
+      }
+    });
+    controller.armGlobalNoActiveSessions({ settleDelayMs: 10, cancelOnNewActivity: false });
+    await vi.advanceTimersByTimeAsync(10);
+    controller.evaluateActiveSessions(0, false);
+    if (inFlight) finishSchedule();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual(['/s /t 60', '/a']);
+    expect(controller.getActiveShutdown().scheduled).toBe(false);
+    expect(controller.getGlobalAutomation()).toMatchObject({ policy: { enabled: true }, state: { status: 'armed' } });
+  });
+
+  it('invalidates an old queued global schedule even if the source recovers before the queue drains', async () => {
+    vi.useFakeTimers();
+    const runCommand = vi.fn(async () => {});
+    const controller = new AutomationController(new MonitorStore(), { dryRun: false, runCommand });
+    let release!: () => void;
+    const internal = controller as unknown as { queueShutdownOperation: (operation: () => Promise<void>) => Promise<void> };
+    const blocked = internal.queueShutdownOperation(() => new Promise<void>(resolve => { release = resolve; }));
+    controller.armGlobalNoActiveSessions({ settleDelayMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1000);
+    controller.evaluateActiveSessions(0, false);
+    controller.evaluateActiveSessions(0, true);
+    release();
+    await blocked;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(runCommand).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith('shutdown.exe', ['/s', '/t', '60']);
+  });
+
+  it('does not cancel a run shutdown or its pending timer when the activity source fails', async () => {
+    vi.useFakeTimers();
+    const store = new MonitorStore();
+    const run = store.createRun('root', { prompt: 'Work', cwd: 'C:/repo' });
+    store.upsertThreadFromRaw({ id: 'root', status: { type: 'idle' } }, run.id);
+    const runCommand = vi.fn(async () => {});
+    const controller = new AutomationController(store, { dryRun: false, runCommand });
+    controller.armRun(run.id, { settleDelayMs: 1000 });
+    controller.evaluateActiveSessions(1);
+    controller.armGlobalNoActiveSessions({ settleDelayMs: 10 });
+    controller.evaluateActiveSessions(0, false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(controller.getActiveShutdown()).toMatchObject({ scope: 'run', runId: run.id, scheduled: true });
+    controller.evaluateActiveSessions(0, false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith('shutdown.exe', ['/s', '/t', '60']);
+    expect(controller.getActiveShutdown().scheduled).toBe(true);
+  });
+
   it.each(["manual", "new activity"])("cancels an in-flight global shutdown after %s", async (reason) => {
     vi.useFakeTimers();
     let finishSchedule!: () => void;

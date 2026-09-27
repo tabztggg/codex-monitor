@@ -4,6 +4,8 @@ $repo = Split-Path -Parent $PSScriptRoot
 $install = Join-Path $env:LOCALAPPDATA 'Programs\CodexMonitor'
 New-Item -ItemType Directory -Path (Join-Path $repo '.cache') -Force | Out-Null
 Start-Transcript -Path (Join-Path $repo '.cache/desktop-entry.log') -Force | Out-Null
+$failureFile = Join-Path $repo '.cache/install-error.txt'
+Set-Content -LiteralPath $failureFile -Value '' -Encoding Unicode
 try {
   if ((@($Deploy, $Update, $Uninstall) | Where-Object { $_ }).Count -gt 1) { throw 'Choose only one of deploy, update or uninstall.' }
   if ($Uninstall) {
@@ -37,6 +39,7 @@ try {
     & (Join-Path $install 'Manage-StandaloneMonitor.ps1') -Action Start -NoBrowser:$NoBrowser
   }
 } catch {
+  Set-Content -LiteralPath $failureFile -Value $_.Exception.Message -Encoding Unicode
   Write-Output $_.Exception.Message
   exit 1
 } finally { Stop-Transcript | Out-Null }

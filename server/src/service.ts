@@ -3,6 +3,7 @@ import { AccountUsageHistory } from './account-usage';
 import path from "node:path";
 import { deriveThreadRuntimeStatus, type ActiveSession, type ArmAutomationRequest, type ArmGlobalAutomationRequest, type CodexUsageSnapshot, type HistoryJobListResponse, type HistoryThreadListResponse, type MonitorSnapshot, type RunSnapshot, type ServerConnectionState } from "../../shared/monitor";
 import { ActiveSessionTracker } from "./active-sessions";
+import type { LiveTokenSnapshot } from '../../shared/live-tokens';
 import { CodexAppServerClient } from "./codex-client";
 import { AutomationController } from "./automation";
 import { HistoryJobReader, type HistoryJobMetadata } from "./history-jobs";
@@ -97,6 +98,15 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       cloneValue(this.serverState),
       this.automation.getActiveShutdown()
     );
+  }
+
+  /** Local rolling counters only; does not refresh accounts or full task history. */
+  public getLiveTokens(): LiveTokenSnapshot {
+    const snapshot = this.activeSessionTracker.getLiveTokens();
+    if (!this.activeSessionTracker.isActivitySourceAvailable()) {
+      this.automation.evaluateActiveSessions(this.activeSessions, false);
+    }
+    return snapshot;
   }
 
   public listRuns() {
@@ -437,6 +447,11 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
 
   private async refreshActiveSessionsInternal(): Promise<void> {
     const scannedSessions = this.activeSessionTracker.listActiveSessions();
+    if (!this.activeSessionTracker.isActivitySourceAvailable()) {
+      this.automation.evaluateActiveSessions(this.activeSessions, false);
+      this.emitSnapshot();
+      return;
+    }
     let nextSessions = scannedSessions;
 
     try {
@@ -479,12 +494,12 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     }
 
     if (JSON.stringify(nextSessions) === JSON.stringify(this.activeSessions)) {
-      this.automation.evaluateActiveSessions(nextSessions);
+      this.automation.evaluateActiveSessions(nextSessions, this.activeSessionTracker.isActivitySourceAvailable());
       return;
     }
 
     this.activeSessions = nextSessions;
-    this.automation.evaluateActiveSessions(this.activeSessions);
+    this.automation.evaluateActiveSessions(this.activeSessions, this.activeSessionTracker.isActivitySourceAvailable());
     this.emitSnapshot();
   }
 

@@ -77,9 +77,27 @@ it('identifies a matching repository commit while retaining the local-change mar
   expect(await checker.check()).toMatchObject({ updateAvailable: false, status: 'current', localChanges: true });
 });
 
-it.each(['0.4.6', '0.4.7', 'unknown'])('does not infer update availability from version %s without an installed commit', async version => {
+it.each(['0.4.6', 'unknown', '0.4.6-beta.1', '01.2.3'])('does not infer commit equivalence from version %s without an installed commit', async version => {
   const { checker } = setup({ commit: null, version, remoteVersion: '0.4.6' });
   expect(await checker.check()).toMatchObject({ updateAvailable: null, status: 'unavailable', repositoryVersion: '0.4.6', stale: false });
+});
+
+it.each([
+  ['0.4.9', '0.4.10', true], ['0.4.10', '0.4.9', false], ['1.9.9', '2.0.0', true],
+  ['10.0.0', '2.0.0', false], ['0.4.10', '0.4.11-beta.1', null],
+] as const)('allows only an unambiguous forward stable release for ZIP %s -> %s', async (version, remoteVersion, available) => {
+  const { checker, request } = setup({ commit: null, version, remoteVersion });
+  expect(await checker.check()).toMatchObject({ updateAvailable: available, stale: false,
+    status: available === null ? 'unavailable' : available ? 'available' : 'current' });
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it('invalidates version-only ZIP cache after replacing the installed version', async () => {
+  const { checker, request, deployment } = setup({ commit: null, version: '0.4.9', remoteVersion: '0.4.10' });
+  expect(await checker.check()).toMatchObject({ updateAvailable: true });
+  const updated = new RepositoryVersionChecker({ root, deployment: { ...deployment, version: '0.4.10' }, fetch: request, now: () => time });
+  expect(await updated.check()).toMatchObject({ updateAvailable: null, currentVersion: '0.4.10' });
+  expect(request).toHaveBeenCalledTimes(4);
 });
 
 it('deduplicates concurrent clients and reuses a 30 minute cache across restarts', async () => {

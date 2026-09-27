@@ -62,7 +62,8 @@ type ParsedHistoryJob = HistoryJob & {
   untimedTokens?: number;
   totalUnpricedTokens?: number;
   quotaCalibrationEvents?: QuotaCalibrationEvent[];
-  quotaCalibrationVersion?: 6;
+  quotaCalibrationVersion?: 7;
+  hasIncompleteUsage?: boolean;
   parentThreadId: string | null;
   isSubagent: boolean;
 };
@@ -130,7 +131,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
 };
 
 const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
-const ARCHIVE_CACHE_VERSION = 2;
+const ARCHIVE_CACHE_VERSION = 3;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
@@ -170,12 +171,6 @@ export class HistoryJobReader {
     dateTo?: string;
     forceRefresh?: boolean;
   }): HistoryJobListResponse {
-    if (args.forceRefresh) {
-      this.cache.clear();
-      this.incremental.clear();
-      this.identities.clear();
-      this.archiveCacheDirty = true;
-    }
     const nowMs = args.nowMs ?? Date.now();
     const period = args.period ?? 'quota';
     const parseDay = (v?: string) => {
@@ -196,13 +191,22 @@ export class HistoryJobReader {
     const archiveMetadata = readArchiveMetadata(path.join(this.sessionsRoot, '..'));
     const archiveMode = args.archiveMode === 'all' ? 'all' : 'recent';
     const projectFor = readProjectResolver(path.join(this.sessionsRoot, '..'));
-    const activeFiles = listSessionFiles(this.sessionsRoot);
+    const activeFiles = listSessionFiles(this.sessionsRoot,
+      ![...this.cache.keys()].some(file => file.startsWith(this.sessionsRoot + path.sep)));
     // During an archive move both copies may briefly exist. Count that rollout once.
     const activeNames = new Set(activeFiles.map(file => path.basename(file.path)));
-    const archiveFiles = listSessionFiles(this.archivedRoot)
+    const archiveFiles = listSessionFiles(this.archivedRoot,
+      ![...this.cache.keys()].some(file => path.dirname(file) === this.archivedRoot || file.startsWith(this.archivedRoot + path.sep)))
       .filter(file => !activeNames.has(path.basename(file.path)));
+    // A failed discovery is not a deletion or a successful rebuild. Keep the
+    // last cache intact until both directory walks have succeeded.
+    if (args.forceRefresh) {
+      this.incremental.clear();
+      this.identities.clear();
+      this.archiveCacheDirty = true;
+    }
     const archivedPaths = new Set(archiveFiles.map(file => file.path));
-    const selection = this.selectArchives(activeFiles, archiveFiles, archiveMetadata, archiveMode);
+    const selection = this.selectArchives(activeFiles, archiveFiles, archiveMetadata, archiveMode, Boolean(args.forceRefresh));
     const sessionFiles = [...activeFiles, ...selection.files];
     // A narrower request must not evict cached summaries for the full-history view.
     const activePaths = new Set([...activeFiles, ...archiveFiles].map((file) => file.path));
@@ -232,7 +236,7 @@ export class HistoryJobReader {
     const parsedJobs = sessionFiles
       .map((file) => {
         const previous = this.cache.get(file.path);
-        const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null);
+        const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null, Boolean(args.forceRefresh));
         const archived = archivedPaths.has(file.path);
         const next = this.cache.get(file.path);
         if (archived && (previous?.compact !== next?.compact || previous?.mtimeMs !== next?.mtimeMs || previous?.size !== next?.size ||
@@ -259,7 +263,7 @@ export class HistoryJobReader {
     const ledger = this.attribution.read(key);
     const selectedDays = new Map<string, HistoryUsageDay[]>();
     const selectedStart = customStart ?? periodStart(period, nowMs, window?.startedAtMs ?? null);
-    const allJobs = consolidated.map(({ parsedTurns: _turns, usageEvents: _usageEvents, quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
+    const allJobs = consolidated.map(({ parsedTurns: _turns, usageEvents: _usageEvents, quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, hasIncompleteUsage = false, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
       const days = (period === 'quota' ? quotaDailyUsage ?? [] : dailyUsage ?? [])
         .filter(day => (!selectedStart || day.date >= localDay(selectedStart)) && day.date <= localDay(selectedEnd));
       selectedDays.set(job.id, days);
@@ -270,12 +274,12 @@ export class HistoryJobReader {
         : priced.length ? priced.reduce((sum, day) => sum + day.costUsd!, 0) : null;
       const unpriced = period === 'lifetime' ? totalUnpricedTokens : period === 'quota' ? job.sinceResetUnpricedTokens ?? 0 : days.reduce((sum, day) => sum + day.unpricedTokens, 0);
       const available = period !== 'quota' || Boolean(window && weekEnd > nowMs);
-      const emptyKnown = available && Boolean(job.totalUsage) && !usage && untimedTokens === 0;
+      const emptyKnown = available && Boolean(job.totalUsage) && !usage && untimedTokens === 0 && !hasIncompleteUsage;
       const periodMetrics: HistoryPeriodMetrics = {
-        tokensComplete: available && Boolean(usage || emptyKnown) && (period === 'lifetime' || untimedTokens === 0),
+        tokensComplete: available && !hasIncompleteUsage && Boolean(usage || emptyKnown) && (period === 'lifetime' || untimedTokens === 0),
         usage: available ? usage ?? (emptyKnown ? { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 } : null) : null,
         costUsd: available ? cost ?? (emptyKnown ? 0 : null) : null,
-        costComplete: period === 'lifetime' ? job.totalEstimatedCostIsComplete : available && unpriced === 0 && untimedTokens === 0,
+        costComplete: !hasIncompleteUsage && (period === 'lifetime' ? job.totalEstimatedCostIsComplete : available && unpriced === 0 && untimedTokens === 0),
         unpricedTokens: unpriced, untimedTokens
       };
       const attributed = ledger?.attributed[job.id] ?? 0;
@@ -285,8 +289,8 @@ export class HistoryJobReader {
         periodMetrics,
         lifetime20xPercent: equivalent20x({ ...job, sinceResetUsage: job.totalUsage, sinceResetEstimatedCostUsd: job.totalEstimatedCostUsd }, calibration.costPerPercent),
         lifetime20xIsComplete: job.totalEstimatedCostIsComplete,
-        currentAccountEquivalentPercent: accountEquivalent.percent,
-        currentAccountEquivalentIsComplete: accountEquivalent.complete,
+        currentAccountEquivalentPercent: hasIncompleteUsage && accountEquivalent.percent === 0 ? null : accountEquivalent.percent,
+        currentAccountEquivalentIsComplete: accountEquivalent.complete && !hasIncompleteUsage,
         estimated20xPercent: available && periodMetrics.usage ? equivalent20x({ ...job, sinceResetUsage: periodMetrics.usage, sinceResetEstimatedCostUsd: periodMetrics.costUsd }, calibration.costPerPercent) : null,
         estimated20xIsComplete: periodMetrics.costComplete,
         estimatedUsagePercentSinceReset: !ledger ? null : attributed > 0 ? attributed :
@@ -320,7 +324,7 @@ export class HistoryJobReader {
         equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent,
           source: calibration.source, calibratedAt: calibration.calibratedAt, referenceQuotaPercent: calibration.referenceQuotaPercent },
         ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
-        status: ledger ? 'available' : 'unavailable',
+        status: ledger && !ledger.stale ? 'available' : 'unavailable',
         observedSince: ledger?.observedAt ?? null,
         unattributedPercent: ledger?.unattributed ?? window?.usedPercent ?? null
       }
@@ -330,12 +334,13 @@ export class HistoryJobReader {
   private readJob(
     file: SessionFile,
     nowMs: number,
-    usageWindowStartedAtMs: number | null
+    usageWindowStartedAtMs: number | null,
+    forceRefresh = false
   ): ParsedHistoryJob | null {
     const cached = this.cache.get(file.path);
-    const unchanged = Boolean(cached?.compact && cached.mtimeMs === file.mtimeMs &&
+    const unchanged = Boolean(!forceRefresh && cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.job?.quotaCalibrationVersion === 6 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.job?.quotaCalibrationVersion === 7 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -371,17 +376,19 @@ export class HistoryJobReader {
       return cloneValue(job);
     } catch (error) {
       console.error(`Could not read Codex session ${file.path}:`, error instanceof Error ? error.message : String(error));
-      this.incremental.get(file.path)?.reader.invalidate();
-      return cached?.job ? cloneValue(cached.job) : null;
+      // Preserve the last successful summary, but fail the API request so a
+      // browser keeps its explicitly stale snapshot instead of fresh-looking
+      // partial totals. The reader owns retry/oversized-record invalidation.
+      throw new Error('Could not read local task statistics; the previous snapshot remains unchanged.', { cause: error });
     }
   }
 
-  private selectArchives(activeFiles: SessionFile[], archiveFiles: SessionFile[], metadata: Map<string, ArchiveMetadata>, mode: HistoryArchiveMode) {
+  private selectArchives(activeFiles: SessionFile[], archiveFiles: SessionFile[], metadata: Map<string, ArchiveMetadata>, mode: HistoryArchiveMode, forceRefresh = false) {
     const identity = (file: SessionFile): ArchiveMetadata => {
       const fileId = extractSessionId(file.path);
       const indexed = fileId ? metadata.get(fileId) : undefined;
       if (indexed) return indexed;
-      const cached = this.cache.get(file.path)?.job;
+      const cached = !forceRefresh && this.cache.get(file.path)?.job;
       if (cached) return { id: cached.id, parentThreadId: cached.parentThreadId, isSubagent: cached.isSubagent, archivedAt: null };
       const known = this.identities.get(file.path);
       if (known) return known;
@@ -393,8 +400,14 @@ export class HistoryJobReader {
         descriptor = openSync(file.path, 'r');
         const buffer = Buffer.alloc(64 * 1024);
         const bytes = readSync(descriptor, buffer, 0, buffer.length, 0);
-        header = asRecord(asRecord(JSON.parse(buffer.subarray(0, bytes).toString('utf8').split('\n')[0]))?.payload);
-      } catch { /* File-name identity remains usable when the optional header is absent. */ }
+        try {
+          header = asRecord(asRecord(JSON.parse(buffer.subarray(0, bytes).toString('utf8').split('\n')[0]))?.payload);
+        } catch { /* A truncated optional header can still use the file-name identity. */ }
+      } catch (error) {
+        // An unreadable header is not evidence that an archived child became
+        // an unrelated root or disappeared from the selected archive scope.
+        throw new Error('Could not read local task statistics; the previous snapshot remains unchanged.', { cause: error });
+      }
       finally { if (descriptor !== undefined) closeSync(descriptor); }
       const subagent = asRecord(header?.source)?.subagent;
       const parent = header?.parent_thread_id ?? header?.parentThreadId ?? asRecord(asRecord(subagent)?.thread_spawn)?.parent_thread_id;
@@ -493,7 +506,7 @@ class CompactHistoryRecords {
       const source = asRecord(payload?.source);
       const subagent = asRecord(source?.subagent) ?? asRecord(source?.subAgent);
       const spawn = asRecord(subagent?.thread_spawn) ?? asRecord(subagent?.threadSpawn);
-      compact = { ...statFields(payload, ['id', 'timestamp', 'name', 'cwd', 'model_provider', 'modelProvider']),
+      compact = { ...statFields(payload, ['id', 'timestamp', 'name', 'cwd', 'model_provider', 'modelProvider', 'forked_from_id', 'forkedFromId']),
         parent_thread_id: asString(payload?.parent_thread_id) ?? asString(payload?.parentThreadId) ??
           asString(spawn?.parent_thread_id) ?? asString(spawn?.parentThreadId),
         source: normalizeSourceKind(payload?.source) ?? normalizeOriginator(payload?.originator) };
@@ -559,8 +572,12 @@ function statFields(record: Record<string, unknown> | null, keys: string[]): Rec
 
 function compactTokenUsage(value: unknown): Record<string, unknown> | null {
   const record = asRecord(value);
-  return record ? statFields(record, ['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens',
-    'output_tokens', 'reasoning_output_tokens', 'total_tokens']) : null;
+  if (!record) return value === undefined || value === null ? null : { total_tokens: null };
+  // Preserve the presence of invalid counters so validation cannot mistake an
+  // invalid value for an omitted, recoverable counter. Never retain objects.
+  return Object.fromEntries(['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens',
+    'output_tokens', 'reasoning_output_tokens', 'total_tokens'].filter(key => Object.hasOwn(record, key))
+    .map(key => [key, typeof record[key] === 'number' || typeof record[key] === 'string' ? record[key] : null]));
 }
 
 function isCompactHistoryData(value: unknown): value is CompactHistoryData {
@@ -647,6 +664,7 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[], nowMs: number, usageWindowSta
       quotaCalibrationEvents: [...existing.quotaCalibrationEvents ?? [], ...job.quotaCalibrationEvents ?? []],
       untimedTokens: (existing.untimedTokens ?? 0) + (job.untimedTokens ?? 0),
       totalUnpricedTokens: (existing.totalUnpricedTokens ?? 0) + (job.totalUnpricedTokens ?? 0),
+      hasIncompleteUsage: existing.hasIncompleteUsage || job.hasIncompleteUsage,
       archived: existing.archived && job.archived,
       parentThreadId: newer.parentThreadId ?? older.parentThreadId,
       isSubagent: newer.isSubagent || older.isSubagent,
@@ -698,6 +716,7 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[], nowMs: number, usageWindowSta
       combined.totalDurationMs = combined.parsedTurns.reduce((sum, turn) =>
         sum + (durationForTurn(turn, nowMs, Date.parse(combined.updatedAt)) ?? 0), 0);
     }
+    if (combined.hasIncompleteUsage) combined.totalEstimatedCostIsComplete = false;
     merged.set(job.id, combined);
   }
 
@@ -794,11 +813,13 @@ function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] 
     target.quotaCalibrationEvents = [...target.quotaCalibrationEvents ?? [], ...job.quotaCalibrationEvents ?? []];
     target.untimedTokens = (target.untimedTokens ?? 0) + (job.untimedTokens ?? 0);
     target.totalUnpricedTokens = (target.totalUnpricedTokens ?? 0) + (job.totalUnpricedTokens ?? 0);
+    target.hasIncompleteUsage ||= job.hasIncompleteUsage;
     target.totalEstimatedCostUsd = addNullableNumbers(
       target.totalEstimatedCostUsd,
       job.totalEstimatedCostUsd
     );
     target.totalEstimatedCostIsComplete =
+      !target.hasIncompleteUsage &&
       (!target.totalUsage || target.totalEstimatedCostIsComplete) &&
       (!job.totalUsage || job.totalEstimatedCostIsComplete);
     target.totalUsage = addNullableTokenUsage(target.totalUsage, job.totalUsage);
@@ -928,6 +949,8 @@ export function parseHistorySessionFile(args: {
 }): ParsedHistoryJob | null {
   let sessionId = args.sessionId;
   let metadataId: string | null = null;
+  let ownerCreatedAtMs: number | null = null;
+  let inheritedMetadata = false;
   let calibrationStreamId: string | null = null;
   let parentThreadId: string | null = null;
   let isSubagent = false;
@@ -947,6 +970,7 @@ export function parseHistorySessionFile(args: {
   let totalUsage: TokenUsage | null = null;
   let totalEstimatedCostUsd = 0;
   let totalCostIsComplete = true;
+  let hasIncompleteUsage = false;
   let hasPricedTotalUsage = false;
   let activeModel: string | null = null;
   let last24HoursUsage: TokenUsage | null = null;
@@ -990,21 +1014,45 @@ export function parseHistorySessionFile(args: {
     const incomingId = recordType === 'session_meta' ? asString(payload?.id) : null;
     // Forked logs can include an ancestor's session_meta immediately after
     // their own header. It is inherited context, not a change of task identity.
-    if (incomingId && metadataId && incomingId !== metadataId) continue;
+    if (incomingId && metadataId && incomingId !== metadataId) {
+      inheritedMetadata = true;
+      continue;
+    }
 
     const recordTimestampMs = parseDateMs(record.timestamp);
+    if (inheritedMetadata && (ownerCreatedAtMs === null || recordTimestampMs === null || recordTimestampMs < ownerCreatedAtMs)) {
+      // Copied ancestor records provide context, not new work by this owner.
+      // Keep the cumulative baseline so a later quota-only refresh is still
+      // recognized as a duplicate, and retain model context for old exports.
+      if (recordType === 'turn_context') activeModel = asString(payload?.model) ?? activeModel;
+      if (recordType === 'event_msg' && payload?.type === 'token_count') {
+        // Without a time boundary, its ownership cannot be established. Do not
+        // invent fresh consumption or present this file as complete.
+        if (ownerCreatedAtMs === null || recordTimestampMs === null) {
+          hasIncompleteUsage = true;
+          totalCostIsComplete = false;
+        }
+        const cumulative = normalizeTokenUsage(asRecord(payload.info)?.total_token_usage);
+        if (cumulative && completeTokenUsage(asRecord(asRecord(payload.info)?.total_token_usage), cumulative)) {
+          previousTokenUsageKey = JSON.stringify(cumulative);
+        }
+      }
+      continue;
+    }
     if (recordTimestampMs !== null) {
       latestRecordTimestampMs =
         latestRecordTimestampMs === null
           ? recordTimestampMs
           : Math.max(latestRecordTimestampMs, recordTimestampMs);
-      createdAtMs =
+      if (ownerCreatedAtMs === null) createdAtMs =
         createdAtMs === null
           ? recordTimestampMs
           : Math.min(createdAtMs, recordTimestampMs);
     }
 
     if (recordType === "session_meta") {
+      ownerCreatedAtMs ??= parseDateMs(payload?.timestamp) ?? recordTimestampMs;
+      inheritedMetadata ||= Boolean(asString(payload?.forked_from_id) ?? asString(payload?.forkedFromId));
       if (incomingId) {
         metadataId = incomingId;
         if (sessionId !== incomingId) calibrationStreamId = null;
@@ -1092,10 +1140,13 @@ export function parseHistorySessionFile(args: {
 
     if (payloadType === "token_count") {
       const info = asRecord(payload?.info);
+      const rawIncrement = asRecord(info?.last_token_usage);
       const increment = normalizeTokenUsage(info?.last_token_usage);
       const cumulative = normalizeTokenUsage(info?.total_token_usage);
-      const cumulativeKey = cumulative ? JSON.stringify(cumulative) : null;
-      const duplicate = Boolean(increment && cumulativeKey && cumulativeKey === previousTokenUsageKey);
+      const cumulativeKey = cumulative && completeTokenUsage(asRecord(info?.total_token_usage), cumulative) ? JSON.stringify(cumulative) : null;
+      const duplicate = Boolean(cumulativeKey && cumulativeKey === previousTokenUsageKey);
+      const incrementComplete = Boolean(increment && completeTokenUsage(rawIncrement, increment));
+      const incrementCost = increment && incrementComplete ? estimateApiEquivalentCost(increment, activeModel) : null;
       if (increment) {
         // Timestamp + counters identify copies independently of model context or
         // rate-limit metadata, which may be missing from a partial rollout.
@@ -1103,7 +1154,7 @@ export function parseHistorySessionFile(args: {
         const occurrence = key === null ? 0 : (usageEventOccurrences.get(key) ?? 0) + 1;
         if (key !== null) usageEventOccurrences.set(key, occurrence);
         usageEvents.push({ id: key === null ? null : createHash('sha256').update(`${key}:${occurrence}`).digest('hex'),
-          at: recordTimestampMs, usage: increment, cost: estimateApiEquivalentCost(increment, activeModel), duplicate });
+          at: recordTimestampMs, usage: increment, cost: incrementCost, duplicate });
       }
       if (recordTimestampMs !== null && recordTimestampMs <= args.nowMs) {
         const sampleId = calibrationSampleId(sessionId, recordTimestampMs, increment, cumulative, payload?.rate_limits);
@@ -1114,7 +1165,7 @@ export function parseHistorySessionFile(args: {
           calibrationStreamId ??= createHash('sha256').update(sessionId ?? args.sessionId ?? '').digest('hex');
           quotaCalibrationEvents.push({ id: sampleId, streamId: calibrationStreamId, at: recordTimestampMs,
             duplicateUsage: duplicate,
-            cost: duplicate ? 0 : increment ? estimateApiEquivalentCost(increment, activeModel) : cumulative?.totalTokens ? null : 0,
+            cost: duplicate ? 0 : increment ? incrementCost : (rawIncrement || cumulative?.totalTokens) ? null : 0,
             limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
         }
       }
@@ -1123,12 +1174,16 @@ export function parseHistorySessionFile(args: {
       if (duplicate) {
         continue;
       }
-      if (increment) previousTokenUsageKey = cumulativeKey;
+      if (cumulativeKey) previousTokenUsageKey = cumulativeKey;
+      if ((rawIncrement || cumulative?.totalTokens) && !incrementComplete) {
+        hasIncompleteUsage = true;
+        totalCostIsComplete = false;
+      }
       lastRunUsage = increment ?? lastRunUsage;
 
       if (increment) {
         totalUsage = addTokenUsage(totalUsage, increment);
-        const estimatedCost = estimateApiEquivalentCost(increment, activeModel);
+        const estimatedCost = incrementCost;
         if (recordTimestampMs === null) untimedTokens += increment.totalTokens;
         else if (recordTimestampMs <= args.nowMs) {
           const date = localDay(recordTimestampMs);
@@ -1153,7 +1208,7 @@ export function parseHistorySessionFile(args: {
         recordTimestampMs >= args.nowMs - ROLLING_USAGE_WINDOW_MS
       ) {
         last24HoursUsage = addTokenUsage(last24HoursUsage, increment);
-        const estimatedCost = estimateApiEquivalentCost(increment, activeModel);
+        const estimatedCost = incrementCost;
         if (estimatedCost === null) {
           last24HoursCostIsComplete = false;
         } else {
@@ -1169,7 +1224,7 @@ export function parseHistorySessionFile(args: {
         recordTimestampMs >= args.usageWindowStartedAtMs
       ) {
         sinceResetUsage = addTokenUsage(sinceResetUsage, increment);
-        const estimatedCost = estimateApiEquivalentCost(increment, activeModel);
+        const estimatedCost = incrementCost;
         if (estimatedCost !== null) {
           sinceResetEstimatedCostUsd += estimatedCost;
           hasPricedSinceResetUsage = true;
@@ -1201,7 +1256,8 @@ export function parseHistorySessionFile(args: {
     usageEvents,
     parsedTurns: sortedTurns,
     quotaCalibrationEvents,
-    quotaCalibrationVersion: 6,
+    quotaCalibrationVersion: 7,
+    hasIncompleteUsage,
     dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
     archived: false,
     parentThreadId,
@@ -1256,23 +1312,20 @@ export function resolveCodexSessionsRoot(options?: {
   return path.join(codexHome, "sessions");
 }
 
-function listSessionFiles(root: string): SessionFile[] {
-  if (!existsSync(root)) {
-    return [];
-  }
-
+function listSessionFiles(root: string, allowMissing = false): SessionFile[] {
   const results: SessionFile[] = [];
-  walkDirectory(root, results);
+  try {
+    walkDirectory(root, results);
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException;
+    if (allowMissing && failure.code === 'ENOENT' && failure.path === root) return [];
+    throw new Error('Could not scan local task statistics; the previous snapshot remains unchanged.', { cause: error });
+  }
   return results.sort((left, right) => right.mtimeMs - left.mtimeMs);
 }
 
 function walkDirectory(directory: string, results: SessionFile[]): void {
-  let entries;
-  try {
-    entries = readdirSync(directory, { withFileTypes: true, encoding: "utf8" });
-  } catch {
-    return;
-  }
+  const entries = readdirSync(directory, { withFileTypes: true, encoding: "utf8" });
 
   for (const entry of entries) {
     const fullPath = path.join(directory, entry.name);
@@ -1285,18 +1338,14 @@ function walkDirectory(directory: string, results: SessionFile[]): void {
       continue;
     }
 
-    try {
-      const stats = statSync(fullPath);
-      results.push({
-        path: fullPath,
-        mtimeMs: stats.mtimeMs,
-        size: stats.size,
-        ctimeMs: stats.ctimeMs,
-        identity: `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`
-      });
-    } catch {
-      continue;
-    }
+    const stats = statSync(fullPath);
+    results.push({
+      path: fullPath,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      ctimeMs: stats.ctimeMs,
+      identity: `${stats.dev}:${stats.ino}:${stats.birthtimeMs}`
+    });
   }
 }
 
@@ -1536,13 +1585,19 @@ function normalizeTokenUsage(value: unknown): TokenUsage | null {
     return null;
   }
 
-  const inputTokens = asFiniteNumber(record.input_tokens) ?? 0;
-  const cachedInputTokens = asFiniteNumber(record.cached_input_tokens) ?? 0;
-  const cacheWriteInputTokens = asFiniteNumber(record.cache_write_input_tokens) ?? 0;
-  const outputTokens = asFiniteNumber(record.output_tokens) ?? 0;
-  const reasoningOutputTokens = asFiniteNumber(record.reasoning_output_tokens) ?? 0;
-  const totalTokens =
-    asFiniteNumber(record.total_tokens) ?? inputTokens + outputTokens;
+  const input = tokenInteger(record.input_tokens);
+  const output = tokenInteger(record.output_tokens);
+  const total = tokenInteger(record.total_tokens);
+  if (input === null && output === null && total === null) return null;
+  // A single omitted primary counter can be recovered exactly from the total;
+  // otherwise retain only known nonnegative counts and flag the breakdown.
+  const inputTokens = input ?? (record.input_tokens === undefined && total !== null && output !== null && total >= output ? total - output : 0);
+  const outputTokens = output ?? (record.output_tokens === undefined && total !== null && input !== null && total >= input ? total - input : 0);
+  const cachedInputTokens = tokenInteger(record.cached_input_tokens) ?? 0;
+  const cacheWriteInputTokens = tokenInteger(record.cache_write_input_tokens) ?? 0;
+  const reasoningOutputTokens = tokenInteger(record.reasoning_output_tokens) ?? 0;
+  const totalTokens = total ?? inputTokens + outputTokens;
+  if (!Number.isSafeInteger(totalTokens)) return null;
 
   return {
     inputTokens,
@@ -1552,6 +1607,21 @@ function normalizeTokenUsage(value: unknown): TokenUsage | null {
     reasoningOutputTokens,
     totalTokens
   };
+}
+
+function tokenInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function completeTokenUsage(record: Record<string, unknown> | null, usage: TokenUsage): boolean {
+  if (!record) return false;
+  for (const field of ['input_tokens', 'output_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'reasoning_output_tokens', 'total_tokens']) {
+    if (record[field] !== undefined && tokenInteger(record[field]) === null) return false;
+  }
+  const input = tokenInteger(record.input_tokens), output = tokenInteger(record.output_tokens), total = tokenInteger(record.total_tokens);
+  const knownSplit = input !== null && output !== null || total !== null && (input !== null || output !== null || total === 0);
+  return knownSplit && Number.isSafeInteger(usage.totalTokens) && usage.totalTokens === usage.inputTokens + usage.outputTokens &&
+    usage.cachedInputTokens <= usage.inputTokens && usage.reasoningOutputTokens <= usage.outputTokens;
 }
 
 function addTokenUsage(

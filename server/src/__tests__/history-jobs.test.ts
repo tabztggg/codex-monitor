@@ -339,8 +339,10 @@ describe("parseHistorySessionFile", () => {
     });
     expect(job?.last24HoursEstimatedCostUsd).toBeCloseTo(0.001584, 8);
     expect(job?.totalUsage).toMatchObject({ totalTokens: 1164 });
-    expect(job?.totalEstimatedCostUsd).toBeCloseTo(0.002904, 8);
-    expect(job?.totalEstimatedCostIsComplete).toBe(true);
+    // The older report has total=999 but input+output=110. Its known token
+    // count remains visible; its inconsistent cost cannot be called complete.
+    expect(job?.totalEstimatedCostUsd).toBeCloseTo(0.001584, 8);
+    expect(job?.totalEstimatedCostIsComplete).toBe(false);
   });
 
   it("keeps a marked lower-bound cost when some recorded models are unpriced", () => {

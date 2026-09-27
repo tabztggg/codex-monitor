@@ -46,6 +46,15 @@ app.get("/api/snapshot", (_request, response) => {
   response.json(service.getSnapshot());
 });
 
+app.get('/api/live-tokens', (_request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  try {
+    response.json(service.getLiveTokens());
+  } catch {
+    response.status(503).json({ error: 'Live token usage unavailable' });
+  }
+});
+
 app.get("/api/runs", (_request, response) => {
   response.json(service.listRuns());
 });

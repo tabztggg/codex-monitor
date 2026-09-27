@@ -1,0 +1,150 @@
+/* Homepage layout: account snapshot, recent reports, range totals, then activity. */
+.page-overview {
+  --overview-card: linear-gradient(115deg, color-mix(in srgb, var(--accent-blue) 3%, var(--surface)), var(--surface));
+}
+
+.page-overview .dashboard-heading { margin-bottom: 18px; }
+.page-overview .dashboard-title h2 { font-size: 30px; }
+.page-overview .dashboard-title p { margin-top: 6px; }
+.page-overview .history-refresh-controls { gap: 12px; }
+.page-overview .refresh-button { border-color: color-mix(in srgb, var(--accent-blue) 60%, var(--line)); }
+
+.page-overview .account-stack { padding: 14px; background: var(--overview-card); border-radius: 9px; }
+.page-overview .account-usage-row { padding: 16px 22px; background: var(--overview-card); }
+.page-overview .account-usage-row .global-quota-grid {
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.15fr) minmax(270px, 1.25fr);
+  gap: 24px;
+  min-height: 108px;
+  padding-right: 0;
+}
+.page-overview .global-quota-heading h3 { font-size: 20px; overflow-wrap: anywhere; }
+.page-overview .quota-account { margin-top: 8px; gap: 8px; }
+.page-overview .quota-account > span { font-size: 12px; padding: 3px 8px; }
+.page-overview .account-updated-at { font-size: 12px; margin-top: 10px; }
+.page-overview .quota-balance { border-left: 1px solid var(--line); padding-left: 24px; }
+.page-overview .quota-number { font-size: 32px; }
+.page-overview .quota-number > span { font-size: 12px; }
+.page-overview .quota-meter-pair { gap: 8px; margin-top: 8px; }
+.page-overview .quota-meter-label { font-size: 12px; }
+.page-overview .quota-meter-pair .quota-remaining-meter { height: 7px; }
+.page-overview .quota-reset-block { grid-column: auto; padding-left: 24px; border-left: 1px solid var(--line); }
+.page-overview .quota-reset-label { font-size: 11px; }
+.page-overview .quota-reset { font-size: 20px; padding-right: 82px; margin: 4px 0; }
+.page-overview .quota-period-range { display: flex; flex-wrap: wrap; gap: 3px 6px; margin-top: 8px; }
+.page-overview .quota-period-range .quota-period-label { flex-basis: 100%; font-size: 11px; }
+.page-overview .quota-period-range time { font-size: 11px; }
+.page-overview .account-details > summary { right: 22px; top: 42px; font-size: 12px; }
+.page-overview .account-details[open] { margin-top: 16px; }
+.page-overview .account-usage-row .quota-unavailable { grid-column: 2 / -1; padding-right: 86px; }
+
+.page-overview .cross-account-section {
+  margin-top: 16px;
+  padding: 20px 24px 16px;
+  border-radius: 9px;
+  background: var(--overview-card);
+}
+.page-overview .statistics-heading { align-items: center; gap: 14px 20px; }
+.page-overview .statistics-heading h2 { font-size: 20px; gap: 10px; }
+.page-overview .statistics-controls { margin-left: auto; gap: 10px; min-width: 0; }
+.page-overview .period-control > span,
+.page-overview .comparison-control > span,
+.page-overview .scope-summary-heading > strong {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.page-overview .period-buttons button { padding: 8px 12px; min-height: 38px; }
+.page-overview .custom-date-range { gap: 7px; }
+.page-overview .custom-date-range input { width: 135px; min-width: 0; min-height: 38px; padding: 7px; font-size: 12px; border: 1px solid var(--line-strong); color-scheme: inherit; }
+.page-overview .comparison-control select { min-height: 38px; }
+.page-overview .scope-summary { margin-top: 12px; }
+.page-overview .scope-summary-heading { margin-bottom: 14px; font-size: 12px; }
+.page-overview .summary-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.page-overview .summary-metrics > div,
+.page-overview .summary-metrics > .summary-equivalent {
+  padding: 0 26px;
+  border: 0;
+  border-left: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: none;
+  gap: 6px;
+  grid-column: auto;
+}
+.page-overview .summary-metrics > div:first-child { padding-left: 0; border-left: 0; }
+.page-overview .summary-metrics > div:last-child { padding-right: 0; }
+.page-overview .summary-metrics .metric-label { font-size: 14px; min-height: 22px; color: var(--muted); }
+.page-overview .summary-metrics .metric-label .scope-badge { font-size: 10px; padding: 1px 5px; }
+.page-overview .summary-metrics strong { font-size: clamp(27px, 2.4vw, 34px); letter-spacing: -.6px; }
+.page-overview .summary-metrics small { font-size: 11px; margin-top: 4px; }
+.page-overview .summary-tokens .token-breakdown { gap: 3px 12px; margin-top: 4px; }
+.page-overview .summary-tokens > small { display: none; }
+
+.page-overview .overview-summary-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 24px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.page-overview .overview-period-details { flex: 0 0 auto; min-width: 0; max-width: 100%; font-size: 12px; }
+.page-overview .overview-period-details > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 10px; cursor: pointer; list-style: none; color: var(--accent-blue); }
+.page-overview .overview-period-details > summary::-webkit-details-marker { display: none; }
+.page-overview .overview-period-details > summary > .period-disclosure-arrow { display: inline-block; }
+.page-overview .confirmed-period-range { min-width: 0; max-width: 100%; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.page-overview .overview-period-details[open] { flex-basis: 100%; }
+.page-overview .overview-period-details[open] > summary > .period-disclosure-arrow { transform: rotate(90deg); }
+.page-overview .overview-period-details .period-scope { background: none; margin-top: 8px; }
+.page-overview .overview-data-quality { border: 0; margin: 0 0 0 auto; min-width: 0; }
+.page-overview .overview-data-quality > summary { padding: 0; font-size: 11px; }
+.page-overview .overview-data-quality[open] { flex-basis: 100%; }
+.page-overview .overview-summary-footer summary:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 4px; }
+.page-overview .monitor-footer { margin-top: 16px; }
+
+@media (max-width: 1200px) {
+  .page-overview .statistics-controls { width: 100%; margin-left: 0; }
+  .page-overview .comparison-control { margin-left: auto; }
+}
+@media (max-width: 1000px) {
+  .page-overview .account-usage-row .global-quota-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; }
+  .page-overview .quota-reset-block { grid-column: 1 / -1; border: 0; border-top: 1px solid var(--line); padding: 14px 0 0; }
+  .page-overview .quota-reset { padding-right: 0; }
+  .page-overview .quota-period-range { margin-top: 6px; }
+  .page-overview .quota-period-range .quota-period-label { flex-basis: auto; }
+  .page-overview .account-details > summary { top: auto; bottom: 24px; }
+  .page-overview .account-details[open] > summary { position: static; text-align: right; }
+  .page-overview .quota-reset-block { padding-right: 96px; }
+  .page-overview .summary-metrics > div { padding-inline: 18px; }
+}
+@media (max-width: 700px) {
+  .page-overview .account-stack { padding: 10px; }
+  .page-overview .account-usage-row { padding: 16px; }
+  .page-overview .account-usage-row .global-quota-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .page-overview .quota-account-column { padding-right: 0; }
+  .page-overview .quota-balance { border: 0; border-top: 1px solid var(--line); padding: 16px 0 0; }
+  .page-overview .quota-reset-block { grid-column: 1; padding-right: 0; }
+  .page-overview .account-details { margin-top: 12px; }
+  .page-overview .account-details > summary { position: static; text-align: right; }
+  .page-overview .account-usage-row .quota-unavailable { grid-column: 1; padding: 0; }
+  .page-overview .cross-account-section { padding: 18px 16px 14px; }
+  .page-overview .statistics-controls { gap: 12px; }
+  .page-overview .period-control { order: 0; width: auto; flex: 1 1 190px; }
+  .page-overview .comparison-control { order: 1; width: auto; }
+  .page-overview .custom-date-range { order: 2; width: 100%; display: flex; flex-wrap: wrap; }
+  .page-overview .custom-date-range input { flex: 1 1 110px; width: 110px; }
+  .page-overview .summary-metrics { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .page-overview .summary-metrics > div,
+  .page-overview .summary-metrics > .summary-equivalent { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .page-overview .summary-metrics > div:first-child { padding: 0; border: 0; }
+  .page-overview .summary-metrics strong { font-size: 30px; }
+  .page-overview .overview-data-quality { margin-left: 0; }
+  .page-overview .overview-data-quality > summary { gap: 8px; }
+  .page-overview .period-scope { grid-template-columns: minmax(0, 1fr); }
+  .page-overview .period-scope-times { flex-direction: column; }
+}

@@ -40,7 +40,7 @@ export function installServiceControl(app: Express, enabled: boolean, exit: (cod
     if (request.body.action === 'update') {
       if (!updater.supported) { response.status(503).json({ error: 'Windows standalone installation required for updates.' }); return; }
       try { response.status(202).json({ accepted: true, update: updater.start() }); }
-      catch { response.status(500).json({ error: 'Could not start the update. Check the installation directory permissions.' }); }
+      catch { response.status(500).json({ error: 'Could not start the update. Another installation may be running, or the installation directory is not writable.' }); }
       return;
     }
     pending = true;

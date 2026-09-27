@@ -380,6 +380,23 @@ describe('visible statistics account and period scope', () => {
     }
   });
 
+  it('keeps confirmed custom dates and their analysis time zone in the compact range', () => {
+    const confirmed = { ...analysis, period: 'custom' as const, timeZone: 'America/New_York',
+      startedAt: '2026-09-19T02:30:00.000Z', endedAt: '2026-09-20T10:45:00.000Z' };
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const html = renderToStaticMarkup(createElement(HistoryPeriodScope, {
+        analysis: confirmed, allocation, nowMs, compact: true
+      }));
+      expect(html).toContain(`dateTime="${confirmed.startedAt}"`);
+      expect(html).toContain(`dateTime="${confirmed.endedAt}"`);
+      expect(html).toContain('22:30');
+      expect(html).toContain('06:45');
+      expect(html.match(/UTC-4/g)).toHaveLength(2);
+      expect(html).not.toContain(resetsAt);
+    }
+  });
+
   it('does not invent quota dates from data cutoff when bounds are missing, invalid or reversed', () => {
     for (const language of ['en', 'zh'] as const) {
       testState.language = language;

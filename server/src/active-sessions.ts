@@ -5,6 +5,8 @@ import { type ActiveSession } from "../../shared/monitor";
 import { asRecord, asString } from "./utils";
 import { userPreview } from "../../shared/session-preview";
 import { IncrementalSessionLog } from "./session-log-reader";
+import type { LiveTokenSnapshot } from "../../shared/live-tokens";
+import { createLiveTokenFileState, LIVE_TOKEN_READ_INTERVAL_MS, LiveTokenMonitor, type LiveTokenFileState } from "./live-tokens";
 
 const DEFAULT_ACTIVE_WINDOW_MS = 15 * 60 * 1000;
 
@@ -12,6 +14,8 @@ type CachedSessionState = {
   reader: IncrementalSessionLog;
   state: ActiveSessionState;
   sessionId: string;
+  live: LiveTokenFileState;
+  mtimeMs: number;
 };
 
 type ActiveSessionState = {
@@ -28,6 +32,13 @@ type ActiveSessionState = {
 
 export class ActiveSessionTracker {
   private readonly cache = new Map<string, CachedSessionState>();
+  private readonly liveTokens = new LiveTokenMonitor();
+  private readonly livePaths = new Set<string>();
+  private initialScan = true;
+  private liveSourceAvailable = true;
+  private activitySourceAvailable = false;
+  private lastConfirmedSessions: ActiveSession[] = [];
+  private lastLiveReadAtMs = Number.NEGATIVE_INFINITY;
 
   public constructor(
     private readonly sessionsRoot = resolveCodexSessionsRoot(),
@@ -35,19 +46,53 @@ export class ActiveSessionTracker {
   ) {}
 
   public listActiveSessions(nowMs = Date.now()): ActiveSession[] {
-    const sessionFiles = listSessionFiles(this.sessionsRoot);
+    this.liveSourceAvailable = existsSync(this.sessionsRoot);
+    const sessionFiles = listSessionFiles(this.sessionsRoot, () => { this.liveSourceAvailable = false; });
+    const listingComplete = this.liveSourceAvailable;
+    if (!listingComplete) this.liveTokens.markUnavailable(nowMs);
+    this.activitySourceAvailable = listingComplete;
     const activePaths = new Set(sessionFiles.map((file) => file.path));
 
     for (const cachedPath of this.cache.keys()) {
-      if (!activePaths.has(cachedPath)) {
+      if (listingComplete && !activePaths.has(cachedPath)) {
         this.cache.delete(cachedPath);
+        this.livePaths.delete(cachedPath);
       }
     }
 
-    return sessionFiles
+    const sessions = sessionFiles
       .map((file) => this.readActiveSession(file.path, file.mtimeMs, nowMs))
       .filter((session): session is ActiveSession => Boolean(session))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    if (listingComplete) this.initialScan = false;
+    // Expire memory even when no page is requesting live statistics.
+    this.liveTokens.snapshot(nowMs, this.liveSourceAvailable);
+    if (this.activitySourceAvailable) this.lastConfirmedSessions = sessions;
+    return this.lastConfirmedSessions;
+  }
+
+  /** Unknown activity is not an empty, successfully observed session list. */
+  public isActivitySourceAvailable(): boolean {
+    return this.activitySourceAvailable;
+  }
+
+  /** Light shared 5s tail: no directory walk, history read, or app-server request. */
+  public getLiveTokens(nowMs = Date.now()): LiveTokenSnapshot {
+    if (nowMs < this.lastLiveReadAtMs || nowMs - this.lastLiveReadAtMs >= LIVE_TOKEN_READ_INTERVAL_MS) {
+      this.lastLiveReadAtMs = nowMs;
+      for (const filePath of this.livePaths) {
+        const cached = this.cache.get(filePath);
+        if (!cached) { this.livePaths.delete(filePath); continue; }
+        const lastActivity = cached.live.latestRecordAtMs ?? cached.mtimeMs;
+        // Keep recently completed chats and subagents long enough to collect final reports.
+        if (lastActivity < nowMs - Math.max(this.activeWindowMs, 300_000)) {
+          this.livePaths.delete(filePath);
+          continue;
+        }
+        this.readActiveSession(filePath, cached.mtimeMs, nowMs);
+      }
+    }
+    return this.liveTokens.snapshot(Math.max(nowMs, Date.now()), this.liveSourceAvailable);
   }
 
   private readActiveSession(
@@ -59,20 +104,43 @@ export class ActiveSessionTracker {
     if (!cached) {
       const sessionId = extractSessionId(filePath);
       if (!sessionId) return null;
-      cached = { reader: new IncrementalSessionLog(), state: createActiveSessionState(), sessionId };
+      cached = { reader: new IncrementalSessionLog(), state: createActiveSessionState(), sessionId,
+        live: createLiveTokenFileState(sessionId, this.initialScan), mtimeMs };
       this.cache.set(filePath, cached);
     }
+    cached.mtimeMs = mtimeMs;
 
     const entry = cached;
+    const previousState = entry.state;
+    let nextState = previousState;
     try {
       entry.reader.read(
         filePath,
-        (line) => consumeActiveSessionLine(entry.state, line),
-        () => { entry.state = createActiveSessionState(); }
+        (line) => {
+          // Usage includes subagents, even though top-level activity excludes them.
+          let record: Record<string, unknown> | null = null;
+          try { record = asRecord(JSON.parse(line)); } catch { /* Incomplete/malformed record. */ }
+          // A directory scan/large first read can outlast the timestamp captured
+          // by its caller. Never discard a report appended during that read.
+          if (record) this.liveTokens.consume(entry.live, record, Math.max(nowMs, Date.now()));
+          if (nextState === previousState) nextState = { ...previousState, terminalTurnIds: new Set(previousState.terminalTurnIds) };
+          consumeActiveSessionLine(nextState, line, record);
+        },
+        () => { nextState = createActiveSessionState(); this.liveTokens.resetFile(entry.live); }
       );
+      entry.state = nextState;
+      this.liveTokens.finishFile(entry.live);
+      if ((entry.live.latestRecordAtMs ?? mtimeMs) >= nowMs - Math.max(this.activeWindowMs, 300_000)) {
+        this.livePaths.add(filePath);
+      }
     } catch {
       // The reader invalidates its offset on failure, so a transient read error
       // is retried from a clean state on the next poll.
+      const lastActivity = entry.live.latestRecordAtMs ?? mtimeMs;
+      this.activitySourceAvailable = false;
+      if (this.livePaths.has(filePath) || lastActivity >= nowMs - Math.max(this.activeWindowMs, 300_000)) {
+        this.liveTokens.markUnavailable(nowMs);
+      }
       return null;
     }
 
@@ -113,11 +181,11 @@ function createActiveSessionState(): ActiveSessionState {
   };
 }
 
-function consumeActiveSessionLine(state: ActiveSessionState, rawLine: string): void {
+function consumeActiveSessionLine(state: ActiveSessionState, rawLine: string, knownRecord?: Record<string, unknown> | null): void {
   if (!rawLine.trim() || state.subagent) return;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(rawLine);
+    parsed = knownRecord === undefined ? JSON.parse(rawLine) : knownRecord;
   } catch {
     return;
   }
@@ -223,31 +291,36 @@ function resolveCodexSessionsRoot(): string {
   return path.join(codexHome, "sessions");
 }
 
-function listSessionFiles(root: string): Array<{ path: string; mtimeMs: number; size: number }> {
+function listSessionFiles(root: string, onReadError?: () => void): Array<{ path: string; mtimeMs: number; size: number }> {
   if (!existsSync(root)) {
+    onReadError?.();
     return [];
   }
 
   const results: Array<{ path: string; mtimeMs: number; size: number }> = [];
-  walkDirectory(root, results);
+  walkDirectory(root, results, onReadError);
   return results.sort((left, right) => right.mtimeMs - left.mtimeMs);
 }
 
 function walkDirectory(
   directory: string,
-  results: Array<{ path: string; mtimeMs: number; size: number }>
+  results: Array<{ path: string; mtimeMs: number; size: number }>,
+  onReadError?: () => void
 ): void {
   let entries;
   try {
     entries = readdirSync(directory, { withFileTypes: true, encoding: "utf8" });
   } catch {
+    onReadError?.();
     return;
   }
 
   for (const entry of entries) {
     const fullPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      walkDirectory(fullPath, results);
+      // Files live below date directories; a partial listing cannot establish
+      // deletion or the absence of active tasks.
+      walkDirectory(fullPath, results, onReadError);
       continue;
     }
 
@@ -263,6 +336,7 @@ function walkDirectory(
         size: stat.size
       });
     } catch {
+      onReadError?.();
       continue;
     }
   }

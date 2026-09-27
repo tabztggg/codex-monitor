@@ -6,28 +6,34 @@
 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.10](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.10)** · Automatically prepare Node.js/npm, Git, PowerShell 7 and Codex CLI during installation. [Changelog](CHANGELOG.md)
+**[v0.4.11](https://github.com/tabztggg/codex-monitor/blob/main/CHANGELOG.md#v0411--2026-09-27)** · Live token windows, a refreshed overview, and more reliable statistics and Windows installation. [Changelog](CHANGELOG.md)
 
-![Usage overview: version status, remaining quota and time, range totals](assets/screenshots/v0.4.7-overview-en.jpg)
+![Usage overview: live tokens, remaining quota and time, range totals](assets/screenshots/v0.4.11-overview-en.jpg)
 
-Screenshots of the actual v0.4.7 interface use fictional accounts, tasks and usage.
+Screenshots of the actual v0.4.11 interface use fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
-![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.7-tasks-en.jpg)
+![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.11-tasks-en.jpg)
 
-![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.7-trends-en.jpg)
+![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.11-trends-en.jpg)
 
 </details>
 
 ## Three pages
 
+The overview shows account quota, recent tokens, range totals, then rankings and activity. Expand the time-range and data-coverage details when needed.
+
 - **Usage overview `/`:** the current login's quota, full quota period and update time, with paired bars comparing remaining quota and time; cross-account totals for the selected range, token breakdown, top 3 tasks and current activity.
 - **Task details `/tasks`:** search, filters, sorting, column settings and project totals. Browse historical account records **without changing the Codex login**. Expand a task for official lifetime quota and model, effort and speed breakdowns.
 - **Trends & methodology `/trends`:** daily cost/tokens, cross-account quota rankings for the selected range, data coverage and estimation details.
 
+Live tokens on the overview offer **1-minute / 5-minute / 20-minute / 1-hour** windows: input, output, cache hit rate and reporting tasks. These cover local chats across accounts, timed when Monitor receives usage reports. At most the latest hour remains in bounded memory; restarting resets the counters and creates no new history files. While the overview is visible, known active/recent logs are read incrementally every 5 seconds; the existing minute activity scan discovers new chats. Account and full-history polling remain unchanged. Each window reports its own collection or missing-data state, and methodology is folded under Details.
+
 By default, read unarchived tasks and the 30 most recently archived root tasks, including attributable children. **Calculate all archives** expands that scope. Task statistics refresh every 10 minutes by default; choose 30 seconds or 1/2/5/10/30/60 minutes, or refresh manually. Older fast settings migrate to 10 minutes once; subsequent choices are remembered. Hidden pages pause new statistics requests and catch up when due on return; outages retain existing values. Account quota polls every 5 minutes and activity every minute, with 2-second activity checks while shutdown automation is armed. Chinese/English selection is remembered; new visitors start in English.
+
+Each history page has a 60-second deadline to allow an initial rebuild of large logs; timeouts retain previous results and allow retry. Unreadable logs are not treated as deleted tasks, and forks count only their new consumption. Missing token components or gaps in live cumulative reports are marked incomplete, not presented as complete zero usage.
 
 ## Quick start
 
@@ -51,7 +57,11 @@ cd codex-monitor
 
 Initial installation needs internet access. Missing tools go into `%LOCALAPPDATA%\Programs\CodexMonitorTools`: Node.js 24 LTS, official Git MinGit, PowerShell 7, and the official Codex npm package when needed. It then installs project dependencies and builds. No administrator access, system PATH changes or account sign-in changes are needed. ZIP downloads are SHA256-verified; failures stop without replacing existing tools. Logs: `.cache/desktop-entry.log` and `.cache/bootstrap.log` in the checkout. Uninstall preserves settings, usage data, private tools and the source checkout for reuse.
 
+Install/repair stages the complete runtime before replacing the service, rolls back on failure and checks that the previous service recovers. Local installation and web updates exclude each other to prevent concurrent replacement. ZIP installations without a Git commit use stable version numbers to detect upgrades. Equal versions cannot prove identical commits; the root update entry can explicitly install the latest revision.
+
 **One-click update:** double-click **Update Codex Monitor.vbs** in the root. It starts Monitor, updates the installed copy to this repository's latest `main`, and opens the dashboard for progress without a console window. A missing installation is deployed first; an update already in progress is reused. Your source checkout is preserved.
+
+Installation errors show the dependency, URL, exception chain and script location in the dialog and `.cache/install-error.txt`. Socket error `10013` requires checking the failing machine's outbound rules, security logs and proxy; it does not mean a folder-write permission failure. [Download proxy and troubleshooting](docs/standalone-windows.md#download-network-troubleshooting)
 
 To redeploy your current local source instead:
 

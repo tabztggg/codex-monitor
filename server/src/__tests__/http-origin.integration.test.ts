@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => ({
   server: null as Server | null,
   webRoot: '',
   start: vi.fn(async () => {}),
+  liveTokens: vi.fn(() => ({ scope: 'local', status: 'collecting', windows: {} })),
   snapshot: { source: 'isolated test fixture' }
 }));
 
@@ -17,6 +18,7 @@ vi.mock('../service', async () => {
   return { MonitorService: class extends EventEmitter {
     start = fixture.start;
     getSnapshot() { return fixture.snapshot; }
+    getLiveTokens() { return fixture.liveTokens(); }
   } };
 });
 vi.mock('node:http', async importOriginal => {
@@ -127,6 +129,18 @@ function websocket(origin?: string, headers: Record<string, string> = {}) {
 }
 
 describe('index HTTP/CORS/static/WebSocket origin policy', () => {
+  it('serves uncached live counters and reports a local read failure without private details', async () => {
+    await startServer();
+    const result = await http('/api/live-tokens', lanOrigin);
+    expect(result.status).toBe(200);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(result.body)).toMatchObject({ scope: 'local', status: 'collecting' });
+    fixture.liveTokens.mockImplementationOnce(() => { throw new Error('private local path'); });
+    const failed = await http('/api/live-tokens', lanOrigin);
+    expect(failed.status).toBe(503);
+    expect(failed.headers['cache-control']).toBe('no-store');
+    expect(failed.body).not.toContain('private local path');
+  });
   it('permits both explicitly configured tunnel schemes for the API and static resources', async () => {
     await startServer(`${httpOrigin}, ${httpsOrigin}`);
     for (const origin of [httpOrigin, httpsOrigin]) {

@@ -1,6 +1,6 @@
 import { spawn, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const UPDATE_REPOSITORY = 'https://github.com/tabztggg/codex-monitor';
@@ -140,17 +140,23 @@ export class ServiceUpdater {
   start(): UpdateStatus {
     if (!this.supported) throw new Error('Windows standalone installation required for updates.');
     if (this.isBusy()) throw new Error('Service action already pending');
+    // Windows installers open this file with FileShare.None. Keep a handle
+    // through preparation so either launcher can exclude the other before
+    // stopping the service. The durable ready state protects the handoff.
+    mkdirSync(path.dirname(this.stateFile), { recursive: true });
+    const deploymentLock = openSync(path.join(this.options.root, '.cache/deploy.lock'), 'a+');
+    const previousState = this.state;
     this.preparing = true;
     this.state = { supported: true, repository: UPDATE_REPOSITORY, status: 'checking', version: this.deployment.version,
       operationId: randomUUID(), startedAt: new Date().toISOString() };
     try { this.save('checking'); }
-    catch (error) { this.preparing = false; throw error; }
+    catch (error) { this.state = previousState; this.preparing = false; closeSync(deploymentLock); throw error; }
     void this.prepare().catch(error => {
       const message = error instanceof Error ? error.message : 'Update failed. Check logs/service-update.log.';
       try { this.save('failed', { error: message }); }
       catch { this.state = { ...this.state, status: 'failed', error: message }; }
       finally { this.preparing = false; }
-    });
+    }).finally(() => { closeSync(deploymentLock); });
     return this.getStatus();
   }
   private async prepare() {

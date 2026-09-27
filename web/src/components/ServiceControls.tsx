@@ -4,7 +4,7 @@ import { useI18n } from '../LanguageContext';
 
 type ServiceAction = 'update' | 'restart' | 'stop';
 type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'building' | 'ready' | 'applying' | 'restarting' | 'completed' | 'up-to-date' | 'failed';
-interface ServiceUpdate {
+export interface ServiceUpdate {
   supported: boolean;
   repository: string;
   status: UpdateStatus;
@@ -19,6 +19,16 @@ interface WatchedUpdate { operationId: string; instance: string; refreshed?: boo
 const UPDATE_STORAGE_KEY = 'codex-monitor-service-update';
 const VERSION_REFRESH_INTERVAL = 30 * 60 * 1000;
 const activeUpdateStatuses = new Set<UpdateStatus>(['checking', 'downloading', 'building', 'ready', 'applying', 'restarting']);
+
+/** Persisted updater records describe an operation, not the currently installed version. */
+export function visibleServiceUpdate(update: ServiceUpdate | undefined, watchedOperationId?: string, installedVersion?: string): ServiceUpdate | undefined {
+  if (!update || update.status === 'idle') return undefined;
+  if (activeUpdateStatuses.has(update.status)) return update;
+  if (!update.operationId || update.operationId !== watchedOperationId) return undefined;
+  if ((update.status === 'completed' || update.status === 'up-to-date') &&
+      (!installedVersion || update.targetVersion !== installedVersion)) return undefined;
+  return update;
+}
 const updateMessages: Record<UpdateStatus, string> = {
   idle: '',
   checking: 'Checking the latest repository version…',
@@ -221,11 +231,12 @@ export function ServiceControls() {
     }
   }
 
-  const updateMessage = update?.status === 'up-to-date' && update.localChanges
+  const notice = visibleServiceUpdate(update, watchedUpdate.current?.operationId, versions?.currentVersion);
+  const updateMessage = notice?.status === 'up-to-date' && notice.localChanges
     ? 'Latest repository commit is already installed. Local unpublished changes were kept.'
-    : update ? updateMessages[update.status] : '';
+    : notice ? updateMessages[notice.status] : '';
   const message = status || (updating && connectionLost ? 'Connection interrupted. Waiting for update status…' : updateMessage);
-  const errorDetail = error || (update?.status === 'failed' ? update.error : '');
+  const errorDetail = error || (notice?.status === 'failed' ? notice.error : '');
   const statusKey = `${update?.operationId || ''}:${message}:${errorDetail || ''}`;
   const actionsDisabled = !enabled || busy || updating;
   const initialVersionCheck = checkingVersions && !versions;
@@ -233,7 +244,7 @@ export function ServiceControls() {
   const versionsUnavailable = versionFetchUnavailable || versions?.status === 'unavailable';
   const updateAvailable = !versionsUnavailable && versions?.status === 'available' && versions.updateAvailable === true;
   const versionsCurrent = !versionsUnavailable && versions?.status === 'current' && versions.updateAvailable === false;
-  const currentVersion = update?.version || versions?.currentVersion || t(initialVersionCheck ? 'Checking…' : 'Unknown');
+  const currentVersion = versions?.currentVersion || t(initialVersionCheck ? 'Checking…' : 'Unknown');
   const repositoryVersion = versions?.repositoryVersion || t(initialVersionCheck ? 'Checking…' : 'Unknown');
   const currentVersionTitle = [
     `${t('Current version')}: ${currentVersion}`,
@@ -286,7 +297,7 @@ export function ServiceControls() {
     {message && statusKey !== dismissedStatus && <small className={`service-control-status${errorDetail ? ' service-control-status-error' : ''}`} role="status">
       {!updating && !busy && <button className="service-status-dismiss" aria-label={t('Dismiss')} onClick={() => setDismissedStatus(statusKey)}>×</button>}
       {t(message)}
-      {update?.targetVersion && !status && <span className="service-update-version">{t('Version')}: {update.targetVersion}</span>}
+      {notice?.targetVersion && !status && <span className="service-update-version">{t('Version')}: {notice.targetVersion}</span>}
       {errorDetail && <span className="service-update-error">{t(errorDetail)}</span>}
     </small>}
   </div>;

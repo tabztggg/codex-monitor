@@ -73,6 +73,23 @@ describe.skipIf(process.platform !== 'win32')('Windows install/uninstall entries
     expect(existsSync(install)).toBe(false);
   });
 
+  it.each(['Start-DesktopEntry.ps1', 'Bootstrap-PowerShell.ps1'])('saves the actual %s failure for the hidden launcher dialog', async entry => {
+    await put('scripts/placeholder');
+    await copyFile(path.join(repository, 'scripts', entry), path.join(root, 'scripts', entry));
+    await put('scripts/Windows-Dependencies.ps1', `
+      $script:MonitorToolsRoot=$PSScriptRoot
+      function Resolve-MonitorDependencies { throw 'Dependency download failed: https://example.test/package.zip; HTTP 403' }
+      function Invoke-MonitorDependencyLock { param($Action); & $Action }
+      function Test-MonitorTool { return $false }
+      function Install-MonitorArchive { throw 'Dependency download failed: https://example.test/package.zip; HTTP 403' }
+    `);
+    await expect(exec(powershell!, ['-NoProfile', '-NonInteractive', '-File', path.join(root, 'scripts', entry), '-Deploy', '-NoBrowser'], {
+      windowsHide: true, timeout: 10_000, env: { ...process.env, LOCALAPPDATA: path.join(root, 'Local Data') },
+    })).rejects.toMatchObject({ code: 1 });
+    expect(await readFile(path.join(root, '.cache/install-error.txt'), 'utf16le')).toContain('Dependency download failed: https://example.test/package.zip; HTTP 403');
+    expect(existsSync(install)).toBe(false);
+  });
+
   it('refuses an uninstall root outside the standard installation before touching it', async () => {
     await put('outside/keep.txt', 'KEEP');
     await expect(exec(powershell!, ['-NoProfile', '-NonInteractive', '-File',

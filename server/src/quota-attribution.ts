@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export type QuotaSample = { id: string; cost: number; tokens: number; unpriced?: number; historical?: boolean };
 type Ledger = {
-  version: 2;
+  version: 2 | 3;
   key: string;
   used: number;
   observedAt: string;
@@ -43,7 +43,7 @@ export class QuotaAttribution {
           console.warn('Quota attribution uses the previous session parser; rebuilding its baseline on the next observation.');
           return;
         }
-        if (!state || state.version !== 2 || typeof state.key !== 'string' ||
+        if (!state || (state.version !== 2 && state.version !== 3) || typeof state.key !== 'string' ||
             !nonnegative(state.used) || state.used > 100 || !nonnegative(state.unattributed) ||
             !isRecord(state.baseline) || !isRecord(state.attributed) ||
             typeof state.observedAt !== 'string' || !Number.isFinite(Date.parse(state.observedAt)) ||
@@ -64,9 +64,11 @@ export class QuotaAttribution {
     const baseline = Object.fromEntries(samples.map(s => [s.id, { cost: s.cost, tokens: s.tokens, unpriced: s.unpriced ?? 0 }]));
     const previous = this.state;
     let next: Ledger;
-    if (!previous || !isSameQuotaWindow(previous.key, key) || used < previous.used) {
+    if (!previous || previous.version !== 3 || !isSameQuotaWindow(previous.key, key) || used < previous.used) {
       // Existing account consumption predates observation; never assign it retroactively.
-      next = { version: 2, key, used, baseline, observedAt: new Date(nowMs).toISOString(), attributed: {}, unattributed: used };
+      // v2 may include inherited fork usage. Keep it visible as stale until
+      // this successful observation, then replace its weights atomically.
+      next = { version: 3, key, used, baseline, observedAt: new Date(nowMs).toISOString(), attributed: {}, unattributed: used };
     } else {
       const delta = used - previous.used;
       const discoveredArchives = samples.filter(s => s.historical && !previous.baseline[s.id]);
@@ -109,7 +111,10 @@ export class QuotaAttribution {
     this.state = next;
   }
 
-  read(key: string) { return this.state && isSameQuotaWindow(this.state.key, key) ? this.state : null; }
+  read(key: string) {
+    return this.state && isSameQuotaWindow(this.state.key, key)
+      ? { ...this.state, stale: this.state.version !== 3 } : null;
+  }
 }
 
 function nonnegative(value: unknown): value is number {

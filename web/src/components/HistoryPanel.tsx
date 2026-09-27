@@ -7,6 +7,7 @@ import { useI18n } from '../LanguageContext';
 import type { I18n, Translate } from '../localization';
 import { TaskInsights } from './TaskInsights';
 import { OverviewHighlights } from './OverviewHighlights';
+import { LiveTokensPanel } from './LiveTokensPanel';
 import { OverviewDataQuality } from './OverviewDataQuality';
 import { OfficialTaskUsagePanel } from './OfficialTaskUsagePanel';
 import { formatEstimatedCost, formatTokenCount, formatUsagePercent, comparePlanUsage, comparisonPlans, isComparisonPlan, type ComparisonPlan } from '../usage-display';
@@ -34,6 +35,8 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   });
   useEffect(() => { try { window.localStorage.setItem('codex-monitor-comparison-plan', comparisonPlan); } catch { /* Storage is optional. */ } }, [comparisonPlan]);
   const planLabel = comparisonPlans[comparisonPlan].label;
+  const statisticsRangeHelp = t('The time range controls cross-account summary equivalents, cost, tokens and trends. The right-hand task quota always shows lifetime usage. Selected account % always uses the current quota period.');
+  const comparisonPlanHelp = t('Plan comparison changes both current-account and cross-account equivalents, including project totals. One {plan} weekly allowance = 100%.', { plan: planLabel });
   const equivalentTitle = t('{plan} equivalent usage', { plan: planLabel });
   const columnTitle = (c: typeof columns[number]) => c.key === 'usage' ? equivalentTitle : t(c.title);
   const sortColumnTitle = (c: typeof columns[number]) => c.key === 'usage' || c.key === 'equivalent20x'
@@ -154,7 +157,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   };
   return <section className={`history-panel density-${view.density} ${simple ? 'simple-table' : 'full-table'}`} aria-busy={loading}>
     <div className="dashboard-heading" id="usage-overview">
-      <div className="dashboard-title"><h2>{t(page === 'tasks' ? 'Task details' : page === 'trends' ? 'Trends & methodology' : 'Usage overview')}</h2><p>{t(page === 'tasks' ? 'Compare task usage and filter local records.' : page === 'trends' ? 'Daily usage, rankings and estimation methodology.' : 'Account snapshots and cross-account estimates, clearly separated.')}</p></div>
+      <div className="dashboard-title"><h2>{t(page === 'tasks' ? 'Task details' : page === 'trends' ? 'Trends & methodology' : 'Usage overview')}</h2><p>{t(page === 'tasks' ? 'Compare task usage and filter local records.' : page === 'trends' ? 'Daily usage, rankings and estimation methodology.' : 'Account quota, recent token reports and historical usage.')}</p></div>
       <div className="history-refresh-controls">
         <span className={`connection-status ${connectionLabel === 'live' && snapshot.server.initialized ? 'connected' : ''}`}>{connectionLabel === 'live' && snapshot.server.initialized ? t('Connected') : t('Connection: {status}', { status: label(connectionLabel) })}</span>
         <label className="refresh-interval"><span className="sr-only">{t('Task refresh interval')}</span><select value={interval} onChange={e => { const n = Number(e.target.value); if (refreshIntervals.includes(n)) setInterval(n); }}>{refreshIntervals.map(n => <option key={n} value={n}>{n === 30000 ? t('30 seconds') : n === 60000 ? t('1 minute') : t('{count} minutes', { count: n / 60000 })}</option>)}</select></label>
@@ -168,6 +171,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       </div>
     </div>
     {(page === 'all' || page === 'overview') && overviewSlot}
+    {(page === 'all' || page === 'overview') && <LiveTokensPanel />}
 
     <section className="cross-account-section" aria-label={t('Statistics time range')}>
       <div className="statistics-heading">
@@ -178,17 +182,25 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
           {page === 'trends' && <span className="scope-badge">{t('Across accounts')}</span>}
           <div className="period-control"><span id="statistics-range-label">{t('Statistics time range')}</span><div className="period-buttons" role="group" aria-labelledby="statistics-range-label" aria-describedby="statistics-range-help">{(['today', '7d', 'lifetime'] as const).map(key => <button type="button" key={key} aria-pressed={period === key} onClick={() => setPeriod(key)}>{t(key === 'lifetime' ? 'Task lifetime' : key === '7d' ? '7 days' : 'Today')}</button>)}</div></div>
           <div className="custom-date-range"><input type="date" aria-label={t('Start date')} value={dateFrom} max={todayDate} onChange={e => setDateFrom(e.target.value)} /><span>–</span><input type="date" aria-label={t('End date')} value={dateTo} min={dateFrom} max={todayDate} onChange={e => setDateTo(e.target.value)} /><button type="button" className="small-control" disabled={!dateFrom || !dateTo || dateFrom > dateTo || dateTo > todayDate} onClick={() => { setRange({from:dateFrom,to:dateTo}); setPeriod('custom'); }}>{t('Apply dates')}</button></div>
-          <label className="inline-field comparison-control">{t('Equivalent usage comparison')}<select aria-describedby="comparison-plan-help" value={comparisonPlan} onChange={e => { if (isComparisonPlan(e.target.value)) setComparisonPlan(e.target.value); }}>{Object.entries(comparisonPlans).map(([key, plan]) => <option value={key} key={key}>{plan.label}</option>)}</select></label>
+          <label className="inline-field comparison-control"><span>{t('Equivalent usage comparison')}</span><select title={t('Equivalent usage comparison')} aria-describedby="comparison-plan-help" value={comparisonPlan} onChange={e => { if (isComparisonPlan(e.target.value)) setComparisonPlan(e.target.value); }}>{Object.entries(comparisonPlans).map(([key, plan]) => <option value={key} key={key}>{plan.label}</option>)}</select></label>
         </div>
       </div>
-      <p className="statistics-applies">{t(page === 'tasks' ? 'Time range applies to cost and tokens. Quota columns keep their own periods.' : 'Equivalent usage · Cost · Tokens')}</p>
+      {page !== 'overview' && page !== 'all' && <p className="statistics-applies">{t(page === 'tasks' ? 'Time range applies to cost and tokens. Quota columns keep their own periods.' : 'Equivalent usage · Cost · Tokens')}</p>}
+      <div className="sr-only"><p id="statistics-range-help">{statisticsRangeHelp}</p><p id="comparison-plan-help">{comparisonPlanHelp}</p></div>
       {error && <p className="history-error" role="alert">{t('Could not refresh tasks: {error}', { error: i18n.error(error) })}</p>}
       {period !== activePeriod && <p className="muted-note" role="status">{t('Loading the selected period. Previous results remain labeled with their original period.')}</p>}
-      {analysis ? <HistoryPeriodScope analysis={analysis} allocation={allocation} nowMs={nowMs} /> : <p className="muted-note" role="status">{t(loading ? 'Loading tasks…' : 'Task data unavailable. Retry refresh.')}</p>}
+      {analysis ? page !== 'overview' && page !== 'all' && <HistoryPeriodScope analysis={analysis} allocation={allocation} nowMs={nowMs} /> : <p className="muted-note" role="status">{t(loading ? 'Loading tasks…' : 'Task data unavailable. Retry refresh.')}</p>}
       {analysis && page !== 'overview' && page !== 'all' && <div className="scope-coverage" role="status"><span>{t('{count} included tasks', { count: mergedJobs.length })}</span><span>{t(archives.mode === 'all' ? 'Archives: all {count}' : 'Archives: latest {count} of {total}', { count: archives.included, total: archives.total })}</span><span>{t('Local records · estimates may be incomplete')}</span></div>}
       {(page === 'all' || page === 'overview') && <>
         <TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="summary" onShowBasis={showBasis} hideCalibration />
-        {analysis && <OverviewDataQuality jobs={mergedJobs} analysis={analysis} archives={archives} allocation={allocation} updatedAt={updatedAt} onShowBasis={showBasis} />}
+        {analysis && <div className="overview-summary-footer">
+          <details className="overview-period-details">
+            <summary>{t('Statistics time range')}<HistoryPeriodScope analysis={analysis} allocation={allocation} nowMs={nowMs} compact /><span className="period-disclosure-arrow" aria-hidden="true">▸</span></summary>
+            <p className="muted-note">{t('Equivalent usage · Cost · Tokens')}</p>
+            <HistoryPeriodScope analysis={analysis} allocation={allocation} nowMs={nowMs} />
+          </details>
+          <OverviewDataQuality jobs={mergedJobs} analysis={analysis} archives={archives} allocation={allocation} updatedAt={updatedAt} onShowBasis={showBasis} />
+        </div>}
       </>}
     </section>
     {(page === 'all' || page === 'overview') && <OverviewHighlights jobs={mergedJobs} sessions={snapshot.activeSessions} ready={Boolean(analysis)} live={connectionLabel === 'live' && snapshot.server.initialized} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} nowMs={nowMs} />}
@@ -248,8 +260,8 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
     {(page === 'all' || page === 'trends') && <>
     <div id="task-trends"><TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="trend" expanded={page === 'trends'} /></div>
     <details className="metric-explanation" id="estimation-basis" ref={basisRef}><summary>{t('Statistics help and estimation basis')}</summary>
-      <p id="statistics-range-help">{t('The time range controls cross-account summary equivalents, cost, tokens and trends. The right-hand task quota always shows lifetime usage. Selected account % always uses the current quota period.')}</p>
-      <p id="comparison-plan-help">{t('Plan comparison changes both current-account and cross-account equivalents, including project totals. One {plan} weekly allowance = 100%.', { plan: planLabel })}</p>
+      <p>{statisticsRangeHelp}</p>
+      <p>{comparisonPlanHelp}</p>
       <p>{t('Equivalent usage compares all locally recorded accounts with one {plan} weekly allowance in the selected period. Values may exceed 100%.', { plan: planLabel })}</p>
       <p>{t('All recorded Pro accounts are treated as 20x, as confirmed by the owner. The conversion uses observed weekly quota changes and API-equivalent token costs; it is not an official allowance or bill. Missing logs, other devices, tools and unpriced models can affect the estimate.')}</p>
       <p>{quotaTitle}</p>
@@ -272,8 +284,8 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   </section>;
 }
 
-export function HistoryPeriodScope({ analysis, allocation, nowMs }: {
-  analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; nowMs: number;
+export function HistoryPeriodScope({ analysis, allocation, nowMs, compact = false }: {
+  analysis: HistoryAnalysis | null; allocation: HistoryUsageAllocation | null; nowMs: number; compact?: boolean;
 }) {
   const { t, locale, windowLabel } = useI18n();
   const period = analysis?.period ?? 'quota';
@@ -281,13 +293,19 @@ export function HistoryPeriodScope({ analysis, allocation, nowMs }: {
   try { new Intl.DateTimeFormat(locale, { timeZone }); }
   catch { timeZone = 'UTC'; }
   const formatter = new Intl.DateTimeFormat(locale, { timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZoneName: 'shortOffset' });
+    hour: '2-digit', minute: '2-digit', ...(compact ? {} : { second: '2-digit' as const }), hour12: false, timeZoneName: 'shortOffset' });
   const validTime = (value: string | null | undefined): value is string => Boolean(value && Number.isFinite(Date.parse(value)));
   const time = (value: string | null | undefined) => validTime(value)
     ? <time dateTime={value}>{formatter.format(new Date(value)).replace('GMT', 'UTC')}</time> : <span>{t('Unavailable')}</span>;
   const start = allocation?.windowStartedAt;
   const end = allocation?.resetsAt;
   const hasWindow = validTime(start) && validTime(end) && Date.parse(start) < Date.parse(end);
+  // Always label the values with the confirmed response range, including while a
+  // different custom range is loading or has failed. Draft inputs are not data.
+  if (compact) return <span className="confirmed-period-range">
+    {period === 'quota' ? hasWindow ? time(start) : t('Period unavailable') : period === 'lifetime' ? t('All available history') : time(analysis?.startedAt)}
+    <span aria-hidden="true"> — </span>{time(period === 'quota' && hasWindow ? end : analysis?.endedAt)}
+  </span>;
   return <div className="period-scope">
     <div className="period-scope-heading"><strong>{t(periods[period])}{period === 'quota' && hasWindow && allocation?.windowLabel ? ` · ${windowLabel(allocation.windowLabel)}` : ''}</strong><span>{t('Time zone: {zone}', { zone: timeZone })}</span></div>
     <dl className="period-scope-times">

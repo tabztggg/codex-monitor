@@ -22,6 +22,9 @@ export class AutomationController {
   private globalPolicy: RunAutomationPolicy;
   private globalState = structuredClone(DEFAULT_AUTOMATION_STATE);
   private activeSessionCount = 0;
+  private activeSessionSourceAvailable = true;
+  private sourceCancellationPending = false;
+  private globalSettleRevision = 0;
   private shutdownOperation: Promise<void> = Promise.resolve();
   private schedulingShutdown: { scope: "run" | "global"; runId: string | null } | null = null;
 
@@ -99,7 +102,7 @@ export class AutomationController {
       settlesAt: null,
       shutdownAt: null
     };
-    this.evaluateActiveSessions(this.activeSessionCount);
+    this.evaluateActiveSessions(this.activeSessionCount, this.activeSessionSourceAvailable);
   }
 
   public async cancelGlobalAutomation(
@@ -144,9 +147,16 @@ export class AutomationController {
 
   private async cancelShutdownInternal(
     reason: string,
-    options: { disarm?: boolean }
+    options: { disarm?: boolean },
+    scope?: "global"
   ): Promise<void> {
-    this.clearAllDebounces();
+    // Source failures own only the global idle rule, never another run's timer.
+    if (scope === "global") {
+      if (this.activeShutdown.scope !== "global") return;
+      this.clearGlobalDebounce();
+    } else {
+      this.clearAllDebounces();
+    }
 
     const runId = this.activeShutdown.runId;
     if (this.activeShutdown.scheduled && !this.isDryRun()) {
@@ -233,11 +243,12 @@ export class AutomationController {
     }
   }
 
-  public evaluateActiveSessions(activeSessions: ActiveSession[] | number): void {
+  public evaluateActiveSessions(activeSessions: ActiveSession[] | number, sourceAvailable = true): void {
     const activeCount = Array.isArray(activeSessions)
       ? activeSessions.length
       : activeSessions;
     this.activeSessionCount = activeCount;
+    this.activeSessionSourceAvailable = sourceAvailable;
 
     if (!this.globalPolicy.enabled) {
       this.clearGlobalDebounce();
@@ -247,6 +258,27 @@ export class AutomationController {
       this.globalState = {
         ...DEFAULT_AUTOMATION_STATE
       };
+      return;
+    }
+
+    if (!sourceAvailable) {
+      this.globalSettleRevision++;
+      this.clearGlobalDebounce();
+      this.globalState = {
+        ...this.globalState,
+        status: "armed",
+        settlesAt: null,
+        shutdownAt: null,
+        lastAction: "Activity source unavailable; waiting for a successful scan"
+      };
+      if (this.isShutdownFor("global") && !this.sourceCancellationPending) {
+        this.sourceCancellationPending = true;
+        // Serialize behind an in-flight schedule, then recheck its owner. Keep
+        // the user's policy armed and require a fresh full settle after recovery.
+        void this.queueShutdownOperation(() =>
+          this.cancelShutdownInternal("activity source unavailable", {}, "global")
+        ).catch(() => {}).finally(() => { this.sourceCancellationPending = false; });
+      }
       return;
     }
 
@@ -498,7 +530,9 @@ export class AutomationController {
   }
 
   private async scheduleGlobalShutdown(): Promise<void> {
+    const revision = this.globalSettleRevision;
     await this.queueShutdownOperation(async () => {
+      if (revision !== this.globalSettleRevision) return;
       this.schedulingShutdown = { scope: "global", runId: null };
       try {
         await this.scheduleGlobalShutdownInternal();
@@ -511,6 +545,7 @@ export class AutomationController {
   private async scheduleGlobalShutdownInternal(): Promise<void> {
     if (
       !this.globalPolicy.enabled ||
+      !this.activeSessionSourceAvailable ||
       this.activeSessionCount > 0 ||
       this.activeShutdown.scheduled
     ) {

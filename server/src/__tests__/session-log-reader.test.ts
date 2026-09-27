@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { IncrementalSessionLog } from '../session-log-reader';
+import { IncrementalSessionLog, MAX_SESSION_LOG_LINE_BYTES, SessionLogReadLimitError } from '../session-log-reader';
 
 vi.mock('node:fs', async original => {
   const actual = await original<typeof fs>();
@@ -41,6 +41,146 @@ describe('incremental session log cursor', () => {
     expect(resets).toBe(1);
     const bytes = vi.mocked(fs.readSync).mock.results.reduce((sum, result) => sum + (result.type === 'return' ? Number(result.value) : 0), 0);
     expect(bytes).toBeLessThanOrEqual(Buffer.byteLength(last + '\n') + 512);
+  });
+
+  it.each(['\n', ''])('rejects oversized records before concatenating them, including tails (%j)', suffix => {
+    const limit = 512 * 1024;
+    reader = new IncrementalSessionLog(limit);
+    fs.writeFileSync(file, JSON.stringify({ text: 'x'.repeat(limit * 4) }) + suffix);
+    expect(() => reader.read(file, consume, reset)).toThrow(SessionLogReadLimitError);
+    expect(lines).toEqual([]);
+    const bytes = vi.mocked(fs.readSync).mock.results.reduce((sum, result) => sum + (result.type === 'return' ? Number(result.value) : 0), 0);
+    expect(bytes).toBeLessThanOrEqual(limit + 256 * 1024);
+    vi.mocked(fs.readSync).mockClear();
+    expect(() => reader.read(file, consume, reset)).toThrow(/read limit/);
+    expect(fs.readSync).not.toHaveBeenCalled();
+    fs.writeFileSync(file, '{"n":1}\n');
+    expect(reader.read(file, consume, reset)).toBe(true);
+    expect(lines).toEqual(['{"n":1}']);
+  });
+
+  it('reads files far larger than the record limit when each record is bounded', () => {
+    const line = JSON.stringify({ text: 'x'.repeat(64 * 1024) });
+    const recordCount = 256;
+    fs.writeFileSync(file, (line + '\n').repeat(recordCount));
+    expect(fs.statSync(file).size).toBeGreaterThan(MAX_SESSION_LOG_LINE_BYTES);
+    let consumed = 0;
+    reader.read(file, record => { expect(record.length).toBe(line.length); consumed++; }, () => {});
+    expect(consumed).toBe(recordCount);
+  });
+
+  it('rechecks only the oversized record when a blocked file continues growing', () => {
+    const limit = 512 * 1024;
+    reader = new IncrementalSessionLog(limit);
+    const prefix = (JSON.stringify({ text: 'x'.repeat(128 * 1024) }) + '\n').repeat(12);
+    fs.writeFileSync(file, prefix + 'x'.repeat(limit * 2));
+    expect(() => reader.read(file, consume, reset)).toThrow(SessionLogReadLimitError);
+    fs.appendFileSync(file, '\n{"n":2}\n');
+    vi.mocked(fs.readSync).mockClear();
+    const consumeAgain = vi.fn();
+    expect(() => reader.read(file, consumeAgain, reset)).toThrow(SessionLogReadLimitError);
+    expect(consumeAgain).not.toHaveBeenCalled();
+    const bytes = vi.mocked(fs.readSync).mock.results.reduce((sum, result) => sum + (result.type === 'return' ? Number(result.value) : 0), 0);
+    expect(bytes).toBeLessThanOrEqual(limit + 2);
+    // An in-place repair of the oversized line is detected even when the file grows.
+    fs.writeFileSync(file, prefix + ('{"n":3}\n').repeat(limit / 2));
+    reader.read(file, consume, reset);
+    expect(lines.at(-1)).toBe('{"n":3}');
+  });
+
+  const toolOutput = (text: string, type = 'custom_tool_call_output') => JSON.stringify({
+    timestamp: '2026-09-27T10:00:00.000Z', type: 'response_item', payload: { type, output: text }
+  });
+
+  it.each(['custom_tool_call_output', 'function_call_output'])('projects oversized %s while retaining adjacent statistics and time', type => {
+    reader = new IncrementalSessionLog(1024);
+    const first = '{"type":"event_msg","payload":{"type":"token_count","n":1}}';
+    const last = '{"type":"event_msg","payload":{"type":"task_complete"}}';
+    const output = toolOutput('x'.repeat(600 * 1024) + '\\"嵌套 {"type":"token_count"}', type);
+    fs.writeFileSync(file, `${first}\n${output}\r\n${last}\n`);
+    reader.read(file, consume, reset);
+    expect(lines).toEqual([first, JSON.stringify({ type: 'response_item', timestamp: '2026-09-27T10:00:00.000Z', payload: { type } }), last]);
+    vi.mocked(fs.readSync).mockClear();
+    expect(reader.read(file, consume, reset)).toBe(false);
+    expect(fs.readSync).not.toHaveBeenCalled();
+    fs.appendFileSync(file, '{"n":2}\n');
+    reader.read(file, consume, reset);
+    expect(lines.at(-1)).toBe('{"n":2}');
+    expect(resets).toBe(1);
+  });
+
+  it('streams an incomplete oversized tail across appends without rereading or retaining its body', () => {
+    reader = new IncrementalSessionLog(1024);
+    const output = toolOutput('x'.repeat(600 * 1024) + '🙂');
+    fs.writeFileSync(file, output.slice(0, -5));
+    reader.read(file, consume, reset);
+    expect(lines).toEqual([]);
+    vi.mocked(fs.readSync).mockClear();
+    fs.appendFileSync(file, output.slice(-5));
+    reader.read(file, consume, reset);
+    expect(lines).toHaveLength(1);
+    const bytes = vi.mocked(fs.readSync).mock.results.reduce((sum, result) => sum + (result.type === 'return' ? Number(result.value) : 0), 0);
+    expect(bytes).toBeLessThan(1024);
+    fs.appendFileSync(file, '\n{"n":2}\n');
+    reader.read(file, consume, reset);
+    expect(lines).toHaveLength(2);
+    expect(lines.at(-1)).toBe('{"n":2}');
+  });
+
+  it('rebuilds a rewritten pending output instead of consuming an obsolete projection', () => {
+    reader = new IncrementalSessionLog(1024);
+    fs.writeFileSync(file, toolOutput('x'.repeat(300 * 1024)).slice(0, -2));
+    reader.read(file, consume, reset);
+    fs.writeFileSync(file, '{"n":1}\n' + toolOutput('y'.repeat(600 * 1024)) + '\n');
+    reader.read(file, consume, reset);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe('{"n":1}');
+    expect(resets).toBe(2);
+  });
+
+  it.each([
+    '{"type":"event_msg","payload":{"type":"token_count","text":"BODY"}}',
+    '{"type":"session_meta","payload":{"type":"custom_tool_call_output","text":"BODY"}}',
+    '{"type":"turn_context","payload":{"type":"custom_tool_call_output","text":"BODY"}}',
+    '{"type":"event_msg","payload":{"type":"task_started","text":"BODY"}}',
+    '{"type":"event_msg","payload":{"type":"task_complete","text":"BODY"}}',
+    '{"type":"event_msg","payload":{"type":"turn_aborted","text":"BODY"}}',
+    '{"nested":{"type":"response_item"},"type":"event_msg","payload":{"type":"custom_tool_call_output","text":"BODY"}}',
+    '{"type":"response_item","payload":{"type":"message","role":"user","text":"BODY"}}',
+    '{"type":"response_item","payload":{"nested":{"type":"custom_tool_call_output"},"output":"BODY"}}',
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},"type":"event_msg"}',
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY","type":"token_count"}}',
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},"payload":{"type":"token_count"}}',
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},}',
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY\\q"}}',
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},"deep":' + '['.repeat(65) + '0' + ']'.repeat(65) + '}'
+  ])('never projects a statistical, ambiguous or malformed oversized envelope: %s', template => {
+    reader = new IncrementalSessionLog(1024);
+    fs.writeFileSync(file, template.replace('BODY', 'x'.repeat(300 * 1024)) + '\n');
+    expect(() => reader.read(file, consume, reset)).toThrow(SessionLogReadLimitError);
+    expect(lines).toEqual([]);
+  });
+
+  it('recognizes escaped identity keys and rejects a duplicate identity encoded with escapes', () => {
+    reader = new IncrementalSessionLog(1024);
+    const output = toolOutput('x'.repeat(300 * 1024)).replace('"type":"response_item"', '"\\u0074ype":"response_item"');
+    fs.writeFileSync(file, output + '\n');
+    reader.read(file, consume, reset);
+    expect(lines).toHaveLength(1);
+    fs.writeFileSync(file, output.slice(0, -1) + ',"type":"event_msg"}\n');
+    expect(() => reader.read(file, consume, reset)).toThrow(SessionLogReadLimitError);
+  });
+
+  it('recovers when a blocked unknown record is rewritten in place as a larger valid tool output', () => {
+    reader = new IncrementalSessionLog(1024);
+    fs.writeFileSync(file, JSON.stringify({ type: 'unknown', text: 'x'.repeat(300 * 1024) }) + '\n');
+    expect(() => reader.read(file, consume, reset)).toThrow(SessionLogReadLimitError);
+    const original = fs.statSync(file);
+    fs.writeFileSync(file, toolOutput('y'.repeat(600 * 1024)) + '\n');
+    expect(fs.statSync(file).ino).toBe(original.ino);
+    reader.read(file, consume, reset);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).payload.type).toBe('custom_tool_call_output');
   });
 
   it('waits for a partial UTF-8 record and consumes it once when completed', () => {

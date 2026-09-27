@@ -11,6 +11,31 @@ import type {
   RunSnapshot,
   SortDirection
 } from "../../shared/monitor";
+import type { LiveTokenSnapshot } from "../../shared/live-tokens";
+
+// First load may rebuild statistics for large local histories before caching.
+export const HISTORY_PAGE_TIMEOUT_MS = 60_000;
+
+/** Bound both connection and response-body reads without aborting the caller's next poll. */
+async function historyFetch<T>(input: RequestInfo, parentSignal?: AbortSignal): Promise<T> {
+  parentSignal?.throwIfAborted();
+  const controller = new AbortController();
+  const cancel = () => controller.abort(parentSignal?.reason);
+  parentSignal?.addEventListener('abort', cancel, { once: true });
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(controller.signal.reason);
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+  });
+  const timeout = setTimeout(() => controller.abort(new Error('Task request timed out. Previous results are kept; retry refresh.')), HISTORY_PAGE_TIMEOUT_MS);
+  try {
+    return await Promise.race([jsonFetch<T>(input, { signal: controller.signal }), aborted]);
+  } finally {
+    clearTimeout(timeout);
+    parentSignal?.removeEventListener('abort', cancel);
+    controller.signal.removeEventListener('abort', onAbort);
+  }
+}
 
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
@@ -31,6 +56,9 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 }
 
 export const api = {
+  fetchLiveTokens(signal?: AbortSignal): Promise<LiveTokenSnapshot> {
+    return jsonFetch<LiveTokenSnapshot>("/api/live-tokens", { signal, cache: "no-store" });
+  },
   fetchOfficialTaskUsage(id: string, signal?: AbortSignal): Promise<OfficialTaskUsage> {
     return jsonFetch(`/api/history/jobs/${encodeURIComponent(id)}/official-usage`, { signal });
   },
@@ -117,9 +145,9 @@ export const api = {
       params.set("sortDirection", args.sortDirection);
     }
 
-    return jsonFetch<HistoryJobListResponse>(
+    return historyFetch<HistoryJobListResponse>(
       `/api/history/jobs?${params.toString()}`,
-      { signal: args.signal }
+      args.signal
     );
   }
 };

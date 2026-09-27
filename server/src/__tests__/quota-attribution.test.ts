@@ -7,6 +7,25 @@ const sample = (id: string, cost: number, unpriced = 0) => ({ id, cost, tokens: 
 const weeklyKey = (endMs: number, name = 'Overall Codex', durationMs = 604800000) =>
   JSON.stringify([name, 'Weekly', endMs - durationMs, new Date(endMs).toISOString()]);
 
+it('retains v2 attribution as stale for display until a successful corrected baseline replaces its weights', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'quota-fork-migrate-'));
+  try {
+    const file = path.join(root, 'ledger.json');
+    const original = JSON.stringify({ version: 2, key: 'week', used: 10,
+      baseline: { fork: { cost: 500, tokens: 50000 } }, attributed: { fork: 8 }, unattributed: 2,
+      observedAt: new Date(0).toISOString() });
+    writeFileSync(file, original);
+    const ledger = new QuotaAttribution(file);
+    expect(ledger.read('week')).toMatchObject({ version: 2, stale: true, attributed: { fork: 8 } });
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    ledger.observe('week', 11, [sample('fork', 5), sample('live', 10)], 1);
+    expect(ledger.read('week')).toMatchObject({ version: 3, stale: false, attributed: {}, unattributed: 11 });
+    const restarted = new QuotaAttribution(file);
+    restarted.observe('week', 12, [sample('fork', 5), sample('live', 11)], 2);
+    expect(restarted.read('week')?.attributed).toEqual({ fork: 0, live: 1 });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 it('rebaselines old parser ledgers without assigning recovered historical tasks the next quota increase', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'quota-migrate-'));
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -20,14 +39,14 @@ it('rebaselines old parser ledgers without assigning recovered historical tasks 
     expect(ledger.read('week')).toBeNull();
     expect(readFileSync(file, 'utf8')).toBe(original);
     ledger.observe('week', 11, [sample('live', 11), sample('recovered-old', 500)], 1);
-    expect(ledger.read('week')).toMatchObject({ version: 2, used: 11, attributed: {}, unattributed: 11,
+    expect(ledger.read('week')).toMatchObject({ version: 3, used: 11, attributed: {}, unattributed: 11,
       baseline: { 'recovered-old': { cost: 500, tokens: 50000 } } });
     const reopened = new QuotaAttribution(file);
     reopened.observe('week', 12, [sample('live', 12), sample('recovered-old', 500)], 2);
     expect(reopened.read('week')?.attributed.live).toBe(1);
     expect(reopened.read('week')?.attributed['recovered-old'] ?? 0).toBe(0);
     expect(reopened.read('week')?.unattributed).toBe(11);
-    expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(2);
+    expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(3);
     expect(warning).toHaveBeenCalledOnce();
   } finally { warning.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 });
@@ -43,8 +62,8 @@ it.each(['{truncated', JSON.stringify({ version: 2, key: 'week', used: 10, obser
     expect(ledger.read('week')).toBeNull();
     expect(readFileSync(file, 'utf8')).toBe(original);
     ledger.observe('week', 10, [sample('existing', 500)], 1);
-    expect(ledger.read('week')).toMatchObject({ version: 2, attributed: {}, unattributed: 10 });
-    expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(2);
+    expect(ledger.read('week')).toMatchObject({ version: 3, attributed: {}, unattributed: 10 });
+    expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(3);
     expect(warning).toHaveBeenCalledOnce();
   } finally { warning.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RepositoryVersionStatus } from '../../../shared/service-version';
 import { useI18n } from '../LanguageContext';
+import { scheduleVersionCheck, versionCheckState, versionErrorMessages, VERSION_FAILURE_INTERVAL, VERSION_REFRESH_INTERVAL } from '../version-check';
 
 type ServiceAction = 'update' | 'restart' | 'stop';
 type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'building' | 'ready' | 'applying' | 'restarting' | 'completed' | 'up-to-date' | 'failed';
@@ -17,7 +18,6 @@ export interface ServiceUpdate {
 interface ServiceSnapshot { enabled: boolean; instance?: string; update?: ServiceUpdate }
 interface WatchedUpdate { operationId: string; instance: string; refreshed?: boolean }
 const UPDATE_STORAGE_KEY = 'codex-monitor-service-update';
-const VERSION_REFRESH_INTERVAL = 30 * 60 * 1000;
 const activeUpdateStatuses = new Set<UpdateStatus>(['checking', 'downloading', 'building', 'ready', 'applying', 'restarting']);
 
 /** Persisted updater records describe an operation, not the currently installed version. */
@@ -68,6 +68,10 @@ export function ServiceControls() {
   const [versions, setVersions] = useState<RepositoryVersionStatus | null>(null);
   const [checkingVersions, setCheckingVersions] = useState(true);
   const [versionCheckFailed, setVersionCheckFailed] = useState(false);
+  const [versionTransportError, setVersionTransportError] = useState('');
+  const [versionClock, setVersionClock] = useState(Date.now);
+  const [versionDue, setVersionDue] = useState<number | null>(null);
+  const versionDueRef = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const instance = useRef('');
   const watchedUpdate = useRef<WatchedUpdate | null>(readWatchedUpdate());
@@ -129,6 +133,7 @@ export function ServiceControls() {
 
   const readVersions = useCallback(async (manual = false) => {
     if ((readingVersions.current && !readingVersions.current.signal.aborted) || !mounted.current) return;
+    if (document.hidden || (!manual && Date.now() < versionDueRef.current)) return;
     const controller = new AbortController();
     readingVersions.current = controller;
     setCheckingVersions(true);
@@ -136,20 +141,33 @@ export function ServiceControls() {
     const timeout = window.setTimeout(() => controller.abort(), 35_000);
     try {
       const response = await fetch(`/api/service/versions${manual ? '?refresh=1' : ''}`, { signal: controller.signal, cache: 'no-store' });
-      if (!response.ok) throw new Error();
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const next: RepositoryVersionStatus = await response.json();
       if (mounted.current && readingVersions.current === controller) {
         setVersions(next);
         setVersionCheckFailed(false);
+        setVersionTransportError('');
+        const serverDue = Date.parse(next.nextCheckAt ?? '');
+        const due = Number.isFinite(serverDue) && serverDue > Date.now() ? serverDue
+          : Date.now() + (next.stale ? VERSION_FAILURE_INTERVAL : VERSION_REFRESH_INTERVAL);
+        versionDueRef.current = due;
+        setVersionDue(due);
       }
-    } catch {
+    } catch (error) {
       // Keep previous version information, but never present it as a fresh check.
-      if (mounted.current && readingVersions.current === controller) setVersionCheckFailed(true);
+      if (mounted.current && readingVersions.current === controller) {
+        setVersionCheckFailed(true);
+        setVersionTransportError(controller.signal.aborted ? 'Monitor did not answer the version check within 35 seconds.'
+          : error instanceof Error && /^HTTP \d{3}$/.test(error.message) ? error.message : 'The browser could not reach the Monitor version endpoint.');
+        const due = Date.now() + VERSION_FAILURE_INTERVAL;
+        versionDueRef.current = due;
+        setVersionDue(due);
+      }
     } finally {
       window.clearTimeout(timeout);
       if (readingVersions.current === controller) {
         readingVersions.current = null;
-        if (mounted.current) setCheckingVersions(false);
+        if (mounted.current) { setCheckingVersions(false); setVersionClock(Date.now()); }
       }
     }
   }, []);
@@ -162,17 +180,27 @@ export function ServiceControls() {
     mounted.current = true;
     void readStatus();
     void readVersions();
-    const onFocus = () => { void readStatus(); void readVersions(); };
+    const onFocus = () => { if (!document.hidden) { void readStatus(); void readVersions(); } };
     window.addEventListener('focus', onFocus);
-    const versionTimer = window.setInterval(() => { void readVersions(); }, VERSION_REFRESH_INTERVAL);
+    document.addEventListener('visibilitychange', onFocus);
     return () => {
       mounted.current = false;
       window.removeEventListener('focus', onFocus);
-      window.clearInterval(versionTimer);
+      document.removeEventListener('visibilitychange', onFocus);
       readingStatus.current?.abort();
       readingVersions.current?.abort();
     };
   }, [readStatus, readVersions]);
+  useEffect(() => {
+    if (versionDue === null) return;
+    return scheduleVersionCheck(versionDue, () => { void readVersions(); });
+  }, [versionDue, readVersions]);
+  const manualDue = versionCheckFailed ? versionDue : Date.parse(versions?.nextManualCheckAt ?? '');
+  useEffect(() => {
+    if (!manualDue || !Number.isFinite(manualDue) || manualDue <= Date.now()) return;
+    const timer = window.setTimeout(() => setVersionClock(Date.now()), manualDue - Date.now() + 25);
+    return () => window.clearTimeout(timer);
+  }, [manualDue]);
   useEffect(() => {
     if (!updating) return;
     // This endpoint only reads local updater state; polling never checks GitHub.
@@ -240,10 +268,11 @@ export function ServiceControls() {
   const statusKey = `${update?.operationId || ''}:${message}:${errorDetail || ''}`;
   const actionsDisabled = !enabled || busy || updating;
   const initialVersionCheck = checkingVersions && !versions;
-  const versionFetchUnavailable = versionCheckFailed || Boolean(versions?.stale);
-  const versionsUnavailable = versionFetchUnavailable || versions?.status === 'unavailable';
-  const updateAvailable = !versionsUnavailable && versions?.status === 'available' && versions.updateAvailable === true;
-  const versionsCurrent = !versionsUnavailable && versions?.status === 'current' && versions.updateAvailable === false;
+  const versionState = versionCheckState(versions, versionCheckFailed, versionClock);
+  const versionFetchUnavailable = versionState.unavailable;
+  const updateAvailable = versionState.available;
+  const versionsCurrent = versionState.current;
+  const versionCoolingDown = !!manualDue && Number.isFinite(manualDue) && manualDue > versionClock;
   const currentVersion = versions?.currentVersion || t(initialVersionCheck ? 'Checking…' : 'Unknown');
   const repositoryVersion = versions?.repositoryVersion || t(initialVersionCheck ? 'Checking…' : 'Unknown');
   const currentVersionTitle = [
@@ -265,17 +294,35 @@ export function ServiceControls() {
   const versionButtonLabel = updating ? t('Updating…') : checkingVersions ? t('Checking…')
     : updateAvailable ? (versions?.repositoryVersion === versions?.currentVersion ? t('Update available · Update')
       : t('Update to v{version}', { version: repositoryVersion }))
-    : versionFetchUnavailable ? t('Check failed · Retry') : versionsCurrent ? t('Up to date') : t('Check for updates');
-  const versionButtonDisabled = busy || updating || checkingVersions || (updateAvailable && (!enabled || !update?.supported));
+    : versionFetchUnavailable ? t(versionState.lastCurrent ? 'Previously up to date' : 'Recheck pending') : versionsCurrent ? t('Up to date') : t('Check for updates');
+  const versionButtonDisabled = busy || updating || checkingVersions || (!updateAvailable && versionCoolingDown) || (updateAvailable && (!enabled || !update?.supported));
+  const nextCheckLabel = manualDue && Number.isFinite(manualDue) && versionCoolingDown
+    ? t('Recheck available at {time}', { time: dateTime(new Date(manualDue).toISOString()) }) : t('Click to check again.');
   const versionButtonTitle = updateAvailable
     ? t(!update?.supported ? 'Repository updates require a managed Windows installation.' : 'Update from tabztggg/codex-monitor · main')
-    : `${versionCheckDetail}\n${t('Click to check again. Checks are limited to once every 5 minutes.')}`;
+    : `${versionCheckDetail}\n${nextCheckLabel}`;
   return <div className="service-controls" role="group" aria-label={t('Service')}>
     <div className="service-version-summary" role="status" aria-live="polite" aria-atomic="true">
       <dl className="service-version-values">
         <div title={currentVersionTitle}><dt>{t('Current version')}</dt><dd>{currentVersion}{versions?.currentCommit && <code className="service-version-commit">{versions.currentCommit.slice(0, 7)}</code>}{versions?.localChanges && <span aria-label={t('Includes local unpublished changes.')}>*</span>}</dd></div>
-        <div title={repositoryVersionTitle}><dt>{t('Repository version')}</dt><dd>{repositoryVersion}{versions?.repositoryCommit && <code className="service-version-commit">{versions.repositoryCommit.slice(0, 7)}</code>}</dd></div>
+        <div title={repositoryVersionTitle}><dt>{t(versionFetchUnavailable && versions?.repositoryVersion ? 'Last known repository' : 'Repository version')}</dt><dd>{repositoryVersion}{versions?.repositoryCommit && <code className="service-version-commit">{versions.repositoryCommit.slice(0, 7)}</code>}</dd></div>
       </dl>
+      <details className="service-version-details">
+        <summary className={versionFetchUnavailable ? 'service-version-retry' : ''}>{t(versionFetchUnavailable ? 'Check incomplete' : 'Check details')}</summary>
+        <div className="service-version-diagnostics">
+          <strong>{versionCheckDetail}</strong>
+          {versions?.checkedAt && <p>{t('Last confirmed at {time}', { time: dateTime(versions.checkedAt) })}</p>}
+          {versions?.attemptedAt && !versionCheckFailed && <p>{t('Last attempted at {time}', { time: dateTime(versions.attemptedAt) })}</p>}
+          {versionCheckFailed ? <p>{t(versionTransportError)}</p> : versions?.lastError && <p>
+            {t(versionErrorMessages[versions.lastError.kind])}
+            {' '}{t(`Check stage: ${versions.lastError.stage}`)}
+            {versions.lastError.httpStatus && ` · HTTP ${versions.lastError.httpStatus}`}
+            {versions.lastError.code && ` · ${versions.lastError.code}`}
+          </p>}
+          <p>{nextCheckLabel}</p>
+          {versionFetchUnavailable && <small>{t('An incomplete version check does not mean installation or updating failed.')}</small>}
+        </div>
+      </details>
     </div>
     <button className={`language-switch service-control-button service-version-button${updateAvailable ? ' service-control-update-available' : versionsCurrent ? ' service-version-current' : versionFetchUnavailable ? ' service-version-retry' : ''}`}
       disabled={versionButtonDisabled} aria-busy={checkingVersions || updating} title={versionButtonTitle}

@@ -1076,6 +1076,12 @@ a {
 .service-version-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .service-version-button.service-version-current { color: var(--muted); }
 .service-version-button.service-version-retry { color: var(--warn); }
+.service-version-details { font-size: 11px; }
+.service-version-details summary { cursor: pointer; color: var(--muted); }
+.service-version-details summary.service-version-retry { color: var(--warn); }
+.service-version-diagnostics { position: absolute; z-index: 22; right: 0; top: calc(100% + 8px); width: min(380px, calc(100vw - 32px)); box-sizing: border-box; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); line-height: 1.6; overflow-wrap: anywhere; }
+.service-version-diagnostics p { margin: 6px 0; }
+.service-version-diagnostics small { color: var(--muted); }
 .service-update-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--warn); }
 .service-control-button { color: var(--ink); white-space: nowrap; }
 .service-control-update-available { color: var(--ink); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 24%, var(--surface)); font-weight: 650; box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 35%, transparent); }

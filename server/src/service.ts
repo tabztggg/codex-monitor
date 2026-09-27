@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { AccountUsageHistory } from './account-usage';
+import { FreshCurrentAccountSource, type CurrentAccountSource } from './current-account';
 import path from "node:path";
 import { deriveThreadRuntimeStatus, type ActiveSession, type ArmAutomationRequest, type ArmGlobalAutomationRequest, type CodexUsageSnapshot, type HistoryJobListResponse, type HistoryThreadListResponse, type MonitorSnapshot, type RunSnapshot, type ServerConnectionState } from "../../shared/monitor";
 import { ActiveSessionTracker } from "./active-sessions";
@@ -39,6 +40,11 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   private codexUsageRefreshPromise: Promise<void> | null = null;
   private usageAccountRevision = 0;
   private usageIdentityPending = false;
+  private readonly currentAccountSource: CurrentAccountSource | null;
+  private accountIdentityCheck: Promise<void> | null = null;
+  private nextAccountIdentityCheck = 0;
+  private accountRefreshQueued = false;
+  private lastAccountRefreshStarted = -Infinity;
   private historyThreadMetadataCache: {
     refreshedAtMs: number;
     data: Map<string, HistoryJobMetadata>;
@@ -46,11 +52,13 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   private historyThreadMetadataRefreshPromise: Promise<Map<string, HistoryJobMetadata>> | null = null;
 
   public constructor(
-    client = new CodexAppServerClient(),
-    historyJobReader = new HistoryJobReader(undefined, path.resolve('.cache/quota-attribution.json'))
+    client?: CodexAppServerClient,
+    historyJobReader = new HistoryJobReader(undefined, path.resolve('.cache/quota-attribution.json')),
+    currentAccountSource?: CurrentAccountSource,
   ) {
     super();
-    this.client = client;
+    this.client = client ?? new CodexAppServerClient();
+    this.currentAccountSource = currentAccountSource ?? (client ? null : new FreshCurrentAccountSource());
     this.historyJobReader = historyJobReader;
     this.automation = new AutomationController(this.store, {
       onChange: () => this.emitSnapshot()
@@ -107,6 +115,15 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       this.automation.evaluateActiveSessions(this.activeSessions, false);
     }
     return snapshot;
+  }
+
+  /** Explicit page refresh is shared across tabs and bounded; account changes
+   * bypass the short manual cooldown but never overlap an in-flight read. */
+  public async refreshCurrentAccount(): Promise<CodexUsageSnapshot> {
+    await this.checkAccountIdentity(true);
+    if (this.codexUsageRefreshPromise) await this.codexUsageRefreshPromise;
+    else if (Date.now() - this.lastAccountRefreshStarted >= 30_000) await this.refreshCodexUsage();
+    return cloneValue(this.codexUsage);
   }
 
   public listRuns() {
@@ -340,7 +357,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       this.serverState.connected = true;
       this.serverState.initialized = true;
       this.serverState.lastError = null;
-      void this.refreshCodexUsage();
+      if (!this.currentAccountSource) void this.refreshCodexUsage();
       this.emitSnapshot();
     });
 
@@ -350,19 +367,24 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     });
 
     this.client.on("close", (code) => {
-      this.usageAccountRevision++;
+      if (!this.currentAccountSource) this.usageAccountRevision++;
       this.serverState.connected = false;
       this.serverState.initialized = false;
       this.serverState.lastError =
         code === null
           ? "Codex app-server closed."
           : `Codex app-server exited with code ${code}.`;
-      this.usageIdentityPending = true;
-      this.codexUsage = staleCodexUsage(this.codexUsage, this.serverState.lastError);
+      if (!this.currentAccountSource) {
+        this.usageIdentityPending = true;
+        this.codexUsage = staleCodexUsage(this.codexUsage, this.serverState.lastError);
+      }
       this.emitSnapshot();
     });
 
     this.client.on("notification", (message) => {
+      // The metadata client may still be logged in as the previous account.
+      // Only the fresh usage client may publish current-account quota.
+      if (this.currentAccountSource && (message.method === 'account/updated' || message.method === 'account/rateLimits/updated')) return;
       if (message.method === 'account/updated') {
         // account/read can itself emit this notification. The paired before /
         // after identity reads validate the account without invalidating themselves.
@@ -446,6 +468,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   }
 
   private async refreshActiveSessionsInternal(): Promise<void> {
+    void this.checkAccountIdentity();
     const scannedSessions = this.activeSessionTracker.listActiveSessions();
     if (!this.activeSessionTracker.isActivitySourceAvailable()) {
       this.automation.evaluateActiveSessions(this.activeSessions, false);
@@ -508,8 +531,13 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       return this.codexUsageRefreshPromise;
     }
 
+    this.lastAccountRefreshStarted = Date.now();
     this.codexUsageRefreshPromise = this.refreshCodexUsageInternal().finally(() => {
       this.codexUsageRefreshPromise = null;
+      if (this.accountRefreshQueued) {
+        this.accountRefreshQueued = false;
+        void this.refreshCodexUsage();
+      }
     });
 
     return this.codexUsageRefreshPromise;
@@ -519,8 +547,11 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     let nextUsage: CodexUsageSnapshot;
     const revision = this.usageAccountRevision;
     try {
-      await this.client.ensureStarted();
-      nextUsage = await readAccountUsage(this.client, this.codexUsage);
+      if (this.currentAccountSource) nextUsage = await this.currentAccountSource.read(this.codexUsage);
+      else {
+        await this.client.ensureStarted();
+        nextUsage = await readAccountUsage(this.client, this.codexUsage);
+      }
     } catch (error) {
       nextUsage = staleCodexUsage(
         this.codexUsage,
@@ -539,6 +570,24 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     }
 
     this.emitSnapshot();
+  }
+
+  private async checkAccountIdentity(manual = false): Promise<void> {
+    if (!this.currentAccountSource) return;
+    if (this.accountIdentityCheck) return this.accountIdentityCheck;
+    if (!manual && Date.now() < this.nextAccountIdentityCheck) return;
+    this.nextAccountIdentityCheck = Date.now() + 60_000;
+    this.accountIdentityCheck = (async () => {
+      if (!await this.currentAccountSource!.hasChanged()) return;
+      this.usageAccountRevision++;
+      this.usageIdentityPending = true;
+      this.codexUsage = staleCodexUsage(this.codexUsage, 'Account identity is being checked.');
+      this.emitSnapshot();
+      if (this.codexUsageRefreshPromise) this.accountRefreshQueued = true;
+      else await this.refreshCodexUsage();
+    })().catch(() => { /* A failed local identity check must not relabel quota. */ })
+      .finally(() => { this.accountIdentityCheck = null; });
+    return this.accountIdentityCheck;
   }
 
   private observeQuotaUsage(): void {

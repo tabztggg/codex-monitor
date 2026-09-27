@@ -10,6 +10,16 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.12 — 2026-09-28
+
+- 修复切换登录后仍显示旧账号额度；每分钟检测本地身份变化，“立即刷新”同步读取账号，旧通知不会覆盖新额度。
+- 版本检查保留上次确认结果，显示具体原因与重试时间，遵守 GitHub 限流；减少重复请求，隐藏页面暂停检查。
+- 更新中英文首页说明与实际界面截图，使用虚构演示数据。
+
+验证：624 项测试通过、2 项跳过；类型检查、构建及本机部署通过。
+
+English: Refresh account identity after login switches and discard stale notifications. Make version checks clearer and less repetitive, preserve confirmed results, and honor retry deadlines. Refresh the bilingual README and screenshots.
+
 ## v0.4.11 — 2026-09-27
 
 - 首页新增实时 Token：1／5／20 分钟和 1 小时切换，仅保留内存数据；统一总览卡片与排行布局。

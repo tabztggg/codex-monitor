@@ -145,6 +145,11 @@ app.get('/api/history/jobs/:id/official-usage', async (request, response) => {
   catch { response.status(503).json({ error: 'Official usage unavailable' }); }
 });
 
+app.get('/api/usage/current', async (_request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  response.json(await service.refreshCurrentAccount());
+});
+
 app.get("/api/history/jobs", async (request, response) => {
   try {
     const sourceKinds =

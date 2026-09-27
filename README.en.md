@@ -6,18 +6,18 @@
 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.11](https://github.com/tabztggg/codex-monitor/blob/main/CHANGELOG.md#v0411--2026-09-27)** · Live token windows, a refreshed overview, and more reliable statistics and Windows installation. [Changelog](CHANGELOG.md)
+**[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · Fix quota updates after account switches and clarify version checks and retries. [Changelog](CHANGELOG.md)
 
-![Usage overview: live tokens, remaining quota and time, range totals](assets/screenshots/v0.4.11-overview-en.jpg)
+![Usage overview: live tokens, remaining quota and time, range totals](assets/screenshots/v0.4.12-overview-en.jpg)
 
-Screenshots of the actual v0.4.11 interface use fictional accounts, tasks and usage.
+Screenshots of the actual v0.4.12 interface use fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
-![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.11-tasks-en.jpg)
+![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.12-tasks-en.jpg)
 
-![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.11-trends-en.jpg)
+![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.12-trends-en.jpg)
 
 </details>
 
@@ -32,6 +32,8 @@ The overview shows account quota, recent tokens, range totals, then rankings and
 Live tokens on the overview offer **1-minute / 5-minute / 20-minute / 1-hour** windows: input, output, cache hit rate and reporting tasks. These cover local chats across accounts, timed when Monitor receives usage reports. At most the latest hour remains in bounded memory; restarting resets the counters and creates no new history files. While the overview is visible, known active/recent logs are read incrementally every 5 seconds; the existing minute activity scan discovers new chats. Account and full-history polling remain unchanged. Each window reports its own collection or missing-data state, and methodology is folded under Details.
 
 By default, read unarchived tasks and the 30 most recently archived root tasks, including attributable children. **Calculate all archives** expands that scope. Task statistics refresh every 10 minutes by default; choose 30 seconds or 1/2/5/10/30/60 minutes, or refresh manually. Older fast settings migrate to 10 minutes once; subsequent choices are remembered. Hidden pages pause new statistics requests and catch up when due on return; outages retain existing values. Account quota polls every 5 minutes and activity every minute, with 2-second activity checks while shutdown automation is armed. Chinese/English selection is remembered; new visitors start in English.
+
+Each quota refresh uses a short-lived Codex client to load the current login instead of retaining an old process identity. The existing minute activity scan checks local account changes without relying on file timestamps; keyring-only switches are picked up by the five-minute quota poll. Refresh now also refreshes the account, with a shared 30-second manual cooldown. Reads spanning an account switch are discarded, and old metadata-client notifications cannot overwrite the new quota.
 
 Each history page has a 60-second deadline to allow an initial rebuild of large logs; timeouts retain previous results and allow retry. Unreadable logs are not treated as deleted tasks, and forks count only their new consumption. Missing token components or gaps in live cumulative reports are marked incomplete, not presented as complete zero usage.
 
@@ -69,7 +71,7 @@ To redeploy your current local source instead:
 wscript.exe "Codex Monitor.vbs" deploy
 ```
 
-Monitor runs independently of Codex. The header shows installed and repository versions with one status/action button: **Up to date** checks again, **Update to…** highlights an available update, and failed checks can be retried. Automatic checks are cached for 30 minutes; manual checks have a 5-minute minimum interval. Each repository request times out after 10 seconds. Updating installs this repository's latest `main` commit (requires Git, npm and PowerShell 7). Downloads and builds run while Monitor stays online; it then stops, replaces the runtime and restarts, preserving configuration and usage caches. Installation or health-check failures roll back. The adjacent buttons restart or stop Monitor; after stopping, use the desktop shortcut to start it again. [Windows deployment](docs/standalone-windows.md)
+Monitor runs independently of Codex. The header shows installed and repository versions with one status/action button: **Up to date** checks again, **Update to…** highlights an available update, and failed checks can be retried. Checks run every 30 minutes, or after 5 minutes following a failure; GitHub rate limits honor the server retry time. Hidden pages pause checks. Manual checks have a 5-minute minimum interval and each request still times out after 10 seconds. Verified versions are reused for unchanged commits. Failed checks retain the last confirmed result; Check details shows the reason, confirmation time and next retry time, with retries disabled during cooldown. Updating installs this repository's latest `main` commit (requires Git, npm and PowerShell 7). Downloads and builds run while Monitor stays online; it then stops, replaces the runtime and restarts, preserving configuration and usage caches. Installation or health-check failures roll back. The adjacent buttons restart or stop Monitor; after stopping, use the desktop shortcut to start it again. [Windows deployment](docs/standalone-windows.md)
 
 **macOS/Linux, or manual operation:**
 

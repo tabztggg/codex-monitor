@@ -346,7 +346,7 @@ A running server does not need restarting for Markdown edits.
 
 ## Platform verification
 
-The v0.4.5 validation on 2026-09-27 used Windows: 336 tests passed and 2 were
+The v0.4.12 validation on 2026-09-28 used Windows: 624 tests passed and 2 were
 skipped; TypeScript and production build passed. The README screenshots use the
 actual build with fictional data. These results do not verify every platform,
 physical mobile device or future commit.

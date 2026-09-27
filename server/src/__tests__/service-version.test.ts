@@ -55,12 +55,12 @@ it.each([
   expect(await checker.check()).toMatchObject({ updateAvailable: available, status: available === null ? 'unavailable' : 'current' });
 });
 
-it('keeps fetched metadata when commit comparison fails, without guessing update availability', async () => {
+it('does not publish partially verified metadata when commit comparison fails', async () => {
   const { checker, request } = setup();
   const original = request.getMockImplementation()!;
   request.mockImplementation((input, options) => String(input).includes('/compare/')
     ? Promise.resolve(new Response('{}', { status: 404 })) : original(input, options));
-  expect(await checker.check()).toMatchObject({ repositoryVersion: '0.4.7', repositoryCommit: remoteCommit,
+  expect(await checker.check()).toMatchObject({ repositoryVersion: null, repositoryCommit: null,
     updateAvailable: null, status: 'unavailable', stale: true });
 });
 
@@ -69,12 +69,103 @@ it('invalidates the comparison cache when a different build has been installed',
   await checker.check();
   const next = new RepositoryVersionChecker({ root, deployment: { ...deployment, commit: remoteCommit, version: '0.4.7' }, fetch: request, now: () => time });
   expect(await next.check()).toMatchObject({ currentVersion: '0.4.7', updateAvailable: false, status: 'current' });
-  expect(request).toHaveBeenCalledTimes(5);
+  expect(request).toHaveBeenCalledTimes(4);
 });
 
 it('identifies a matching repository commit while retaining the local-change marker', async () => {
   const { checker } = setup({ remoteCommit: currentCommit, remoteVersion: '0.4.6', localChanges: true });
   expect(await checker.check()).toMatchObject({ updateAvailable: false, status: 'current', localChanges: true });
+});
+
+it('checks a clean matching commit with one request, independent of raw GitHub availability', async () => {
+  const { checker, request } = setup({ remoteCommit: currentCommit, version: '0.4.11' });
+  const original = request.getMockImplementation()!;
+  request.mockImplementation((input, init) => String(input).includes('raw.githubusercontent.com')
+    ? Promise.reject(new Error('unreachable')) : original(input, init));
+  expect(await checker.check()).toMatchObject({ repositoryVersion: '0.4.11', status: 'current', lastError: null });
+  expect(request).toHaveBeenCalledTimes(1);
+  time += VERSION_CACHE_MS;
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it('does not treat an unpublished local version as the remote manifest', async () => {
+  const { checker, request } = setup({ remoteCommit: currentCommit, version: '0.4.12', remoteVersion: '0.4.11', localChanges: true });
+  expect(await checker.check()).toMatchObject({ repositoryVersion: '0.4.11', localChanges: true });
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  [new DOMException('deadline', 'TimeoutError'), 'timeout', undefined],
+  [new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }), 'dns', 'ENOTFOUND'],
+  [new TypeError('fetch failed', { cause: { code: 'CERT_HAS_EXPIRED' } }), 'tls', 'CERT_HAS_EXPIRED'],
+  [new TypeError('fetch failed', { cause: new AggregateError([{ code: 'ECONNRESET' }]) }), 'connection', 'ECONNRESET'],
+  [new Error('https://user:secret@example.com/?token=private'), 'unknown', undefined],
+] as const)('records a safe, persistent reason for %s', async (error, kind, code) => {
+  const { checker, request, create } = setup();
+  request.mockRejectedValue(error);
+  const result = await checker.check();
+  expect(result).toMatchObject({ lastError: { kind, stage: 'revision' }, attemptedAt: new Date(time).toISOString(),
+    nextCheckAt: new Date(time + VERSION_RETRY_MS).toISOString(), nextManualCheckAt: new Date(time + VERSION_MANUAL_CACHE_MS).toISOString() });
+  expect(result.lastError?.code).toBe(code);
+  expect(await create().check()).toEqual(result);
+  expect(readFileSync(path.join(root, '.cache/service-version.json'), 'utf8')).not.toMatch(/secret|private|example\.com/);
+});
+
+it.each([403, 429])('honors GitHub rate-limit reset across readers and restarts (HTTP %s)', async status => {
+  const { checker, request, create } = setup();
+  const resetAt = time + 60 * 60_000;
+  request.mockImplementation(async () => new Response('{}', { status, headers: {
+    'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(resetAt / 1000),
+  } }));
+  const result = await checker.check();
+  expect(result).toMatchObject({ lastError: { kind: 'rate-limit', httpStatus: status }, nextCheckAt: new Date(resetAt).toISOString(), nextManualCheckAt: new Date(resetAt).toISOString() });
+  time += VERSION_RETRY_MS;
+  await checker.check(true); await create().check();
+  expect(request).toHaveBeenCalledTimes(1);
+  time = resetAt;
+  await checker.check(true);
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it('honors Retry-After without misclassifying HTTP 503 as a local network failure', async () => {
+  const { checker, request } = setup();
+  request.mockResolvedValue(new Response('{}', { status: 503, headers: { 'retry-after': '900' } }));
+  expect(await checker.check()).toMatchObject({ lastError: { kind: 'http', httpStatus: 503 }, nextCheckAt: new Date(time + 900_000).toISOString() });
+});
+
+it('preserves the entire confirmed result when a new commit fails verification, then clears the error on recovery', async () => {
+  const { checker, request } = setup({ remoteCommit: currentCommit, version: '0.4.6' });
+  const known = await checker.check();
+  time += VERSION_CACHE_MS;
+  request.mockImplementation(async input => {
+    if (String(input).includes('/compare/')) return new Response('{}', { status: 404 });
+    return new Response(JSON.stringify(String(input).includes('api.github.com')
+      ? { object: { sha: remoteCommit, type: 'commit' } } : { name: 'codex-monitor', version: '0.4.7' }));
+  });
+  expect(await checker.check()).toMatchObject({ repositoryCommit: currentCommit, repositoryVersion: known.repositoryVersion,
+    checkedAt: known.checkedAt, updateAvailable: false, stale: true, lastError: { kind: 'http', stage: 'comparison', httpStatus: 404 } });
+  time += VERSION_RETRY_MS;
+  const original = request.getMockImplementation()!;
+  request.mockImplementation((input, init) => String(input).includes('/compare/')
+    ? Promise.resolve(new Response(JSON.stringify({ status: 'ahead', ahead_by: 1, behind_by: 0 }))) : original(input, init));
+  expect(await checker.check()).toMatchObject({ repositoryCommit: remoteCommit, repositoryVersion: '0.4.7', updateAvailable: true, stale: false, lastError: null });
+});
+
+it.each(['<html>error</html>', 'null', '{}'])('reports invalid ref JSON without guessing the network is down (%s)', async body => {
+  const { checker, request } = setup();
+  request.mockResolvedValue(new Response(body));
+  expect(await checker.check()).toMatchObject({ lastError: { kind: 'invalid-response', stage: 'revision' }, repositoryVersion: null });
+});
+
+it('reads old failure caches as unknown, retaining their confirmed version', async () => {
+  const { checker, create } = setup();
+  await checker.check();
+  const file = path.join(root, '.cache/service-version.json');
+  const value = JSON.parse(readFileSync(file, 'utf8'));
+  delete value.lastError; value.failed = true;
+  writeFileSync(file, JSON.stringify(value));
+  expect(await create().check()).toMatchObject({ repositoryVersion: '0.4.7', stale: true, lastError: { kind: 'unknown' } });
 });
 
 it.each(['0.4.6', 'unknown', '0.4.6-beta.1', '01.2.3'])('does not infer commit equivalence from version %s without an installed commit', async version => {
@@ -110,7 +201,7 @@ it('deduplicates concurrent clients and reuses a 30 minute cache across restarts
   expect(request).toHaveBeenCalledTimes(3);
   time++;
   await checker.check();
-  expect(request).toHaveBeenCalledTimes(6);
+  expect(request).toHaveBeenCalledTimes(5);
 });
 
 it('lets manual checks bypass a successful cache after a shared, persisted 5 minute cooldown', async () => {
@@ -124,10 +215,10 @@ it('lets manual checks bypass a successful cache after a shared, persisted 5 min
   await checker.check();
   expect(request).toHaveBeenCalledTimes(3);
   const results = await Promise.all(Array.from({ length: 20 }, () => checker.check(true)));
-  expect(request).toHaveBeenCalledTimes(6);
+  expect(request).toHaveBeenCalledTimes(5);
   for (const result of results) expect(result).toMatchObject({ status: 'available', checkedAt: new Date(time).toISOString() });
   expect(await create().check(true)).toEqual(results[0]);
-  expect(request).toHaveBeenCalledTimes(6);
+  expect(request).toHaveBeenCalledTimes(5);
 });
 
 it('shares an in-flight manual refresh with automatic and manual readers', async () => {
@@ -144,7 +235,7 @@ it('shares an in-flight manual refresh with automatic and manual readers', async
   expect(request).toHaveBeenCalledTimes(4);
   release();
   expect(await refresh).toMatchObject({ status: 'available', checkedAt: new Date(time).toISOString() });
-  expect(request).toHaveBeenCalledTimes(6);
+  expect(request).toHaveBeenCalledTimes(5);
 });
 
 it.each([false, true])('lets manual checks retry failures after 5 minutes, preserving prior results when present (%s)', async withPreviousResult => {
@@ -167,7 +258,7 @@ it.each([false, true])('lets manual checks retry failures after 5 minutes, prese
   time++;
   request.mockImplementation(original);
   expect(await checker.check(true)).toMatchObject({ status: 'available', stale: false, checkedAt: new Date(time).toISOString() });
-  expect(request).toHaveBeenCalledTimes(failedCallCount + 3);
+  expect(request).toHaveBeenCalledTimes(failedCallCount + (withPreviousResult ? 2 : 3));
 });
 
 it('retains the last successful result on failure and applies a persisted retry cooldown', async () => {
@@ -241,9 +332,9 @@ it('keeps health/status reads offline and exposes version checks only through th
     const refreshed = await fetch(`${base}/api/service/versions?refresh=1`);
     expect(refreshed.headers.get('cache-control')).toBe('no-store');
     expect(await refreshed.json()).toMatchObject({ status: 'available', checkedAt: new Date(time).toISOString() });
-    expect(request).toHaveBeenCalledTimes(6);
+    expect(request).toHaveBeenCalledTimes(5);
     await fetch(`${base}/api/service/versions?refresh=1`);
-    expect(request).toHaveBeenCalledTimes(6);
+    expect(request).toHaveBeenCalledTimes(5);
     expect(command).not.toHaveBeenCalled(); expect(exits).not.toHaveBeenCalled();
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });

@@ -1,5 +1,6 @@
 import type {
   ArmAutomationRequest,
+  CodexUsageSnapshot,
   ArmGlobalAutomationRequest,
   HistoryJobListResponse,
   HistoryArchiveMode,
@@ -56,6 +57,9 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 }
 
 export const api = {
+  refreshCurrentAccount() {
+    return jsonFetch<CodexUsageSnapshot>('/api/usage/current', { cache: 'no-store', signal: AbortSignal.timeout(95_000) });
+  },
   fetchLiveTokens(signal?: AbortSignal): Promise<LiveTokenSnapshot> {
     return jsonFetch<LiveTokenSnapshot>("/api/live-tokens", { signal, cache: "no-store" });
   },

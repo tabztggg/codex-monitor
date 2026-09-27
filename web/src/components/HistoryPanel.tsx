@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type { HistoryAnalysis, HistoryJob, HistoryPeriod, HistoryUsageAllocation, MonitorSnapshot, TokenUsage } from '../../../shared/monitor';
 import { calendarDate, groupTasksByProject, projectTitle, relativeActivity, taskTitle, visibleTasks, type ProjectTaskGroup, type TaskFilter, type TaskSortColumn, type SortDirection } from '../presentation';
 import { useTaskHistory } from '../useTaskHistory';
+import { api } from '../api';
 import { useI18n } from '../LanguageContext';
 import type { I18n, Translate } from '../localization';
 import { TaskInsights } from './TaskInsights';
@@ -55,6 +56,16 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   const accountReadyKey = JSON.stringify([quota.account?.type ?? null, quota.account?.email ?? null,
     Boolean(quotaLimit?.primary?.resetsAt || quotaLimit?.secondary?.resetsAt)]);
   const { jobs, allocation, analysis, nextRefreshAt, refreshNow, rebuildStatistics, updatedAt, error, archives, loading, requestedMode, loadArchives } = useTaskHistory(interval, period, accountReadyKey, selectedAccountId, range);
+  const [refreshingAccount, setRefreshingAccount] = useState(false);
+  const [accountRefreshError, setAccountRefreshError] = useState(false);
+  const refreshPage = async () => {
+    if (refreshingAccount) return;
+    setRefreshingAccount(true);
+    setAccountRefreshError(false);
+    try { await api.refreshCurrentAccount(); }
+    catch { setAccountRefreshError(true); }
+    finally { setRefreshingAccount(false); refreshNow(); }
+  };
   const activePeriod = analysis?.period ?? period;
   const todayDate = calendarDate(nowMs, analysis?.timeZone);
   const [view, setView] = useState(readView);
@@ -161,7 +172,8 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       <div className="history-refresh-controls">
         <span className={`connection-status ${connectionLabel === 'live' && snapshot.server.initialized ? 'connected' : ''}`}>{connectionLabel === 'live' && snapshot.server.initialized ? t('Connected') : t('Connection: {status}', { status: label(connectionLabel) })}</span>
         <label className="refresh-interval"><span className="sr-only">{t('Task refresh interval')}</span><select value={interval} onChange={e => { const n = Number(e.target.value); if (refreshIntervals.includes(n)) setInterval(n); }}>{refreshIntervals.map(n => <option key={n} value={n}>{n === 30000 ? t('30 seconds') : n === 60000 ? t('1 minute') : t('{count} minutes', { count: n / 60000 })}</option>)}</select></label>
-        <button type="button" className="small-control refresh-button" disabled={loading} onClick={refreshNow}><span aria-hidden="true">↻</span> {t(loading ? 'Refreshing…' : 'Refresh now')}</button>
+        <button type="button" className="small-control refresh-button" disabled={loading || refreshingAccount} onClick={() => void refreshPage()}><span aria-hidden="true">↻</span> {t(loading || refreshingAccount ? 'Refreshing…' : 'Refresh now')}</button>
+        {accountRefreshError && <span className="history-refresh stale" role="status">{t('Account refresh unavailable. Previous account data is kept.')}</span>}
         <details className="view-settings refresh-menu"><summary aria-label={t('More actions')} title={t('More actions')}>···</summary><div className="view-settings-content">
           <span className={`history-refresh ${error ? 'stale' : ''}`}>{t(error ? 'Update failed · showing last data' : loading ? 'Refreshing…' : 'Auto-updating')}</span>
           {updatedAt && <span className="muted-note">{t('Last successful refresh: {time}', { time: dateTime(new Date(updatedAt).toISOString()) })}</span>}

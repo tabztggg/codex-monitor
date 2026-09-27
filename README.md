@@ -6,7 +6,7 @@
 
 本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。非 OpenAI 官方产品，也不是计费系统。
 
-**[v0.4.8](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.8)** · 更新检测单次请求超时延长至 10 秒。[更新日志](CHANGELOG.md)
+**[v0.4.9](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.9)** · 根目录新增一键安装、更新和卸载入口。[更新日志](CHANGELOG.md)
 
 ![用量总览：版本状态、剩余额度与时间、范围汇总](assets/screenshots/v0.4.7-overview-zh.jpg)
 
@@ -38,7 +38,20 @@ git clone https://github.com/tabztggg/codex-monitor.git
 cd codex-monitor
 ```
 
-**Windows：** 双击根目录 **Codex Monitor.vbs**。首次自动安装依赖、构建、部署，创建桌面快捷方式和无窗口登录自启动；后续直接启动／打开网页。更新已安装版本：
+**Windows：** 根目录提供四个无命令行窗口的入口：
+
+| 入口 | 用途 |
+| --- | --- |
+| **Install Codex Monitor.vbs** | 安装／修复当前源码版本，创建桌面快捷方式和登录自启动，完成后打开网页。 |
+| **Codex Monitor.vbs** | 日常启动；未安装时自动安装。 |
+| **Update Codex Monitor.vbs** | 将已安装副本更新到仓库最新版。 |
+| **Uninstall Codex Monitor.vbs** | 停止并移除应用、自启动和所属快捷方式；保留配置、用量缓存、日志和备份。 |
+
+安装会自动安装 npm 依赖并构建；Node.js、Codex 和 PowerShell 7 需预先准备。卸载保留的数据位于 `%LOCALAPPDATA%\Programs\CodexMonitor`，重装时自动复用；不会卸载 Codex、Node.js 或删除源码仓库。
+
+**一键更新：** 双击根目录 **Update Codex Monitor.vbs**，自动启动 Monitor 并更新已安装副本到本仓库 `main` 最新版，打开网页查看进度，全程无命令行窗口。未安装时先自动部署；已有更新进行时直接查看进度。源码目录不会被覆盖。
+
+要将当前本地源码重新部署到已安装副本：
 
 ```powershell
 wscript.exe "Codex Monitor.vbs" deploy

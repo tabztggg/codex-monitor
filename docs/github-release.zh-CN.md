@@ -1,12 +1,13 @@
-# v0.4.8 — 更新检测超时调整
+# v0.4.9 — 一键安装、更新与卸载
 
-- 更新检测单次请求超时：4 秒 → 10 秒。
-- 网页等待上限调整为 35 秒，避免后端仍在检查时提前报错；检查频率不变。
+- 根目录新增 **Install / Update / Uninstall Codex Monitor.vbs**，双击安装、更新或卸载，全程无命令行窗口。
+- 安装自动创建桌面快捷方式和登录自启动；卸载保留配置、用量缓存及备份，重装自动复用。
+- 更新复用现有部署与回滚流程；重复点击或回执丢失不会重复提交更新。
 
-**升级：** v0.4.7 Windows 独立安装可点击网页更新；也可更新源码后运行 `wscript.exe "Codex Monitor.vbs" deploy`。[部署说明](https://github.com/tabztggg/codex-monitor/blob/v0.4.8/docs/standalone-windows.md#updating-the-installed-copy)
+**使用：** 拉取／下载本版源码即可使用根目录入口。安装本地源码用 **Install**，升级已安装副本到仓库最新版用 **Update**。[部署说明](https://github.com/tabztggg/codex-monitor/blob/v0.4.9/docs/standalone-windows.md)
 
-**验证：** 超时修改已通过 391 项测试（2 项跳过）、构建和本机部署验证。
+**验证：** 410 项测试通过、2 项跳过；入口与卸载流程通过隔离测试，本机卸载预演通过，未卸载实际服务。
 
-**English:** Allow 10 seconds per repository request and 35 seconds in the browser for update checks. Polling intervals are unchanged.
+**English:** Add console-free install/repair, update and uninstall entries in the root. Preserve settings and usage data on uninstall and reuse them on reinstall. Download or pull the source to get the new entries.
 
 原项目：[manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor)。

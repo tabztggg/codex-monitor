@@ -1,5 +1,7 @@
 # Standalone Windows deployment
 
+双击根目录 **Install Codex Monitor.vbs** 安装／修复当前源码版本，完成后自动打开网页；等同于 `Codex Monitor.vbs deploy`。日常启动仍用 **Codex Monitor.vbs**，获取仓库最新版用 **Update Codex Monitor.vbs**。
+
 运行 `npm ci`、`npm run build` 后使用 PowerShell 7 执行 `pwsh -File scripts/Install-StandaloneMonitor.ps1`。自动部署、创建桌面快捷方式并启用 Windows 登录后无窗口自启动；保留配置与缓存，备份并移除旧 Monitor Hook。关闭 Codex 不影响 Monitor。
 
 Windows 启动入口优先使用 `%ProgramFiles%\PowerShell\7\pwsh.exe`，不存在时使用 Codex 自带的 PowerShell 7；不会回退到 Windows PowerShell 5。后台子进程复用启动它的 PowerShell 7，避免计划任务的 PATH 不同导致启动失败。
@@ -129,7 +131,21 @@ healthy HTTP endpoint confirms the monitor is reachable; account data still
 requires a working, authenticated Codex CLI. Logs can contain local paths or
 task information, so redact them before sharing.
 
+## Uninstall / 卸载
+
+Double-click **Uninstall Codex Monitor.vbs** in the source root. It stops only this installation's host, removes its verified scheduled task and current-user Desktop/Startup/Start-menu links, then deletes known application files. Configuration (`standalone.json`), usage caches (`.cache`), logs, backups and unrecognized files remain in `%LOCALAPPDATA%\Programs\CodexMonitor`. Codex, Node.js, PowerShell and the source checkout are kept. Reinstall with **Install Codex Monitor.vbs** to reuse your data.
+
+The entry targets the standard current-user installation only. It refuses a foreign task/application, linked application directories, or an active update. Failures are logged to the source checkout's `.cache/desktop-entry.log`; an incomplete uninstall can be rerun after resolving the error. It does not request administrator access. Preview without making changes:
+
+```powershell
+pwsh -File scripts/Uninstall-StandaloneMonitor.ps1 -WhatIf
+```
+
+双击根目录 **Uninstall Codex Monitor.vbs**，停止 Monitor 并清除应用文件、对应登录计划任务及桌面／启动文件夹／开始菜单内确认属于它的快捷方式。默认保留配置、用量缓存、日志、备份和未知文件；不卸载 Codex、Node.js、PowerShell，也不删除源码。重装自动复用保留的数据。卸载仅支持当前用户标准安装目录；若检测到更新正在进行、目录链接或同名外部任务，会停止并给出日志提示。上面的 `-WhatIf` 命令仅预演，不执行卸载。
+
 ## Updating the installed copy
+
+Double-click **Update Codex Monitor.vbs** in the repository root for a console-free update. It starts the installed Monitor (deploying first if needed), submits one update request, and opens the dashboard to show progress. Repeated clicks reuse an active update; a lost response is checked without repeating the request. Startup/request errors appear in `.cache/desktop-entry.log` in the source checkout. Installations predating web updates need one manual source deployment first. To request an update without opening a browser, use `wscript.exe "Update Codex Monitor.vbs" nobrowser`.
 
 Click **Update**, to the left of **Restart service**, to install the latest `main` commit from `tabztggg/codex-monitor`. Git, npm and PowerShell 7 must be available. The fixed repository is downloaded and built in a staging directory while Monitor remains online; only a complete build triggers an automatic stop, runtime replacement and restart. Configuration, caches, calibration, task registration and the desktop shortcut are preserved. Failed installation or health checks restore the previous runtime. The page reports progress and reconnects after success. If the installed commit is already current, nothing restarts.
 
@@ -197,6 +213,8 @@ Windows 启动器都会转到同一个已安装任务，避免重复启动。Sto
 `.cache`、日志及管理脚本，除非更新明确要求更换。仅修改源码、执行 `git pull`、
 重新构建或重启，都不会自动替换已安装的应用文件。
 ## 网页服务管理
+
+也可双击源码根目录的 **Update Codex Monitor.vbs** 一键更新：服务未启动时先启动，尚未安装时先部署，然后打开网页显示更新进度，全程无命令行窗口。复用网页更新的配置保留与失败回滚流程，不覆盖源码目录；重复点击遇到已有更新时只查看进度。入口错误见源码目录 `.cache/desktop-entry.log`。不支持网页更新的旧安装需先通过 `Codex Monitor.vbs deploy` 部署一次。
 
 右上角显示当前版本与仓库版本，状态与更新合为一个按钮：「已是最新」点击重新检查，「更新至…」高亮并进入更新确认，「检查失败 · 重试」重新查询。版本号未变的新提交也能识别。页面打开、重新聚焦及每 30 分钟自动检查，所有页面共用 30 分钟持久缓存；自动检查失败保留上次结果，至少 5 分钟后再尝试。手动检查可跳过长缓存，但最短间隔为 5 分钟。单次仓库请求超时为 10 秒；一次检查最多依次请求三次，网页等待上限为 35 秒。服务状态轮询不访问 GitHub，也不自动安装。
 

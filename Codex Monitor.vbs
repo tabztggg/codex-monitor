@@ -14,10 +14,12 @@ command = Chr(34) & powershell & Chr(34) & _
 For i = 0 To WScript.Arguments.Count - 1
   Select Case LCase(WScript.Arguments(i))
     Case "deploy": command = command & " -Deploy"
+    Case "update": command = command & " -Update"
+    Case "uninstall": command = command & " -Uninstall"
     Case "nobrowser": command = command & " -NoBrowser"
-    Case Else: MsgBox "Supported options: deploy, nobrowser", vbExclamation, "Codex Monitor": WScript.Quit 1
+    Case Else: MsgBox "Supported options: deploy, update, uninstall, nobrowser", vbExclamation, "Codex Monitor": WScript.Quit 1
   End Select
 Next
 result = shell.Run(command, 0, True)
-If result <> 0 Then MsgBox "Codex Monitor could not start. See .cache\desktop-entry.log in the repository. Node.js and Codex must be installed.", vbExclamation, "Codex Monitor"
+If result <> 0 Then MsgBox "Codex Monitor could not complete the requested action. See .cache\desktop-entry.log in the repository for details.", vbExclamation, "Codex Monitor"
 WScript.Quit result

@@ -6,7 +6,7 @@
 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.8](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.8)** · Update checks allow 10 seconds per repository request. [Changelog](CHANGELOG.md)
+**[v0.4.9](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.9)** · One-click install, update and uninstall entries in the repository root. [Changelog](CHANGELOG.md)
 
 ![Usage overview: version status, remaining quota and time, range totals](assets/screenshots/v0.4.7-overview-en.jpg)
 
@@ -38,7 +38,20 @@ git clone https://github.com/tabztggg/codex-monitor.git
 cd codex-monitor
 ```
 
-**Windows:** double-click **Codex Monitor.vbs** in the repository root. First launch installs dependencies, builds, deploys, creates a desktop shortcut and enables windowless logon startup. Later launches start/open the dashboard. To update the installed copy:
+**Windows:** the repository root provides four console-free entries:
+
+| Entry | Purpose |
+| --- | --- |
+| **Install Codex Monitor.vbs** | Install/repair the local source version, create the desktop shortcut and logon startup, then open the dashboard. |
+| **Codex Monitor.vbs** | Start Monitor; install automatically if missing. |
+| **Update Codex Monitor.vbs** | Update the installed copy to the latest repository version. |
+| **Uninstall Codex Monitor.vbs** | Stop and remove the application, startup task and owned shortcuts; keep configuration, usage caches, logs and backups. |
+
+Installation handles npm dependencies and builds; Node.js, Codex and PowerShell 7 must already be available. Retained data stays in `%LOCALAPPDATA%\Programs\CodexMonitor` and is reused on reinstall. Uninstall leaves Codex, Node.js and the source checkout intact.
+
+**One-click update:** double-click **Update Codex Monitor.vbs** in the root. It starts Monitor, updates the installed copy to this repository's latest `main`, and opens the dashboard for progress without a console window. A missing installation is deployed first; an update already in progress is reused. Your source checkout is preserved.
+
+To redeploy your current local source instead:
 
 ```powershell
 wscript.exe "Codex Monitor.vbs" deploy

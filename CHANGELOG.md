@@ -10,6 +10,14 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.9 — 2026-09-27
+
+- 根目录提供一键安装／修复、更新和卸载入口，无命令行窗口；卸载保留配置与用量数据，重装自动复用。
+
+验证：410 项测试通过、2 项跳过；入口与卸载流程通过隔离测试，本机卸载预演通过，未卸载实际服务。
+
+English: Add root-level install/repair, update and uninstall entries without console windows. Uninstall preserves settings and usage data for reinstallation.
+
 ## v0.4.8 — 2026-09-27
 
 - 更新检测单次仓库请求超时从 4 秒延长至 10 秒；网页等待上限同步调整为 35 秒，容纳最多三次依次请求。

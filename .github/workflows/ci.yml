@@ -15,8 +15,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Use one canonical Windows temporary directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The runner's default TEMP may use RUNNER~1 while PowerShell expands
+          # it to runneradmin. Keep fixture paths identical across Node and pwsh.
+          "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: npm ci
-      - run: npm test
+      # Installation tests start several real PowerShell processes on shared runners.
+      - run: npm test -- --testTimeout=30000
       - run: npx tsc --noEmit
       - run: npm run build
       - name: Check POSIX launcher syntax

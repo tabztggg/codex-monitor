@@ -33,7 +33,18 @@ describe.skipIf(process.platform !== 'win32')('Windows dependency bootstrap (Pow
     for (const file of ['Codex Monitor.vbs', 'scripts/Bootstrap-PowerShell.ps1']) {
       await copyFile(path.join(repository, file), path.join(root, file));
     }
-    // Only replace downloads. The real root/5.1 bootstrap dispatches a real 7 process.
+    // Stub tool-location lookups in the copied entry. WSH can supply Windows
+    // special-folder variables itself, so child env overrides do not prove absence.
+    const entry = path.join(root, 'Codex Monitor.vbs');
+    let launcher = await readFile(entry, 'utf8');
+    for (const variable of ['ProgramFiles', 'USERPROFILE', 'LOCALAPPDATA']) {
+      const lookup = `shell.ExpandEnvironmentStrings("%${variable}%")`;
+      expect(launcher).toContain(lookup);
+      const missing = path.join(root, `Missing ${variable}`).replace(/"/g, '""');
+      launcher = launcher.replaceAll(lookup, `"${missing}"`);
+    }
+    await writeFile(entry, launcher);
+    // Only downloads are replaced below. The real 5.1 bootstrap starts a real 7 process.
     await writeFile(path.join(root, 'scripts/Windows-Dependencies.ps1'), `
       $script:MonitorToolsRoot=$PSScriptRoot
       function Invoke-MonitorDependencyLock { param($Action); & $Action }
@@ -42,13 +53,8 @@ describe.skipIf(process.platform !== 'win32')('Windows dependency bootstrap (Pow
     `);
     await writeFile(path.join(root, 'scripts/Start-DesktopEntry.ps1'), `param([switch]$Deploy,[switch]$NoBrowser)
       @{deploy=[bool]$Deploy;noBrowser=[bool]$NoBrowser;major=$PSVersionTable.PSVersion.Major} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'result.json')`);
-    // Windows environment keys are case-insensitive. CI may expose PROGRAMFILES;
-    // retaining it alongside ProgramFiles can make Node pass the real path first.
-    const isolatedEnvironment = Object.fromEntries(Object.entries(process.env)
-      .filter(([key]) => !['PROGRAMFILES', 'USERPROFILE', 'LOCALAPPDATA'].includes(key.toUpperCase())));
     await exec(path.join(process.env.WINDIR!, 'System32/wscript.exe'), [path.join(root, 'Codex Monitor.vbs'), 'deploy', 'nobrowser'], {
       windowsHide: true, timeout: 15_000,
-      env: { ...isolatedEnvironment, ProgramFiles: path.join(root, 'No Programs'), USERPROFILE: path.join(root, 'No Profile'), LOCALAPPDATA: path.join(root, 'No AppData') },
     });
     expect(JSON.parse(await readFile(path.join(root, 'scripts/result.json'), 'utf8'))).toEqual({ deploy: true, noBrowser: true, major: 7 });
     expect(existsSync(path.join(root, '.cache/bootstrap.log'))).toBe(true);

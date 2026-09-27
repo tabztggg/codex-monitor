@@ -42,9 +42,13 @@ describe.skipIf(process.platform !== 'win32')('Windows dependency bootstrap (Pow
     `);
     await writeFile(path.join(root, 'scripts/Start-DesktopEntry.ps1'), `param([switch]$Deploy,[switch]$NoBrowser)
       @{deploy=[bool]$Deploy;noBrowser=[bool]$NoBrowser;major=$PSVersionTable.PSVersion.Major} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'result.json')`);
+    // Windows environment keys are case-insensitive. CI may expose PROGRAMFILES;
+    // retaining it alongside ProgramFiles can make Node pass the real path first.
+    const isolatedEnvironment = Object.fromEntries(Object.entries(process.env)
+      .filter(([key]) => !['PROGRAMFILES', 'USERPROFILE', 'LOCALAPPDATA'].includes(key.toUpperCase())));
     await exec(path.join(process.env.WINDIR!, 'System32/wscript.exe'), [path.join(root, 'Codex Monitor.vbs'), 'deploy', 'nobrowser'], {
       windowsHide: true, timeout: 15_000,
-      env: { ...process.env, ProgramFiles: path.join(root, 'No Programs'), USERPROFILE: path.join(root, 'No Profile'), LOCALAPPDATA: path.join(root, 'No AppData') },
+      env: { ...isolatedEnvironment, ProgramFiles: path.join(root, 'No Programs'), USERPROFILE: path.join(root, 'No Profile'), LOCALAPPDATA: path.join(root, 'No AppData') },
     });
     expect(JSON.parse(await readFile(path.join(root, 'scripts/result.json'), 'utf8'))).toEqual({ deploy: true, noBrowser: true, major: 7 });
     expect(existsSync(path.join(root, '.cache/bootstrap.log'))).toBe(true);

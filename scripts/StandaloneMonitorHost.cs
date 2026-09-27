@@ -20,6 +20,9 @@ internal static class StandaloneMonitorHost {
         powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
           @".cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe");
       if (!File.Exists(powershell))
+        powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+          @"Programs\CodexMonitorTools\powershell\pwsh.exe");
+      if (!File.Exists(powershell))
         throw new FileNotFoundException("PowerShell 7 was not found.", powershell);
       using (var child = MonitorBackgroundProcess.Start(powershell,
           "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + runner + "\"", root,

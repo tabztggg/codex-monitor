@@ -1,13 +1,13 @@
-# v0.4.9 — 一键安装、更新与卸载
+# v0.4.10 — 自动安装运行依赖
 
-- 根目录新增 **Install / Update / Uninstall Codex Monitor.vbs**，双击安装、更新或卸载，全程无命令行窗口。
-- 安装自动创建桌面快捷方式和登录自启动；卸载保留配置、用量缓存及备份，重装自动复用。
-- 更新复用现有部署与回滚流程；重复点击或回执丢失不会重复提交更新。
+- 一键安装自动准备缺少的 **Node.js/npm、Git、PowerShell 7 和 Codex CLI**，已有可用版本直接复用。
+- 工具安装到用户目录，无需管理员权限；下载 ZIP 校验 SHA256，开机自启动和网页更新复用已保存的工具路径。
+- 没装 Git 也能使用：下载源码 ZIP、解压，双击 **Install Codex Monitor.vbs**。Codex 账号仍需自行登录。
 
-**使用：** 拉取／下载本版源码即可使用根目录入口。安装本地源码用 **Install**，升级已安装副本到仓库最新版用 **Update**。[部署说明](https://github.com/tabztggg/codex-monitor/blob/v0.4.9/docs/standalone-windows.md)
+**验证：** 423 项测试通过、2 项跳过；官方依赖下载、校验和运行通过隔离实测，本机部署通过。
 
-**验证：** 410 项测试通过、2 项跳过；入口与卸载流程通过隔离测试，本机卸载预演通过，未卸载实际服务。
+[部署说明](https://github.com/tabztggg/codex-monitor/blob/v0.4.10/docs/standalone-windows.md) · [下载源码](https://github.com/tabztggg/codex-monitor/archive/refs/tags/v0.4.10.zip)
 
-**English:** Add console-free install/repair, update and uninstall entries in the root. Preserve settings and usage data on uninstall and reuse them on reinstall. Download or pull the source to get the new entries.
+**English:** Automatically install missing Windows prerequisites into a private user directory. Reuse compatible tools and preserve their paths for logon startup and web updates. Download and extract the source ZIP, then run **Install Codex Monitor.vbs**; Git need not be installed beforehand.
 
 原项目：[manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor)。

@@ -6,7 +6,7 @@
 
 本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。非 OpenAI 官方产品，也不是计费系统。
 
-**[v0.4.9](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.9)** · 根目录新增一键安装、更新和卸载入口。[更新日志](CHANGELOG.md)
+**[v0.4.10](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.10)** · 一键安装自动准备 Node.js/npm、Git、PowerShell 7 和 Codex CLI。[更新日志](CHANGELOG.md)
 
 ![用量总览：版本状态、剩余额度与时间、范围汇总](assets/screenshots/v0.4.7-overview-zh.jpg)
 
@@ -31,7 +31,9 @@ v0.4.7 实际界面截图，账号、任务和用量均为虚构演示数据。
 
 ## 快速开始
 
-需要 **Node.js 22.13+（推荐）**、npm，以及已登录、支持 `codex app-server` 的 Codex。Windows 还需要 **PowerShell 7**，启动器也可使用 Codex 自带的版本。基础运行最低 Node.js 20；官方任务明细需要可读取线程索引的较新版本。
+Windows 一键安装会检查并自动准备 **Node.js/npm、Git、PowerShell 7 和 Codex CLI**，优先复用已有可用版本。使用前需自行登录 Codex。其他平台手动安装需要 Node.js 22.13+（推荐）、npm 和支持 `codex app-server` 的 Codex；基础运行最低 Node.js 20。
+
+没装 Git 也可以直接[下载源码 ZIP](https://github.com/tabztggg/codex-monitor/archive/refs/heads/main.zip)，解压后双击 **Install Codex Monitor.vbs**。已有 Git 可用以下命令获取源码：
 
 ```bash
 git clone https://github.com/tabztggg/codex-monitor.git
@@ -47,7 +49,7 @@ cd codex-monitor
 | **Update Codex Monitor.vbs** | 将已安装副本更新到仓库最新版。 |
 | **Uninstall Codex Monitor.vbs** | 停止并移除应用、自启动和所属快捷方式；保留配置、用量缓存、日志和备份。 |
 
-安装会自动安装 npm 依赖并构建；Node.js、Codex 和 PowerShell 7 需预先准备。卸载保留的数据位于 `%LOCALAPPDATA%\Programs\CodexMonitor`，重装时自动复用；不会卸载 Codex、Node.js 或删除源码仓库。
+首次安装需联网：缺失的运行工具下载到 `%LOCALAPPDATA%\Programs\CodexMonitorTools`（Node.js 24 LTS、Git 官方 MinGit、PowerShell 7；缺少 Codex CLI 时安装官方 npm 包），随后安装项目依赖并构建。无需管理员权限，不修改系统 PATH 或账号登录。下载包校验 SHA256，失败会停止并保留原工具；日志在源码 `.cache/desktop-entry.log` 和 `.cache/bootstrap.log`。卸载保留配置、用量数据和工具目录，重装可复用；不删除源码仓库。
 
 **一键更新：** 双击根目录 **Update Codex Monitor.vbs**，自动启动 Monitor 并更新已安装副本到本仓库 `main` 最新版，打开网页查看进度，全程无命令行窗口。未安装时先自动部署；已有更新进行时直接查看进度。源码目录不会被覆盖。
 

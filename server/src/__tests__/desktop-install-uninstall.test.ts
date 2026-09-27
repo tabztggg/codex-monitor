@@ -44,11 +44,16 @@ describe.skipIf(process.platform !== 'win32')('Windows install/uninstall entries
     await put('Local Data/Programs/CodexMonitor/standalone.json', '{}');
     // Fake only external installation work; execute the real entry's decisions.
     await put('scripts/Install-StandaloneMonitor.ps1', `
+      param($Dependencies)
       Set-Content -LiteralPath (Join-Path $PSScriptRoot 'installed.txt') -Value 'installed'
       Set-Content -LiteralPath ${ps(path.join(install, 'Manage-StandaloneMonitor.ps1'))} -Value 'param($Action,[switch]$NoBrowser); Write-Output "MANAGER_STARTED"'
     `);
     await put('scripts/Install-DesktopShortcut.ps1', '# Fixture, no real desktop writes');
-    await put('reinstall.ps1', `function npm.cmd { $global:LASTEXITCODE=0 }; & ${ps(path.join(root, 'scripts/Start-DesktopEntry.ps1'))} -NoBrowser`);
+    await put('scripts/Windows-Dependencies.ps1', `
+      function Resolve-MonitorDependencies { param($Config); [pscustomobject]@{nodePath='fixture-node'} }
+      function Invoke-MonitorNpm { param($NodePath,$NpmArguments); if ($NodePath -ne 'fixture-node') { throw 'Dependency path was lost' } }
+    `);
+    await put('reinstall.ps1', `& ${ps(path.join(root, 'scripts/Start-DesktopEntry.ps1'))} -NoBrowser`);
     const result = await exec(powershell!, ['-NoProfile', '-NonInteractive', '-File', path.join(root, 'reinstall.ps1')], {
       windowsHide: true, timeout: 10_000, env: { ...process.env, LOCALAPPDATA: path.join(root, 'Local Data') },
     });

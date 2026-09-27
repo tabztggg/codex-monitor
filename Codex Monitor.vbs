@@ -1,16 +1,18 @@
 Option Explicit
-Dim shell, files, root, command, result, i, powershell
+Dim shell, files, root, command, result, i, powershell, script
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 root = files.GetParentFolderName(WScript.ScriptFullName)
+script = files.BuildPath(root, "scripts\Start-DesktopEntry.ps1")
 powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%ProgramFiles%"), "PowerShell\7\pwsh.exe")
 If Not files.FileExists(powershell) Then powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%USERPROFILE%"), ".cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe")
+If Not files.FileExists(powershell) Then powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%LOCALAPPDATA%"), "Programs\CodexMonitorTools\powershell\pwsh.exe")
 If Not files.FileExists(powershell) Then
-  MsgBox "PowerShell 7 was not found. Install PowerShell 7 before starting Codex Monitor.", vbExclamation, "Codex Monitor"
-  WScript.Quit 1
+  powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%WINDIR%"), "System32\WindowsPowerShell\v1.0\powershell.exe")
+  script = files.BuildPath(root, "scripts\Bootstrap-PowerShell.ps1")
 End If
 command = Chr(34) & powershell & Chr(34) & _
-  " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Chr(34) & files.BuildPath(root, "scripts\Start-DesktopEntry.ps1") & Chr(34)
+  " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Chr(34) & script & Chr(34)
 For i = 0 To WScript.Arguments.Count - 1
   Select Case LCase(WScript.Arguments(i))
     Case "deploy": command = command & " -Deploy"
@@ -21,5 +23,5 @@ For i = 0 To WScript.Arguments.Count - 1
   End Select
 Next
 result = shell.Run(command, 0, True)
-If result <> 0 Then MsgBox "Codex Monitor could not complete the requested action. See .cache\desktop-entry.log in the repository for details.", vbExclamation, "Codex Monitor"
+If result <> 0 Then MsgBox "Codex Monitor could not complete the requested action. See .cache\desktop-entry.log or .cache\bootstrap.log in the repository for details.", vbExclamation, "Codex Monitor"
 WScript.Quit result

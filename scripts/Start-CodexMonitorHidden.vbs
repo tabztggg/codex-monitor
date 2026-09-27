@@ -19,6 +19,7 @@ End If
 
 powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%ProgramFiles%"), "PowerShell\7\pwsh.exe")
 If Not files.FileExists(powershell) Then powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%USERPROFILE%"), ".cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe")
+If Not files.FileExists(powershell) Then powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%LOCALAPPDATA%"), "Programs\CodexMonitorTools\powershell\pwsh.exe")
 If Not files.FileExists(powershell) Then
   MsgBox "PowerShell 7 was not found. Install PowerShell 7 before starting Codex Monitor.", vbExclamation, "Codex Monitor"
   WScript.Quit 1

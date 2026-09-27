@@ -219,6 +219,11 @@ try {
   $env:CODEX_MONITOR_DRY_RUN = '1'
   $env:PORT = [string]$config.port
   $env:CODEX_MONITOR_HOST = [string]$config.hostAddress
+  # Task Scheduler does not inherit the installer's PATH. Persisted tools must
+  # also reach npm build scripts and Git spawned by the web updater.
+  $toolDirectories = @(Split-Path -Parent $config.nodePath)
+  if ($config.gitPath -and (Test-Path -LiteralPath $config.gitPath)) { $toolDirectories += Split-Path -Parent $config.gitPath }
+  $env:PATH = ($toolDirectories -join ';') + ';' + $env:PATH
   # The installed configuration is authoritative, including an absent/empty list.
   if ($null -ne $config.allowedOrigins) {
     if ($config.allowedOrigins -isnot [Array]) { throw 'standalone.json allowedOrigins must be an array of HTTP/HTTPS origins.' }

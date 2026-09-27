@@ -10,6 +10,14 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.10 — 2026-09-27
+
+- Windows 一键安装自动补齐 Node.js/npm、Git、PowerShell 7 和 Codex CLI；复用已有环境，缺失时安装官方工具到用户目录，开机启动与网页更新沿用同一路径。
+
+验证：423 项测试通过、2 项跳过；官方依赖下载、校验和运行通过隔离实测，本机部署通过。
+
+English: Automatically prepare missing Windows dependencies in a private user directory; reuse compatible tools and persist their paths for logon startup and web updates.
+
 ## v0.4.9 — 2026-09-27
 
 - 根目录提供一键安装／修复、更新和卸载入口，无命令行窗口；卸载保留配置与用量数据，重装自动复用。

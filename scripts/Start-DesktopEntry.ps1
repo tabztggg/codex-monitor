@@ -15,15 +15,15 @@ try {
     (Test-Path (Join-Path $install 'Run-StandaloneMonitor.exe')) -and
     (Test-Path (Join-Path $install 'dist/server/index.js'))
   if ($Deploy -or -not $installed) {
-    if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Install Node.js 22 or later first.' }
+    . (Join-Path $PSScriptRoot 'Windows-Dependencies.ps1')
+    $previousConfig = if (Test-Path -LiteralPath (Join-Path $install 'standalone.json')) { Get-Content -LiteralPath (Join-Path $install 'standalone.json') -Raw | ConvertFrom-Json } else { $null }
+    $dependencies = Resolve-MonitorDependencies $previousConfig
     Push-Location $repo
     try {
-      & npm.cmd ci
-      if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
-      & npm.cmd run build
-      if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      Invoke-MonitorNpm $dependencies.nodePath @('ci','--include=dev')
+      Invoke-MonitorNpm $dependencies.nodePath @('run','build')
     } finally { Pop-Location }
-    & (Join-Path $PSScriptRoot 'Install-StandaloneMonitor.ps1')
+    & (Join-Path $PSScriptRoot 'Install-StandaloneMonitor.ps1') -Dependencies $dependencies
   }
   # Also repair an accidentally removed desktop shortcut on every launch.
   & (Join-Path $PSScriptRoot 'Install-DesktopShortcut.ps1')

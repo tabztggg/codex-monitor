@@ -6,7 +6,7 @@
 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.9](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.9)** · One-click install, update and uninstall entries in the repository root. [Changelog](CHANGELOG.md)
+**[v0.4.10](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.10)** · Automatically prepare Node.js/npm, Git, PowerShell 7 and Codex CLI during installation. [Changelog](CHANGELOG.md)
 
 ![Usage overview: version status, remaining quota and time, range totals](assets/screenshots/v0.4.7-overview-en.jpg)
 
@@ -31,7 +31,9 @@ By default, read unarchived tasks and the 30 most recently archived root tasks, 
 
 ## Quick start
 
-Requires **Node.js 22.13+ (recommended)**, npm and an authenticated Codex installation supporting `codex app-server`. Windows also requires **PowerShell 7**; launchers can use the Codex-bundled copy. Basic operation supports Node.js 20; official task details need a newer version capable of reading the thread index.
+The Windows installer automatically prepares **Node.js/npm, Git, PowerShell 7 and Codex CLI**, reusing compatible installations first. Sign in to Codex yourself before using account features. Manual installation on other platforms requires Node.js 22.13+ (recommended), npm and Codex with `codex app-server` support; basic operation supports Node.js 20.
+
+Without Git, [download the source ZIP](https://github.com/tabztggg/codex-monitor/archive/refs/heads/main.zip), extract it, and double-click **Install Codex Monitor.vbs**. With Git installed, clone instead:
 
 ```bash
 git clone https://github.com/tabztggg/codex-monitor.git
@@ -47,7 +49,7 @@ cd codex-monitor
 | **Update Codex Monitor.vbs** | Update the installed copy to the latest repository version. |
 | **Uninstall Codex Monitor.vbs** | Stop and remove the application, startup task and owned shortcuts; keep configuration, usage caches, logs and backups. |
 
-Installation handles npm dependencies and builds; Node.js, Codex and PowerShell 7 must already be available. Retained data stays in `%LOCALAPPDATA%\Programs\CodexMonitor` and is reused on reinstall. Uninstall leaves Codex, Node.js and the source checkout intact.
+Initial installation needs internet access. Missing tools go into `%LOCALAPPDATA%\Programs\CodexMonitorTools`: Node.js 24 LTS, official Git MinGit, PowerShell 7, and the official Codex npm package when needed. It then installs project dependencies and builds. No administrator access, system PATH changes or account sign-in changes are needed. ZIP downloads are SHA256-verified; failures stop without replacing existing tools. Logs: `.cache/desktop-entry.log` and `.cache/bootstrap.log` in the checkout. Uninstall preserves settings, usage data, private tools and the source checkout for reuse.
 
 **One-click update:** double-click **Update Codex Monitor.vbs** in the root. It starts Monitor, updates the installed copy to this repository's latest `main`, and opens the dashboard for progress without a console window. A missing installation is deployed first; an update already in progress is reused. Your source checkout is preserved.
 

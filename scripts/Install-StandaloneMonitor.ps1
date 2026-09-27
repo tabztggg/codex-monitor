@@ -2,22 +2,25 @@ param(
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'Programs\CodexMonitor'),
   [string]$HostAddress = '127.0.0.1',
   [int]$Port = 4201,
-  [switch]$SkipDependencies
+  [switch]$SkipDependencies,
+  [psobject]$Dependencies
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'Windows-Dependencies.ps1')
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 if (-not (Test-Path (Join-Path $repo 'dist/server/index.js'))) { throw 'Run npm run build first.' }
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 if ((Get-Item -LiteralPath $InstallRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installation root must not be a reparse point.' }
 $configFile = Join-Path $InstallRoot 'standalone.json'
+$previousConfig = if (Test-Path -LiteralPath $configFile) { Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } else { $null }
+if (-not $Dependencies) { $Dependencies = Resolve-MonitorDependencies $previousConfig }
 $backup = Join-Path $InstallRoot ('backups/deploy-' + (Get-Date -Format yyyyMMdd-HHmmss))
 New-Item -ItemType Directory -Path $backup | Out-Null
 $config = if (Test-Path $configFile) { Get-Content $configFile -Raw | ConvertFrom-Json } else {
-  $cli = Get-ChildItem "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $cli) { throw 'Install Codex CLI first.' }
-  [pscustomobject]@{hostAddress=$HostAddress;port=$Port;nodePath=(Get-Command node.exe).Source;codexPath=$cli.FullName;codexHome=(Join-Path $env:USERPROFILE '.codex');taskName='Codex Monitor';allowedOrigins=@()}
+  [pscustomobject]@{hostAddress=$HostAddress;port=$Port;codexHome=(Join-Path $env:USERPROFILE '.codex');taskName='Codex Monitor';allowedOrigins=@()}
 }
+foreach ($name in @('nodePath','gitPath','codexPath')) { $config | Add-Member -NotePropertyName $name -NotePropertyValue $Dependencies.$name -Force }
 $task = Get-ScheduledTask -TaskName $config.taskName -ErrorAction SilentlyContinue
 if ($task) {
   if ($task.Actions.Count -ne 1 -or $task.Actions[0].WorkingDirectory.TrimEnd('\') -ne $InstallRoot.TrimEnd('\')) { throw 'Existing task belongs to another installation.' }
@@ -54,7 +57,7 @@ foreach($name in @('Run-StandaloneMonitor.ps1','Manage-StandaloneMonitor.ps1','S
 Copy-Item (Join-Path $repo '.cache/standalone-host/Run-StandaloneMonitor.exe') $InstallRoot -Force
 Copy-Item (Join-Path $repo 'dist') $InstallRoot -Recurse -Force
 Copy-Item (Join-Path $repo 'package.json'),(Join-Path $repo 'package-lock.json') $InstallRoot -Force
-if(-not $SkipDependencies){Push-Location $InstallRoot;try{npm ci --omit=dev; if($LASTEXITCODE -ne 0){throw 'Dependency installation failed'}}finally{Pop-Location}}
+if(-not $SkipDependencies){Push-Location $InstallRoot;try{Invoke-MonitorNpm $config.nodePath @('ci','--omit=dev')}finally{Pop-Location}}
 elseif(-not(Test-Path (Join-Path $InstallRoot 'node_modules'))){throw 'Dependencies missing; rerun without SkipDependencies'}
 $commit = $null
 $dirty = $null

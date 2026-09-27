@@ -4,9 +4,20 @@
 
 运行 `npm ci`、`npm run build` 后使用 PowerShell 7 执行 `pwsh -File scripts/Install-StandaloneMonitor.ps1`。自动部署、创建桌面快捷方式并启用 Windows 登录后无窗口自启动；保留配置与缓存，备份并移除旧 Monitor Hook。关闭 Codex 不影响 Monitor。
 
-Windows 启动入口优先使用 `%ProgramFiles%\PowerShell\7\pwsh.exe`，不存在时使用 Codex 自带的 PowerShell 7；不会回退到 Windows PowerShell 5。后台子进程复用启动它的 PowerShell 7，避免计划任务的 PATH 不同导致启动失败。
+Windows 启动入口优先使用标准安装或 Codex 自带的 PowerShell 7，再使用 Monitor 私有工具目录内的版本。如果都没有，仅使用 Windows 内置 PowerShell 5.1 下载并校验 PowerShell 7，然后切换到 7 执行安装。正式后台仍只使用 PowerShell 7。
 
-Windows launchers prefer the standard PowerShell 7 installation, then the Codex-bundled PowerShell 7. They do not fall back to Windows PowerShell 5. Child runners reuse the same PowerShell installation regardless of Task Scheduler's PATH.
+Windows launchers prefer standard, Codex-bundled, then Monitor-private PowerShell 7. On a fresh machine, built-in Windows PowerShell 5.1 is used only to download and verify PowerShell 7; installation and background operation then run under 7.
+
+### Automatic prerequisites / 自动准备依赖
+
+**Install Codex Monitor.vbs** works on Windows x64 and ARM64 without preinstalled Node.js, Git or PowerShell 7. Compatible tools are reused; missing tools are downloaded to `%LOCALAPPDATA%\Programs\CodexMonitorTools`. Node versions below 22.13 or missing npm are replaced only for Monitor by a private Node 24 LTS copy. Nothing changes the machine/user PATH or uninstalls other applications.
+
+- Node.js ZIP and SHA256: [official LTS downloads](https://nodejs.org/download/release/latest-v24.x/).
+- Git ZIP and SHA256: [official Git for Windows MinGit release](https://github.com/git-for-windows/git/releases/latest).
+- PowerShell ZIP and SHA256: [official PowerShell release](https://github.com/PowerShell/PowerShell/releases/latest); [ZIP installation documentation](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-windows).
+- Codex: reuse the installed native CLI, otherwise install `@openai/codex` from the official npm registry into the private tools directory. [Codex CLI and sign-in](https://learn.chatgpt.com/docs/codex/cli). Credentials are never imported or changed by the installer.
+
+Dependencies are validated before activation. A network/checksum failure stops installation and records the error; double-click Install again after connectivity is restored. Concurrent dependency installation is blocked. Node, Git and Codex executable paths are saved in `standalone.json`; the scheduled runner restores Node/Git to its own process PATH so web updates work after logon. Private tools and any previous-tool backup remain on uninstall for reuse. Fresh Codex installations still require the user to sign in; installing a CLI does not create account credentials.
 
 [English README](../README.en.md) · [中文说明](#中文说明)
 

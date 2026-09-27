@@ -6,7 +6,7 @@
 
 本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。非 OpenAI 官方产品，也不是计费系统。
 
-**[v0.4.7](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.7)** · 网页更新、版本提醒与低频刷新。[更新日志](CHANGELOG.md)
+**[v0.4.8](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.8)** · 更新检测单次请求超时延长至 10 秒。[更新日志](CHANGELOG.md)
 
 ![用量总览：版本状态、剩余额度与时间、范围汇总](assets/screenshots/v0.4.7-overview-zh.jpg)
 
@@ -44,7 +44,7 @@ cd codex-monitor
 wscript.exe "Codex Monitor.vbs" deploy
 ```
 
-Monitor 独立于 Codex 运行。网页右上角显示当前版本和仓库版本；状态与更新合为一个按钮：「已是最新」可重新检查，「更新至…」高亮提示，有检查故障时可重试。自动检查缓存 30 分钟，手动检查最短间隔 5 分钟。更新安装本仓库 `main` 最新提交（需要 Git、npm 和 PowerShell 7）：下载、构建时继续运行，准备好后自动停止、替换并重启；保留配置和用量缓存，安装或健康检查失败会回滚。旁边可重启或关闭 Monitor；关闭后需用桌面快捷方式再次启动。[Windows 部署说明](docs/standalone-windows.md)
+Monitor 独立于 Codex 运行。网页右上角显示当前版本和仓库版本；状态与更新合为一个按钮：「已是最新」可重新检查，「更新至…」高亮提示，有检查故障时可重试。自动检查缓存 30 分钟，手动检查最短间隔 5 分钟，单次仓库请求超时为 10 秒。更新安装本仓库 `main` 最新提交（需要 Git、npm 和 PowerShell 7）：下载、构建时继续运行，准备好后自动停止、替换并重启；保留配置和用量缓存，安装或健康检查失败会回滚。旁边可重启或关闭 Monitor；关闭后需用桌面快捷方式再次启动。[Windows 部署说明](docs/standalone-windows.md)
 
 **macOS／Linux，或手动运行：**
 

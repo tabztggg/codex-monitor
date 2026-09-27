@@ -122,8 +122,8 @@ export function ServiceControls() {
     const controller = new AbortController();
     readingVersions.current = controller;
     setCheckingVersions(true);
-    // The server allows up to 12 seconds for its cached repository check.
-    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    // Allow three sequential repository requests of up to 10 seconds, plus transport overhead.
+    const timeout = window.setTimeout(() => controller.abort(), 35_000);
     try {
       const response = await fetch(`/api/service/versions${manual ? '?refresh=1' : ''}`, { signal: controller.signal, cache: 'no-store' });
       if (!response.ok) throw new Error();

@@ -10,6 +10,13 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.8 — 2026-09-27
+
+- 更新检测单次仓库请求超时从 4 秒延长至 10 秒；网页等待上限同步调整为 35 秒，容纳最多三次依次请求。
+- 自动与手动检查间隔保持不变。
+
+English: Increase the per-request update-check timeout from 4 to 10 seconds and the browser wait to 35 seconds for up to three sequential requests. Polling intervals are unchanged.
+
 ## v0.4.7 — 2026-09-27
 
 - 网页增加“更新”：从本仓库 `main` 下载构建后，自动停止、安装并重启；保留配置与缓存，失败回滚。

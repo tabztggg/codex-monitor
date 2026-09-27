@@ -71,7 +71,7 @@ export class RepositoryVersionChecker {
   private async json(url: string): Promise<unknown> {
     const response = await this.request(url, {
       headers: { Accept: 'application/json', 'User-Agent': 'Codex-Monitor-Version-Check' },
-      signal: AbortSignal.timeout(4000), redirect: 'error',
+      signal: AbortSignal.timeout(10_000), redirect: 'error',
     });
     if (!response.ok) throw new Error('Repository version unavailable');
     return response.json();

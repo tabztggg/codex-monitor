@@ -92,11 +92,15 @@ export const api = {
     signal?: AbortSignal;
     archiveMode?: HistoryArchiveMode;
     period?: HistoryPeriod;
+    accountId?: string;
+    range?: {from: string; to: string};
     forceRefresh?: boolean;
   }): Promise<HistoryJobListResponse> {
     const params = new URLSearchParams();
     params.set('archives', args.archiveMode ?? 'recent');
     params.set('period', args.period ?? 'quota');
+    if (args.period === 'custom' && args.range) { params.set('from', args.range.from); params.set('to', args.range.to); }
+    if (args.accountId) params.set('accountId', args.accountId);
     if (args.forceRefresh && !args.cursor) params.set('forceRefresh', 'true');
     params.set("sourceKinds", args.sourceKinds.join(","));
     params.set("limit", String(args.limit ?? 20));

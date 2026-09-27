@@ -143,8 +143,11 @@ app.get("/api/history/jobs", async (request, response) => {
         ? request.query.sourceKinds.split(",").filter(Boolean)
         : null;
     const history = await service.listHistoryJobs({
+      dateFrom: typeof request.query.from === "string" ? request.query.from : undefined,
+      dateTo: typeof request.query.to === "string" ? request.query.to : undefined,
+      accountId: typeof request.query.accountId === "string" ? request.query.accountId : undefined,
       archiveMode: request.query.archives === 'all' ? 'all' : 'recent',
-      period: request.query.period === 'today' || request.query.period === '7d' || request.query.period === 'lifetime' ? request.query.period : 'quota',
+      period: request.query.period === 'custom' || request.query.period === 'today' || request.query.period === '7d' || request.query.period === 'lifetime' ? request.query.period : 'quota',
       forceRefresh: request.query.forceRefresh === 'true',
       cursor:
         typeof request.query.cursor === "string" ? request.query.cursor : null,

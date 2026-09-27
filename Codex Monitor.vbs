@@ -3,7 +3,7 @@ Dim shell, files, root, command, result, i
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 root = files.GetParentFolderName(WScript.ScriptFullName)
-command = Chr(34) & shell.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe" & Chr(34) & _
+command = Chr(34) & shell.ExpandEnvironmentStrings("%ProgramFiles%") & "\PowerShell\7\pwsh.exe" & Chr(34) & _
   " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Chr(34) & files.BuildPath(root, "scripts\Start-DesktopEntry.ps1") & Chr(34)
 For i = 0 To WScript.Arguments.Count - 1
   Select Case LCase(WScript.Arguments(i))

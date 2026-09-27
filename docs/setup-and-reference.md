@@ -7,10 +7,11 @@ customized source tree and its optional local launcher configuration.
 
 ## Requirements
 
-- Node.js and npm. Use Node.js 22 or newer; this checkout has been exercised
+- Node.js and npm. Use Node.js 22.13 or newer; this checkout has been exercised
   locally with Node.js 24. The package still declares `>=20`, but that declaration
   is not proof that its current SQLite-dependent tests work on Node.js 20.
 - An authenticated Codex installation with `codex app-server` support.
+- PowerShell 7 for the Windows launchers.
 - Read access to the local Codex history you want to analyze.
 - Windows is the locally verified platform for this customized dashboard.
   macOS/Linux helpers and a three-platform CI matrix are present; their presence
@@ -34,7 +35,7 @@ npm ci
 npm run build
 ```
 
-Windows PowerShell:
+PowerShell 7:
 
 ```powershell
 $env:CODEX_MONITOR_HOST = '127.0.0.1'
@@ -75,48 +76,28 @@ also requires updating its HTTP and WebSocket targets.
 
 ## On-demand launchers
 
-The repository includes background launchers and shortcut installers. Running
-the standard launchers does not itself install an automatic login service.
-Background launchers write `codex-monitor.out.log` and `codex-monitor.err.log`
-in the repository root. Dependencies must already be installed.
+The root Windows entry installs an independent background copy, desktop shortcut
+and logon task. The macOS/Linux helpers are on-demand launchers.
 
 ### Windows launchers
 
-`scripts/Start-CodexMonitor.ps1` defaults to `127.0.0.1` and forces
-`CODEX_MONITOR_DRY_RUN=1`. Host selection, in priority order:
-
-1. `CODEX_MONITOR_HOST` in the environment.
-2. A single IPv4 address in `.cache/launcher-host.txt`, if present.
-3. `127.0.0.1`.
-
-The optional host file is ignored by Git and stays on the local machine. It
-lets desktop and login shortcuts retain a LAN address without publishing it.
-The Windows launcher validates IPv4 addresses before starting any process.
-
-It starts Node hidden, locates Codex, waits for HTTP health, and optionally opens
-the browser. `-NoBrowser` suppresses the browser. An existing listener is reused
-only after it is verified as Node serving a dry-run monitor; an unrelated port
-owner is not stopped. It builds only if the server bundle is missing, so build
-explicitly after source changes or when frontend output is missing.
-
-Its entry points are:
+Double-click `Codex Monitor.vbs` in the repository root. It invokes PowerShell 7
+without a console window. First launch installs dependencies, builds and deploys;
+later launches start/open the installed copy and repair a missing desktop shortcut.
 
 ```powershell
 wscript.exe '.\Codex Monitor.vbs'
 wscript.exe '.\Codex Monitor.vbs' nobrowser
-& '.\scripts\legacy\Codex With Monitor.cmd' -Cli
+wscript.exe '.\Codex Monitor.vbs' deploy
 ```
 
-`scripts/legacy/Install Desktop Shortcut.cmd` creates a monitor shortcut. The separate Codex
-launcher shortcut starts the monitor and then Codex. For login startup, place
-a shortcut to a reviewed launcher in `shell:startup`; this is per-machine setup,
-not something installed by cloning the repository. `-NoBrowser` avoids opening
-a page at login.
-
-The legacy **Install Codex Process Trigger.cmd** creates a Scheduled Task and
-enables Windows process-creation auditing with administrator rights. Its
-uninstaller removes the task but leaves auditing enabled. This is separate
-from login startup and is not required for the dashboard.
+Deployment uses `scripts/Install-StandaloneMonitor.ps1`, creates and verifies the
+desktop shortcut, and registers a windowless task at user logon. Closing Codex
+does not stop Monitor. Old Monitor lifecycle hooks are backed up and removed.
+The website can restart/stop a managed Monitor; after stopping, use the desktop
+shortcut to start it again. Helpers and retired entry points remain under
+`scripts/` and `scripts/legacy/`. See [standalone Windows deployment](standalone-windows.md)
+for installed paths, configuration, logs and updates.
 
 ### macOS and Linux launchers
 
@@ -141,24 +122,35 @@ those systems remains outstanding.
 ### Recorded usage and costs
 
 The reader processes JSONL in chunks and consolidates attributable subagents
-into root tasks. Repeated token events are suppressed when unchanged cumulative
-counters prove no new usage. A rollout present in both active and archived
-directories is counted once, preferring the active copy. Missing parent metadata
-can prevent child attribution.
+into root tasks. Repeated events and unchanged cumulative token counters do not
+add usage again. A rollout present in both active and archived directories is
+counted once, preferring the active copy. Children that cannot be merged into a
+retained parent remain separate tasks rather than disappearing from totals.
 
 The built-in table in `server/src/history-jobs.ts` estimates input, cached input,
 cache-write, and output costs, with the implemented context multipliers.
-Prices are not fetched dynamically. Unknown models remain unpriced and tool
-fees are excluded. These are API-equivalent estimates, not subscription bills.
+Prices are not fetched dynamically. Priced GPT-6 Astra, Sol and Luna usage is
+included; unknown models remain unpriced and tool fees are excluded. These are
+API-equivalent estimates, not subscription bills. Overview token breakdowns show
+input and output separately; cached input is a subset of input, not extra tokens.
 
-### Current-account equivalents
+### Account selection and task quota
 
-The header selects the overall Codex bucket, preferring its weekly window and
-excluding Spark. **Current account %** replaces the former observed-quota
-allocation column. It divides matched task costs by the same saved Pro 20x
-calibration used for cross-account equivalents. It always covers the current
-weekly period, even when another time range is selected. Plan comparison scales
-both columns; project totals include hidden task rows.
+The overview shows only Monitor's current Codex CLI account, preferring its
+weekly quota window and excluding Spark. It shows the full period, snapshot
+time and source; this login may differ from the Codex desktop app. The task-page
+account selector can use a saved account snapshot without changing either login.
+
+The paired task quota column has fixed scopes:
+
+- **Selected account · This period:** matched usage within that account's quota
+  window; a historical account uses its last recorded window.
+- **Across accounts · Task lifetime:** all retained local periods/accounts for
+  that task and its attributed children.
+
+Both divide priced usage by the same saved Pro 20x calibration. Plan comparison
+scales both values; each side has an independent sort control. Project totals
+include hidden rows. Changing the time range does not change these two scopes.
 
 Rollouts lack reliable account IDs. Records are matched by weekly reset time,
 allowing 60 seconds of timestamp drift; records from other windows are excluded.
@@ -166,7 +158,7 @@ This is an account-identity estimate: accounts sharing the same reset time canno
 be distinguished. Missing windows, unpriced models and untimed usage make the
 result incomplete (`+`), or unavailable (`--`) when no priced subtotal exists.
 No current-week usage is zero only when the records establish that absence.
-The current account label comes from the same quota snapshot as the calculation.
+The selected account label comes from the same quota snapshot as the calculation.
 
 The old `.cache/quota-attribution.json` ledger is preserved for compatibility;
 its observed increment allocation no longer drives the table column.
@@ -174,9 +166,14 @@ its observed increment allocation no longer drives the table column.
 ### Pro 20x equivalents
 
 The estimator assumes all recorded Pro accounts are 20x; logs do not verify that
-assumption and there is no tier selector. Local rate-limit observations from
-the current weekly window calibrate API-equivalent cost per percentage point,
-after merging parallel sessions into one timeline.
+assumption or reliably distinguish Pro 5x/20x. Account badges show only the API's
+plan label. The comparison selector offers Pro 20x, Pro 5x and Plus at factors
+of 1, 4 and 20; it does not change or verify the account's actual tier.
+
+Calibration uses the latest complete observations covering at least 20 percentage
+points when available, from retained samples in the last 30 days. Parallel
+sessions are merged into one timeline. All accounts share this reference;
+selecting another account does not recalibrate it.
 
 At least five usable percentage points are required. Initial balances do not
 count as consumption. Reset changes and gaps over 30 minutes restart observation
@@ -184,8 +181,16 @@ baselines; unusable corrections or missing prices invalidate affected intervals.
 Stale snapshots cannot recount a return to the preceding high-water mark.
 See `server/src/quota-equivalent.ts` for the implementation.
 
-Selected-range costs are divided by this reference. One 20x week always equals
-100%; several weeks of usage can exceed 100%. Records from formerly used
+When observations are insufficient, the previous reference remains visible
+while calibration updates. An optional adjacent `.manual.json` calibration
+override accepts `version: 1`, positive `costPerPercent` and an `updatedAt`
+timestamp in milliseconds. It takes precedence and is identified in the UI;
+remove it and restart to resume automatic calibration. It changes equivalent
+quota only, not costs or tokens. Official account totals are not forced onto tasks.
+
+Selected-range summary and ranking costs are divided by this reference. One
+20x week always equals 100%; this is not a share of total consumption, and several
+weeks of usage can exceed 100%. Records from formerly used
 accounts count only where available locally and within the archive scope.
 The monitor does not authenticate into old accounts or retrieve missing logs.
 
@@ -196,19 +201,22 @@ pricing, tier differences, rounding, tools, and other-device activity affect it.
 
 | Range | Boundary |
 | --- | --- |
-| Current quota period | Current account reset window through the snapshot time. Default. |
-| Today | Midnight today on the monitor computer. |
+| Today (default) | Midnight today on the monitor computer through now. |
 | Last 7 days | Midnight six calendar days ago through now; includes today. |
 | Task lifetime | All recorded history for included tasks. |
+| Custom dates | Start-day midnight through the end of the selected end date, capped at now. |
 
-Cost, tokens, 20x, summaries, trends, and rankings follow this range. Missing
+Cross-account summary equivalents, cost, tokens, trends and rankings follow this
+range. Task quota retains the two fixed scopes described above. Missing
 timestamps cannot be assigned to calendar periods and are reported in the
 estimation panel. Unknown values are `--`; partial results carry `+`. Daily
 trends show recorded dates, without interpreting a missing date as zero usage.
 
 The **Today row filter** is separate from the **Today time range**: the former
-filters task activity, while the latter changes usage totals. Row filters use
-the browser's local day; usage periods use the monitor computer's timezone.
+filters task activity, while the latter changes usage totals. Both use the
+Monitor's time zone. Overview current activity is live state, independent of the
+historical date range. The task count in overview totals counts tasks with
+recorded consumption, not every included task.
 
 ### Archives and totals
 
@@ -328,12 +336,10 @@ A running server does not need restarting for Markdown edits.
 
 ## Platform verification
 
-The feature validation on 2026-09-22 used Windows and Node.js 24: 129 tests passed
-and 2 were skipped; TypeScript and production build passed. Desktop-browser
-checks covered ranges, trends, grouping, hidden archives, column settings,
-density, language persistence, refresh, and sorting. These are results of that
-run, not guarantees for every machine or later commit. A physical mobile-device
-check was not performed.
+The v0.4.5 validation on 2026-09-27 used Windows: 336 tests passed and 2 were
+skipped; TypeScript and production build passed. The README screenshots use the
+actual build with fictional data. These results do not verify every platform,
+physical mobile device or future commit.
 
 `.github/workflows/ci.yml` targets Windows, macOS, and Linux with Node.js 22,
 including POSIX shell syntax checks. A configured workflow does not establish

@@ -5,10 +5,22 @@
 ## 升级 / Upgrade
 
 停止 Monitor，备份并保留 `.cache/` 和本地配置。更新源码后运行 `npm ci`、`npm run build`，再启动。
-Windows 独立安装还需部署新构建与依赖；v0.4.2 还需更新启动器。见[独立安装说明](docs/standalone-windows.md#updating-the-installed-copy)。
+Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安装副本。见[独立安装说明](docs/standalone-windows.md#updating-the-installed-copy)。
 
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
-Standalone Windows installations also need the new build, dependencies and, for v0.4.2, the updated runner.
+For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
+
+## v0.4.5 — 2026-09-27
+
+- 总览、任务、趋势改为独立页面，更新中英文排版及首页截图；总览增加 Token 拆分、范围内消耗前 3 名与当前活动。
+- 总览只显示当前登录账号、完整额度周期及更新时间；任务页保留历史账号选择，不切换 Codex 登录。
+- 任务额度明确为“所选账号·本周期 / 跨账号·任务累计”，两侧独立排序；汇总与趋势按所选日期估算，缺失数据不再当作零。
+- 补齐 GPT-6 Sol／Luna 计价与缓存重算，修复重复事件、漏统计子任务和时间范围偏差；校准不足时保留已有基准。
+- Windows 启动脚本统一使用 PowerShell 7，保留桌面快捷方式与独立登录自启动。
+
+验证：336 项测试通过、2 项跳过；类型检查与构建通过。网页截图使用实际构建和虚构数据。
+
+English: Add dedicated overview, task and trends pages; clarify account/period scopes and quota sorting; fix model pricing, missing/duplicate usage and range handling; use PowerShell 7 launchers. Verified with 336 passing tests, 2 skips, type checking and production build.
 
 ## v0.4.4 — 2026-09-26
 

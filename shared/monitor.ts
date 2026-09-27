@@ -280,6 +280,8 @@ export interface AccountUsageEntry {
 }
 
 export interface HistoryJob {
+  /** A subagent retained because its principal task is outside the available records. */
+  orphanedSubagent?: boolean;
   periodMetrics?: HistoryPeriodMetrics;
   id: string;
   archived: boolean;
@@ -310,6 +312,8 @@ export interface HistoryJob {
   /** Current weekly-window records, using the same reference as cross-account equivalents. */
   currentAccountEquivalentPercent?: number | null;
   currentAccountEquivalentIsComplete?: boolean;
+  lifetime20xPercent?: number | null;
+  lifetime20xIsComplete?: boolean;
   estimated20xPercent?: number | null;
   estimated20xIsComplete?: boolean;
 }
@@ -319,7 +323,7 @@ export interface HistoryUsageAllocation {
   equivalent20x?: {
     costPerPercentUsd: number | null;
     calibrationQuotaPercent: number;
-    source?: 'current' | 'previous' | 'unavailable';
+    source?: 'current' | 'previous' | 'unavailable' | 'manual';
     calibratedAt?: string | null;
     referenceQuotaPercent?: number;
   };
@@ -335,7 +339,7 @@ export interface HistoryUsageAllocation {
 }
 
 export type HistoryArchiveMode = 'recent' | 'all';
-export type HistoryPeriod = 'quota' | 'today' | '7d' | 'lifetime';
+export type HistoryPeriod = 'quota' | 'today' | '7d' | 'lifetime' | 'custom';
 export interface HistoryUsageDay {
   date: string;
   usage: TokenUsage;

@@ -9,7 +9,7 @@ function Test-Administrator {
 }
 
 function Restart-Elevated {
-  $powershellPath = (Get-Command powershell.exe).Source
+  $powershellPath = (Get-Command pwsh.exe -ErrorAction Stop).Source
   Start-Process `
     -FilePath $powershellPath `
     -ArgumentList @(
@@ -71,7 +71,7 @@ if (-not (Test-Administrator)) {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $monitorScript = Join-Path $repoRoot "scripts\Start-CodexMonitor.ps1"
-$powershellPath = (Get-Command powershell.exe).Source
+$powershellPath = (Get-Command pwsh.exe -ErrorAction Stop).Source
 $codexPaths = @(Get-CodexExecutablePaths)
 
 if ($codexPaths.Count -eq 0) {

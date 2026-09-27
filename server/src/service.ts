@@ -184,6 +184,9 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   }
 
   public async listHistoryJobs(args: {
+    accountId?: string;
+    dateFrom?: string;
+    dateTo?: string;
     cursor?: string | null;
     limit?: number | null;
     sourceKinds?: string[] | null;
@@ -191,9 +194,12 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     sortKey?: string | null;
     sortDirection?: string | null;
     archiveMode?: 'recent' | 'all';
-    period?: 'quota' | 'today' | '7d' | 'lifetime';
+    period?: 'quota' | 'today' | '7d' | 'lifetime' | 'custom';
     forceRefresh?: boolean;
   }): Promise<HistoryJobListResponse> {
+    const selected = args.accountId ? this.accountUsageHistory.list(this.codexUsage).find(a => a.id === args.accountId) : undefined;
+    if (args.accountId && !selected) throw new Error("Unknown account selection.");
+    const usage = selected && !selected.current ? selected.usage : this.codexUsage;
     let metadataById: Map<string, HistoryJobMetadata> | null = null;
     try {
       metadataById = await this.getHistoryThreadMetadata();
@@ -205,20 +211,21 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       ...args,
       forceRefresh: args.forceRefresh === true && !args.cursor,
       metadataById,
-      account: this.codexUsage.account,
-      usageWindow: this.getPrimaryUsageWindow()
+      account: usage.account,
+      observeUsage: false,
+      usageWindow: this.getPrimaryUsageWindow(usage)
     });
   }
 
-  private getPrimaryUsageWindow(): {
+  private getPrimaryUsageWindow(usage = this.codexUsage): {
     usedPercent: number;
     startedAtMs: number;
     resetsAt: string;
     limitName: string;
     windowLabel: string;
   } | null {
-    const limit = this.codexUsage.limits.find(entry => entry.id === 'codex') ??
-      (this.codexUsage.primaryLimit?.id === 'codex' ? this.codexUsage.primaryLimit : null);
+    const limit = usage.limits.find(entry => entry.id === 'codex') ??
+      (usage.primaryLimit?.id === 'codex' ? usage.primaryLimit : null);
     const window = [limit?.primary, limit?.secondary].find(entry => entry?.windowDurationMins === 10080) ??
       limit?.primary ?? limit?.secondary;
     if (

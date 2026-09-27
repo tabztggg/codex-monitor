@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BrowserRouter, Link, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, Link, NavLink, Route, Routes, useLocation, useParams } from "react-router-dom";
 import type {
   CodexUsageSnapshot,
-  AccountUsageEntry,
   MonitorSnapshot,
   ThreadNode
 } from "../../shared/monitor";
@@ -93,16 +92,16 @@ export default function App() {
     <BrowserRouter>
       <div className="app-shell">
         <header className="topbar" ref={topbarRef}>
-          <a href="/#usage-overview" className="brand-link">
+          <Link to="/" className="brand-link">
             <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
               <path d="M14 2 3 8v8l11-6V2Zm4 0v8l11 6V8L18 2ZM3 20v4l11 6V16L3 20Zm15-4v14l11-6v-4l-11-4Z" fill="currentColor" />
             </svg>
             <h1>Codex Monitor</h1>
-          </a>
+          </Link>
           <nav className="dashboard-nav" aria-label={t('Dashboard navigation')}>
-            <a className="dashboard-nav-link" href="/#usage-overview">{t('Usage overview')}</a>
-            <a className="dashboard-nav-link" href="/#task-details">{t('Task details')}</a>
-            <a className="dashboard-nav-link" href="/#task-trends">{t('Trends & methodology')}</a>
+            <NavLink className="dashboard-nav-link" to="/" end>{t('Usage overview')}</NavLink>
+            <NavLink className="dashboard-nav-link" to="/tasks">{t('Task details')}</NavLink>
+            <NavLink className="dashboard-nav-link" to="/trends">{t('Trends & methodology')}</NavLink>
           </nav>
           <div className="topbar-actions"><ServiceControls /><LanguageSwitch /></div>
         </header>
@@ -114,8 +113,8 @@ export default function App() {
 
         <Routes>
           <Route
-            path="/"
-            element={<DashboardPage snapshot={safeSnapshot} nowMs={nowMs} connectionLabel={connectionLabel} />}
+            path="/*"
+            element={<RoutedDashboard snapshot={safeSnapshot} nowMs={nowMs} connectionLabel={connectionLabel} />}
           />
           <Route
             path="/runs/:runId"
@@ -127,23 +126,40 @@ export default function App() {
   );
 }
 
+function RoutedDashboard(props: { snapshot: MonitorSnapshot; nowMs: number; connectionLabel: string }) {
+  const location = useLocation();
+  const page = location.pathname === '/tasks' ? 'tasks' : location.pathname === '/trends' ? 'trends' : 'overview';
+  useEffect(() => {
+    if (!location.hash && !new URLSearchParams(location.search).has('task')) window.scrollTo(0, 0);
+  }, [page, location.hash, location.search]);
+  return <DashboardPage {...props} page={page} />;
+}
+
 export function DashboardPage({
   snapshot,
   connectionLabel,
+  page = 'all',
   nowMs
 }: {
   snapshot: MonitorSnapshot;
   nowMs: number;
   connectionLabel: string;
+  page?: 'all' | 'overview' | 'tasks' | 'trends';
 }) {
   const { t } = useI18n();
+  const [selected, setSelected] = useState('');
+  const selectedEntry = snapshot.accountUsages?.find(a => a.id === selected && !a.current);
+  const selectedUsage = selectedEntry?.usage ?? snapshot.codexUsage;
   return (
-    <main className="dashboard-page">
+    <main className={`dashboard-page page-${page}`}>
       <HistoryPanel
-        snapshot={snapshot}
+        page={page}
+        accountSlot={<label className="inline-field account-page-picker">{t('Selected account')}<select value={selected} onChange={event => setSelected(event.target.value)}><option value="">{snapshot.codexUsage.account?.email ?? t('Current login')}</option>{snapshot.accountUsages?.filter(a => !a.current).map(a => <option key={a.id} value={a.id}>{a.usage.account?.email ?? a.id}</option>)}</select></label>}
+        snapshot={{ ...snapshot, codexUsage: selectedUsage }}
+        selectedAccountId={selectedEntry?.id}
         nowMs={nowMs}
         connectionLabel={connectionLabel}
-        overviewSlot={<CodexUsageCard usage={snapshot.codexUsage} accounts={snapshot.accountUsages ?? []} nowMs={nowMs} />}
+        overviewSlot={<CodexUsageCard usage={snapshot.codexUsage} nowMs={nowMs} />}
       />
       <footer className="monitor-footer">
         <details className="secondary-controls">
@@ -225,29 +241,23 @@ function AutomationCard({
   );
 }
 
-function CodexUsageCard({
-  usage: liveUsage,
-  accounts,
+function CodexUsageCard(props: { usage: CodexUsageSnapshot; nowMs: number }) {
+  const { t } = useI18n();
+  return <section className="account-stack" aria-label={t('Overall Codex usage')}>
+    <AccountUsageRow {...props} />
+  </section>;
+}
+
+function AccountUsageRow({
+  usage,
   nowMs
 }: {
   usage: CodexUsageSnapshot;
-  accounts: AccountUsageEntry[];
   nowMs: number;
 }) {
   const { t, locale, windowLabel, dateTime, error: errorText } = useI18n();
-  const [selected, setSelected] = useState('');
-  const otherAccounts = accounts.filter(account => !account.current);
-  const selectedAccount = otherAccounts.find(account => account.id === selected);
-  const historical = Boolean(selectedAccount);
-  const usage = selectedAccount?.usage ?? liveUsage;
-  const options = ['', ...otherAccounts.map(account => account.id)];
-  const activeSelection = selectedAccount ? selected : '';
-  function stepAccount(direction: number) {
-    const index = options.indexOf(activeSelection);
-    setSelected(options[(index + direction + options.length) % options.length]);
-  }
   const window = overallUsageWindow(usage);
-  const pace = window ? quotaPace(window, historical ? Date.parse(usage.updatedAt!) : nowMs) : null;
+  const pace = window ? quotaPace(window, nowMs) : null;
   const unavailable = usage.status !== "available" || !window;
   const expired = pace?.expired;
   const used = unavailable || expired ? null : window.usedPercent;
@@ -256,47 +266,44 @@ function CodexUsageCard({
   const elapsed = unavailable ? null : pace?.elapsed ?? null;
   const heading = difference === null ? "Pace unavailable" : difference > 5 ? "Usage is ahead of elapsed time" : difference < -5 ? "Usage is below the proportional pace" : "Usage is in line with elapsed time";
   const resetAt = window?.resetsAt && Number.isFinite(Date.parse(window.resetsAt)) ? window.resetsAt : null;
-  const resetDate = resetAt ? new Intl.DateTimeFormat(locale, {
+  const periodFormatter = new Intl.DateTimeFormat(locale, {
     year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     hour12: false, timeZoneName: 'shortOffset'
-  }).format(new Date(resetAt)).replace('GMT', 'UTC') : null;
+  });
+  const periodDuration = window?.windowDurationMins;
+  const periodStartMs = resetAt && typeof periodDuration === 'number' && Number.isFinite(periodDuration) && periodDuration > 0
+    ? Date.parse(resetAt) - periodDuration * 60_000 : NaN;
+  const periodStartAt = Number.isFinite(periodStartMs) && Math.abs(periodStartMs) <= 8.64e15 ? new Date(periodStartMs).toISOString() : null;
+  const formatPeriodDate = (value: string) => periodFormatter.format(new Date(value)).replace('GMT', 'UTC');
   return (
-    <section className="surface global-quota" aria-label={t('Overall Codex usage')}>
+    <section className="surface global-quota account-usage-row selected" aria-label={usage.account?.email ?? t('Unknown account')}>
       <div className="global-quota-grid">
         <div className="quota-account-column">
           <div className="global-quota-heading">
-            <h2>{t(historical ? 'Recorded account quota' : 'Current account quota')}</h2>
-            {window && <span className="quota-window-badge">{windowLabel(window.label)}</span>}
+            <h3>{usage.account?.email ?? t('Unknown account')}</h3>
+
           </div>
-          <div className="quota-account-switcher">
-            <button className="small-control" aria-label={t('Previous account')} disabled={options.length < 2} onClick={() => stepAccount(-1)}>‹</button>
-            <select className="small-control" aria-label={t('View account usage')} value={activeSelection} onChange={event => setSelected(event.target.value)}>
-              <option value="">{t('Current login')} · {liveUsage.account?.email ?? t('Unknown account')}</option>
-              {otherAccounts.map(account => <option key={account.id} value={account.id}>{account.usage.account?.email} · {t('Last recorded')}</option>)}
-            </select>
-            <button className="small-control" aria-label={t('Next account')} disabled={options.length < 2} onClick={() => stepAccount(1)}>›</button>
-          </div>
+
           <div className="quota-account" aria-label={t('Usage account')}>
-            <strong>{usage.account?.email ?? t(usage.account?.type === 'apiKey' ? 'API key account' : 'Unknown account')}</strong>
+
+            <span className={`account-kind ${usage.stale ? 'recorded' : 'live'}`}>{t(usage.stale ? 'Last recorded' : 'Current login')}</span>
             {usage.account?.planType && <span>{usage.account.planType}</span>}
-            {(usage.stale || historical) && <span className="quota-account-stale">{t('Last confirmed account')}</span>}
-            <details className="account-source">
-              <summary>{t('CLI account · Details')}</summary>
-              <small>{t('Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.')}</small>
-              {usage.updatedAt && <small>{t('Updated at {time}', { time: dateTime(usage.updatedAt) })}</small>}
-            </details>
+            {window && <span className="quota-window-badge">{windowLabel(window.label)}</span>}
+
+
           </div>
+          {usage.updatedAt && <small className="account-updated-at">{t(usage.stale ? 'Last confirmed at {time}' : 'Updated at {time}', { time: dateTime(usage.updatedAt) })}</small>}
         </div>
         {unavailable ? (
           <p className="usage-message quota-unavailable" role="status">{usage.status === "loading" ? t("Loading overall Codex usage…") : usage.error ? `${t('Overall Codex quota is unavailable.')} ${errorText(usage.error)}` : t("Overall Codex quota is unavailable.")}</p>
         ) : <>
           <div className="quota-balance">
-            <div className="quota-number">{formatPercent(remaining)} <span>{t('remaining')}</span></div>
-            <div className="usage-meter quota-remaining-meter" role="img" aria-label={t('{percent} quota remaining', { percent: formatPercent(remaining) })}>
-              <span style={{ width: `${clampMeterPercent(remaining)}%` }} />
+            <div className="quota-number">{formatPercent(used)} <span>{t('Quota used')}</span></div>
+            <div className="usage-meter quota-remaining-meter" role="img" aria-label={`${t('Quota used')} ${formatPercent(used)}`}>
+              <span style={{ width: `${clampMeterPercent(used)}%` }} />
             </div>
             <div className="quota-stat-line">
-              <span>{t('Quota used')} <b>{formatPercent(used)}</b></span>
+              <span>{t('remaining')} <b>{formatPercent(remaining)}</b></span>
               <span>{t('Time elapsed')} <b>{formatPercent(elapsed)}</b></span>
             </div>
             <details className="quota-pace">
@@ -307,15 +314,25 @@ function CodexUsageCard({
             </details>
           </div>
           <div className="quota-reset-block">
-            <span className="quota-reset-label">{t(historical ? 'Recorded reset time' : 'Next reset')}</span>
-            <strong className="quota-reset">{historical ? t('Last recorded') : expired ? t("Waiting for the renewed quota") : formatResetLabel(resetAt, nowMs, t)}</strong>
-            {resetAt && <time className="quota-reset-at" dateTime={resetAt}>{resetDate}</time>}
+            <span className="quota-reset-label">{t('Next reset')}</span>
+            <strong className="quota-reset">{expired ? t("Waiting for the renewed quota") : formatResetLabel(resetAt, nowMs, t)}</strong>
+            {resetAt && <div className="quota-period-range">
+              {periodStartAt && <>
+                <span className="quota-period-label">{t('Quota period')}</span>
+                <time className="quota-reset-at" dateTime={periodStartAt}>{formatPeriodDate(periodStartAt)}</time>
+                <span aria-hidden="true"> → </span>
+              </>}
+              <time className="quota-reset-at" dateTime={resetAt}>{formatPeriodDate(resetAt)}</time>
+            </div>}
           </div>
         </>}
       </div>
-      {historical && usage.updatedAt && <p className="muted-note" role="status">{t('Recorded at {time}. This account is not being refreshed; switching this view does not change your login.', { time: dateTime(usage.updatedAt) })}</p>}
-      {!historical && usage.stale && usage.updatedAt && <p className="muted-note" role="status">{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</p>}
-      <p className="muted-note">{t('Accounts appear after Monitor reads their usage while logged in. This selector changes only the quota card, not task statistics.')}</p>
+      <details className="account-source account-details">
+        <summary>{t('Account details')}</summary>
+        <small>{t('Source: Monitor’s Codex CLI login. This may differ from the account in the Codex desktop app.')}</small>
+        {usage.stale && usage.updatedAt ? <small>{t('Showing the last confirmed account snapshot from {time}. Retrying automatically.', { time: dateTime(usage.updatedAt) })}</small>
+          : null}
+      </details>
     </section>
   );
 }

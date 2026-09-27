@@ -55,14 +55,24 @@ type CompactHistoryData = {
 };
 
 type ParsedHistoryJob = HistoryJob & {
+  usageEvents?: ParsedUsageEvent[];
+  parsedTurns?: ParsedTurn[];
   dailyUsage?: HistoryUsageDay[];
   quotaDailyUsage?: HistoryUsageDay[];
   untimedTokens?: number;
   totalUnpricedTokens?: number;
   quotaCalibrationEvents?: QuotaCalibrationEvent[];
-  quotaCalibrationVersion?: 5;
+  quotaCalibrationVersion?: 6;
   parentThreadId: string | null;
   isSubagent: boolean;
+};
+
+type ParsedUsageEvent = {
+  id: string | null;
+  at: number | null;
+  usage: TokenUsage;
+  cost: number | null;
+  duplicate: boolean;
 };
 
 export type HistoryJobMetadata = Partial<
@@ -102,9 +112,11 @@ type UsageWindow = {
 
 const ROLLING_USAGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-// Standard API prices in USD per million tokens, verified 2026-09-06.
+// Standard API prices in USD per million tokens, GPT-6 rates verified 2026-09-26: https://developers.openai.com/api/docs/pricing
 // This is an API-equivalent estimate: ChatGPT plan usage is not billed this way.
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 10 },
+  "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWriteInput: 0.125, output: 0.5 },
   "gpt-6-astra": { input: 10, cachedInput: 1, cacheWriteInput: 12.5, output: 50 },
   "gpt-5.6": { input: 4, cachedInput: 0.4, cacheWriteInput: 5, output: 20 },
   "gpt-5.6-sol": { input: 4, cachedInput: 0.4, cacheWriteInput: 5, output: 20 },
@@ -154,6 +166,8 @@ export class HistoryJobReader {
     observeUsage?: boolean;
     archiveMode?: HistoryArchiveMode;
     period?: HistoryPeriod;
+    dateFrom?: string;
+    dateTo?: string;
     forceRefresh?: boolean;
   }): HistoryJobListResponse {
     if (args.forceRefresh) {
@@ -164,6 +178,20 @@ export class HistoryJobReader {
     }
     const nowMs = args.nowMs ?? Date.now();
     const period = args.period ?? 'quota';
+    const parseDay = (v?: string) => {
+      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error('Invalid date range');
+      const d = new Date(v + 'T00:00:00');
+      if (!Number.isFinite(d.getTime()) || localDay(d.getTime()) !== v) throw new Error('Invalid date range');
+      return d.getTime();
+    };
+    const customStart = period === 'custom' ? parseDay(args.dateFrom) : null;
+    const customEnd = period === 'custom' ? parseDay(args.dateTo) : null;
+    if (customStart !== null && customEnd !== null && customStart > customEnd) throw new Error('Invalid date range');
+    if (customStart !== null && customStart > nowMs) throw new Error('Invalid date range');
+    const endDay = customEnd === null ? null : new Date(customEnd);
+    if (endDay) endDay.setDate(endDay.getDate() + 1);
+    const selectedEnd = endDay ? Math.min(nowMs, endDay.getTime() - 1) : nowMs;
+
     const indexedNames = readSessionNames(path.join(this.sessionsRoot, "..", "session_index.jsonl"));
     const archiveMetadata = readArchiveMetadata(path.join(this.sessionsRoot, '..'));
     const archiveMode = args.archiveMode === 'all' ? 'all' : 'recent';
@@ -208,16 +236,18 @@ export class HistoryJobReader {
         const archived = archivedPaths.has(file.path);
         const next = this.cache.get(file.path);
         if (archived && (previous?.compact !== next?.compact || previous?.mtimeMs !== next?.mtimeMs || previous?.size !== next?.size ||
-            previous?.job?.quotaCalibrationVersion !== next?.job?.quotaCalibrationVersion)) this.archiveCacheDirty = true;
+            previous?.job?.quotaCalibrationVersion !== next?.job?.quotaCalibrationVersion ||
+            Boolean(previous?.job?.usageEvents) !== Boolean(next?.job?.usageEvents) ||
+            Boolean(previous?.job?.parsedTurns) !== Boolean(next?.job?.parsedTurns))) this.archiveCacheDirty = true;
         return job ? { ...job, archived } : null;
       })
       .filter((job): job is ParsedHistoryJob => Boolean(job));
     this.saveArchiveCache(archivedPaths);
-    const consolidated = consolidateSubagentUsage(mergeJobsByTask(parsedJobs));
+    const consolidated = consolidateSubagentUsage(mergeJobsByTask(parsedJobs, nowMs, args.usageWindow?.startedAtMs ?? null));
     const window = args.usageWindow;
     const weekEnd = Date.parse(window?.resetsAt ?? '');
     const weekly = window && weekEnd > nowMs && weekEnd - window.startedAtMs === 604800000;
-    const calibration = this.calibration.resolve(parsedJobs.flatMap(job => job.quotaCalibrationEvents ?? []), weekly ? window.startedAtMs : null, nowMs);
+    const calibration = this.calibration.resolve(parsedJobs.flatMap(job => job.quotaCalibrationEvents ?? []), nowMs - 30 * 86400000, nowMs);
     const key = window ? JSON.stringify([window.limitName, window.windowLabel, window.startedAtMs, window.resetsAt]) : '';
     if (window && args.observeUsage) {
       this.attribution.observe(key, window.usedPercent, consolidated.map(job => ({
@@ -228,10 +258,10 @@ export class HistoryJobReader {
     }
     const ledger = this.attribution.read(key);
     const selectedDays = new Map<string, HistoryUsageDay[]>();
-    const selectedStart = periodStart(period, nowMs, window?.startedAtMs ?? null);
-    const allJobs = consolidated.map(({ quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
+    const selectedStart = customStart ?? periodStart(period, nowMs, window?.startedAtMs ?? null);
+    const allJobs = consolidated.map(({ parsedTurns: _turns, usageEvents: _usageEvents, quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
       const days = (period === 'quota' ? quotaDailyUsage ?? [] : dailyUsage ?? [])
-        .filter(day => (!selectedStart || day.date >= localDay(selectedStart)) && day.date <= localDay(nowMs));
+        .filter(day => (!selectedStart || day.date >= localDay(selectedStart)) && day.date <= localDay(selectedEnd));
       selectedDays.set(job.id, days);
       const usage = period === 'lifetime' ? job.totalUsage : period === 'quota' ? job.sinceResetUsage
         : days.reduce<TokenUsage | null>((sum, day) => addUsage(sum, day.usage), null);
@@ -253,6 +283,8 @@ export class HistoryJobReader {
         calibration.costPerPercent, Boolean(job.totalUsage), untimedTokens);
       return { ...job,
         periodMetrics,
+        lifetime20xPercent: equivalent20x({ ...job, sinceResetUsage: job.totalUsage, sinceResetEstimatedCostUsd: job.totalEstimatedCostUsd }, calibration.costPerPercent),
+        lifetime20xIsComplete: job.totalEstimatedCostIsComplete,
         currentAccountEquivalentPercent: accountEquivalent.percent,
         currentAccountEquivalentIsComplete: accountEquivalent.complete,
         estimated20xPercent: available && periodMetrics.usage ? equivalent20x({ ...job, sinceResetUsage: periodMetrics.usage, sinceResetEstimatedCostUsd: periodMetrics.costUsd }, calibration.costPerPercent) : null,
@@ -274,7 +306,7 @@ export class HistoryJobReader {
     return {
       analysis: {
         period, startedAt: selectedStart === null ? null : new Date(selectedStart).toISOString(),
-        endedAt: new Date(nowMs).toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        endedAt: new Date(selectedEnd).toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         days: mergeDays(...jobs.map(job => selectedDays.get(job.id))),
         unpricedTokens: jobs.reduce((sum, job) => sum + (job.periodMetrics?.unpricedTokens ?? 0), 0),
         untimedTokens: jobs.reduce((sum, job) => sum + (job.periodMetrics?.untimedTokens ?? 0), 0)
@@ -303,7 +335,7 @@ export class HistoryJobReader {
     const cached = this.cache.get(file.path);
     const unchanged = Boolean(cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.job?.quotaCalibrationVersion === 5 && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.job?.quotaCalibrationVersion === 6 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -586,7 +618,7 @@ function readSessionNames(indexPath: string): Map<string, string> {
   return names;
 }
 
-function mergeJobsByTask(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
+function mergeJobsByTask(jobs: ParsedHistoryJob[], nowMs: number, usageWindowStartedAtMs: number | null): ParsedHistoryJob[] {
   const merged = new Map<string, ParsedHistoryJob>();
 
   for (const job of jobs) {
@@ -608,7 +640,7 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
         existing.last24HoursEstimatedCostUsd === null) ||
       (Boolean(job.last24HoursUsage) &&
         job.last24HoursEstimatedCostUsd === null);
-    merged.set(job.id, {
+    const combined: ParsedHistoryJob = {
       ...newer,
       dailyUsage: mergeDays(existing.dailyUsage, job.dailyUsage),
       quotaDailyUsage: mergeDays(existing.quotaDailyUsage, job.quotaDailyUsage),
@@ -655,10 +687,84 @@ function mergeJobsByTask(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
       ),
       estimatedUsagePercentSinceReset: null,
       sinceResetUnpricedTokens: (existing.sinceResetUnpricedTokens ?? 0) + (job.sinceResetUnpricedTokens ?? 0)
-    });
+    };
+    if (existing.usageEvents && job.usageEvents) {
+      combined.usageEvents = mergeUsageEvents(existing.usageEvents, job.usageEvents);
+      Object.assign(combined, summarizeUsageEvents(combined.usageEvents, nowMs, usageWindowStartedAtMs));
+    }
+    if (existing.parsedTurns && job.parsedTurns) {
+      combined.parsedTurns = mergeTurns(existing.parsedTurns, job.parsedTurns);
+      combined.runCount = combined.parsedTurns.length;
+      combined.totalDurationMs = combined.parsedTurns.reduce((sum, turn) =>
+        sum + (durationForTurn(turn, nowMs, Date.parse(combined.updatedAt)) ?? 0), 0);
+    }
+    merged.set(job.id, combined);
   }
 
   return [...merged.values()];
+}
+
+function mergeTurns(left: ParsedTurn[], right: ParsedTurn[]): ParsedTurn[] {
+  const grouped = new Map<string, ParsedTurn[]>();
+  for (const turn of [...left, ...right]) grouped.set(turn.id, [...grouped.get(turn.id) ?? [], turn]);
+  const result: ParsedTurn[] = [];
+  for (const turns of grouped.values()) {
+    const starts = new Set(turns.flatMap(turn => turn.startedAtMs === null ? [] : [turn.startedAtMs]));
+    const byStart = new Map<number | null, ParsedTurn>();
+    for (const turn of turns) {
+      // A completion-only fragment can join the one known start of this turn.
+      // If an old log reused an ID, distinct start times remain distinct runs.
+      const start = turn.startedAtMs ?? (starts.size === 1 ? [...starts][0] : null);
+      const old = byStart.get(start);
+      const maximum = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
+      byStart.set(start, { ...turn, startedAtMs: start,
+        completedAtMs: maximum(old?.completedAtMs ?? null, turn.completedAtMs),
+        durationMs: maximum(old?.durationMs ?? null, turn.durationMs) });
+    }
+    result.push(...byStart.values());
+  }
+  return result;
+}
+
+/** Only evidence-identical events are removed; equal-sized responses remain separate. */
+function mergeUsageEvents(left: ParsedUsageEvent[], right: ParsedUsageEvent[]): ParsedUsageEvent[] {
+  const identified = new Map<string, ParsedUsageEvent>();
+  const unidentified: ParsedUsageEvent[] = [];
+  for (const event of [...left, ...right]) {
+    if (!event.id) { unidentified.push(event); continue; }
+    const previous = identified.get(event.id);
+    // A complete rollout can prove that a fragment starts with a rate-limit
+    // refresh rather than a new response. Preserve that stronger evidence.
+    if (!previous || (!previous.duplicate && event.duplicate) ||
+        (!previous.duplicate && !event.duplicate && previous.cost === null && event.cost !== null)) {
+      identified.set(event.id, event);
+    }
+  }
+  return [...identified.values(), ...unidentified];
+}
+
+function summarizeUsageEvents(events: ParsedUsageEvent[], nowMs: number, windowStart: number | null) {
+  const usage = events.filter(event => !event.duplicate);
+  const recent = usage.filter(event => event.at !== null && event.at >= nowMs - ROLLING_USAGE_WINDOW_MS);
+  const quota = usage.filter(event => windowStart !== null && event.at !== null && event.at >= windowStart);
+  const sumUsage = (values: ParsedUsageEvent[]) => values.reduce<TokenUsage | null>((sum, event) => addUsage(sum, event.usage), null);
+  const sumCost = (values: ParsedUsageEvent[]) => values.some(event => event.cost !== null)
+    ? values.reduce((sum, event) => sum + (event.cost ?? 0), 0) : null;
+  const unpriced = (values: ParsedUsageEvent[]) => values.reduce((sum, event) => sum + (event.cost === null ? event.usage.totalTokens : 0), 0);
+  const days = (values: ParsedUsageEvent[]) => mergeDays(values.filter(event => event.at !== null && event.at <= nowMs).map(event => ({
+    date: localDay(event.at!), usage: event.usage, costUsd: event.cost,
+    unpricedTokens: event.cost === null ? event.usage.totalTokens : 0
+  })));
+  return {
+    totalUsage: sumUsage(usage), totalEstimatedCostUsd: sumCost(usage),
+    totalEstimatedCostIsComplete: usage.length > 0 && usage.every(event => event.cost !== null),
+    last24HoursUsage: sumUsage(recent),
+    last24HoursEstimatedCostUsd: recent.every(event => event.cost !== null) ? sumCost(recent) : null,
+    sinceResetUsage: sumUsage(quota), sinceResetEstimatedCostUsd: sumCost(quota),
+    sinceResetUnpricedTokens: unpriced(quota), totalUnpricedTokens: unpriced(usage),
+    untimedTokens: usage.reduce((sum, event) => sum + (event.at === null ? event.usage.totalTokens : 0), 0),
+    dailyUsage: days(usage), quotaDailyUsage: days(quota)
+  };
 }
 
 function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] {
@@ -718,9 +824,8 @@ function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] 
     consolidatedIds.add(job.id);
   }
 
-  return [...jobsById.values()].filter(
-    (job) => !job.isSubagent && !consolidatedIds.has(job.id)
-  );
+  return [...jobsById.values()].filter(job => !consolidatedIds.has(job.id))
+    .map(job => job.isSubagent ? { ...job, orphanedSubagent: true } : job);
 }
 
 function findPrincipalAncestor(
@@ -853,6 +958,8 @@ export function parseHistorySessionFile(args: {
   let hasPricedSinceResetUsage = false;
   let latestTurnId: string | null = null;
   const quotaCalibrationEvents: QuotaCalibrationEvent[] = [];
+  const usageEvents: ParsedUsageEvent[] = [];
+  const usageEventOccurrences = new Map<string, number>();
   const quotaCalibrationEventIds = new Set<string>();
   const dailyUsage = new Map<string, HistoryUsageDay>();
   const quotaDailyUsage = new Map<string, HistoryUsageDay>();
@@ -989,6 +1096,15 @@ export function parseHistorySessionFile(args: {
       const cumulative = normalizeTokenUsage(info?.total_token_usage);
       const cumulativeKey = cumulative ? JSON.stringify(cumulative) : null;
       const duplicate = Boolean(increment && cumulativeKey && cumulativeKey === previousTokenUsageKey);
+      if (increment) {
+        // Timestamp + counters identify copies independently of model context or
+        // rate-limit metadata, which may be missing from a partial rollout.
+        const key = recordTimestampMs === null ? null : JSON.stringify([recordTimestampMs, increment, cumulative]);
+        const occurrence = key === null ? 0 : (usageEventOccurrences.get(key) ?? 0) + 1;
+        if (key !== null) usageEventOccurrences.set(key, occurrence);
+        usageEvents.push({ id: key === null ? null : createHash('sha256').update(`${key}:${occurrence}`).digest('hex'),
+          at: recordTimestampMs, usage: increment, cost: estimateApiEquivalentCost(increment, activeModel), duplicate });
+      }
       if (recordTimestampMs !== null && recordTimestampMs <= args.nowMs) {
         const sampleId = calibrationSampleId(sessionId, recordTimestampMs, increment, cumulative, payload?.rate_limits);
         // An exact duplicate must not replace the original sample with the zero
@@ -1082,8 +1198,10 @@ export function parseHistorySessionFile(args: {
 
   return {
     id: sessionId,
+    usageEvents,
+    parsedTurns: sortedTurns,
     quotaCalibrationEvents,
-    quotaCalibrationVersion: 5,
+    quotaCalibrationVersion: 6,
     dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
     archived: false,
     parentThreadId,

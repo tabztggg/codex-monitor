@@ -1,3 +1,3 @@
 @echo off
 setlocal
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\Uninstall-CodexProcessTrigger.ps1"
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\Uninstall-CodexProcessTrigger.ps1"

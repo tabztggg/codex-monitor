@@ -18,11 +18,12 @@ describe('scoped manual history rebuild', () => {
     const fetchPage = vi.spyOn(api, 'fetchHistoryJobs')
       .mockResolvedValueOnce({ ...emptyPage(), data: [{ id: 'first' } as HistoryJob], nextCursor: 'next' })
       .mockResolvedValueOnce({ ...emptyPage(), data: [{ id: 'second' } as HistoryJob] });
-    const loaded = await loadHistoryPages({ mode: 'recent', period: 'quota', signal: new AbortController().signal, forceRefresh: true });
+    const loaded = await loadHistoryPages({ mode: 'recent', period: 'quota', accountId: 'selected-account', signal: new AbortController().signal, forceRefresh: true });
     expect(fetchPage.mock.calls.map(([request]) => request.forceRefresh)).toEqual([true, false]);
     expect(fetchPage.mock.calls.map(([request]) => request.archiveMode)).toEqual(['recent', 'recent']);
     expect(loaded.jobs.map(job => job.id)).toEqual(['first', 'second']);
     expect(loaded.archives.included).toBe(30);
+    expect(fetchPage.mock.calls.map(([request]) => request.accountId)).toEqual(['selected-account', 'selected-account']);
   });
 
   it('ordinary refresh and different time ranges do not request a rebuild', async () => {
@@ -101,4 +102,17 @@ describe('history metadata reuse', () => {
     expect(client.ensureStarted).toHaveBeenCalledTimes(2);
     expect(reader.listJobs.mock.calls[2][0].metadataById?.has('recovered')).toBe(true);
   });
+});
+
+it('uses the selected account window and rejects unknown selections', async () => {
+  const client = new EventEmitter();
+  const listJobs = vi.fn().mockReturnValue(emptyPage());
+  const service = new MonitorService(client as never, { listJobs } as never);
+  const internal = service as any;
+  const usage = { account: { email: 'selected@example.com' }, limits: [{id:'codex', secondary: {usedPercent:12, windowDurationMins:10080, resetsAt:'2026-10-01T00:00:00Z', label:'Weekly'}}] };
+  internal.accountUsageHistory = { list: () => [{id:'selected-account', current:false, usage}] };
+  internal.getHistoryThreadMetadata = async () => new Map();
+  await service.listHistoryJobs({accountId:'selected-account'});
+  expect(listJobs.mock.calls[0][0]).toMatchObject({account:usage.account, observeUsage:false, usageWindow:{usedPercent:12,resetsAt:'2026-10-01T00:00:00Z'}});
+  await expect(service.listHistoryJobs({accountId:'unknown'})).rejects.toThrow('Unknown account selection');
 });

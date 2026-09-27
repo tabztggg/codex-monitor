@@ -11,12 +11,12 @@ import { TurnInspector } from '../../../web/src/components/TurnInspector';
 import { HistoryPeriodScope } from '../../../web/src/components/HistoryPanel';
 import { TaskInsights } from '../../../web/src/components/TaskInsights';
 
-const testState = vi.hoisted(() => ({ language: 'zh' as Language, loading: false, archiveMode: 'recent' as 'recent' | 'all', error: null as string | null, period: 'quota' as 'quota' | 'today' }));
+const testState = vi.hoisted(() => ({ language: 'zh' as Language, loading: false, archiveMode: 'recent' as 'recent' | 'all', error: null as string | null, period: 'quota' as 'quota' | 'today', allocation: null as HistoryUsageAllocation | null }));
 vi.mock('../../../web/src/LanguageContext', () => ({
   useI18n: () => ({ ...createI18n(testState.language), setLanguage: () => {} }),
   LanguageSwitch: () => null
 }));
-vi.mock('../../../web/src/useTaskHistory', () => ({ useTaskHistory: () => ({ jobs: [job], allocation: null, analysis: { period: testState.period }, updatedAt: Date.parse('2026-09-22T00:00:00Z'), error: testState.error, archives: { mode: testState.archiveMode, total: 100, included: testState.archiveMode === 'all' ? 100 : 30 }, loading: testState.loading, requestedMode: testState.loading || testState.error ? 'all' : testState.archiveMode, loadArchives: () => {} }) }));
+vi.mock('../../../web/src/useTaskHistory', () => ({ useTaskHistory: () => ({ jobs: [job], allocation: testState.allocation, analysis: { period: testState.period }, updatedAt: Date.parse('2026-09-22T00:00:00Z'), error: testState.error, archives: { mode: testState.archiveMode, total: 100, included: testState.archiveMode === 'all' ? 100 : 30 }, loading: testState.loading, requestedMode: testState.loading || testState.error ? 'all' : testState.archiveMode, loadArchives: () => {} }) }));
 
 const job = { id: 'task', name: '用户任务 Original', archived: true, archivedAt: '2026-09-21T00:00:00Z',
   project: { id: 'project', name: '用户项目 Original' }, updatedAt: '2026-09-21T00:00:00Z',
@@ -34,12 +34,123 @@ const turn = { id: 'turn', status: 'completed', startedAt: '2026-09-22T02:00:00Z
 const item = { id: 'item', type: 'agentMessage', title: 'Agent message', text: 'User input 原始对话文字', toolName: 'custom_tool' } as MonitorItem;
 
 describe('full interface language rendering', () => {
+  it('distinguishes a manual normalization target from observed calibration samples', () => {
+    const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page: 'trends' })));
+    try {
+      for (const language of ['zh', 'en'] as const) {
+        testState.language = language;
+        testState.allocation = { equivalent20x: { source: 'manual', costPerPercentUsd: 2, calibrationQuotaPercent: 100 } } as HistoryUsageAllocation;
+        const manual = render();
+        expect(manual).toContain(language === 'zh' ? '<dt>手动归一化目标</dt><dd>100%</dd>' : '<dt>Manual normalization target</dt><dd>100%</dd>');
+        expect(manual).not.toContain(language === 'zh' ? '<dt>校准样本</dt>' : '<dt>Calibration observations</dt>');
+        for (const source of ['current', 'previous', 'unavailable'] as const) {
+          testState.allocation.equivalent20x = { source, costPerPercentUsd: 2, calibrationQuotaPercent: 12 };
+          const automatic = render();
+          expect(automatic).toContain(language === 'zh' ? '<dt>校准样本</dt><dd>12 个百分点</dd>' : '<dt>Calibration observations</dt><dd>12 percentage points</dd>');
+          expect(automatic).not.toContain(language === 'zh' ? '<dt>手动归一化目标</dt>' : '<dt>Manual normalization target</dt>');
+        }
+      }
+    } finally { testState.allocation = null; }
+  });
+  it('explains why an unmerged subtask is listed separately', () => {
+    job.orphanedSubagent = true;
+    try {
+      const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page: 'tasks' })));
+      expect(html).toContain('父任务不可用');
+    } finally { delete job.orphanedSubagent; }
+  });
+  it('makes range and archive scope visible on every page without suggesting a single-account trend', () => {
+    for (const page of ['overview', 'tasks', 'trends'] as const) {
+      const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page })));
+      expect(html).toContain('归档：最近 30 / 共 100 个');
+      if (page === 'trends') expect(html).not.toContain('account-page-picker');
+      if (page === 'tasks') {
+        expect(html).toContain('时间范围影响费用和 Token');
+        expect(html).toContain('今日有活动');
+        const head = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
+        expect(head).toContain('所选账号 · 本周期');
+        expect(head).toContain('跨账号 · 任务累计');
+      }
+    }
+  });
+
+  it('keeps quota percentages above 100 and scales both rankings consistently', () => {
+    testState.language = 'en';
+    const jobs = [
+      { ...job, id: 'a', name: 'First', project: { id: 'a', name: 'A' }, estimated20xPercent: 300, estimated20xIsComplete: true },
+      { ...job, id: 'b', name: 'Second', project: { id: 'b', name: 'B' }, estimated20xPercent: 150, estimated20xIsComplete: true }
+    ];
+    const html = renderToStaticMarkup(createElement(TaskInsights, { jobs, analysis: null, allocation: null, periodLabel: 'Today', section: 'trend', expanded: true }));
+    expect(html).toContain('300.0%');
+    expect(html).toContain('150.0%');
+    expect(html.match(/width:50%/g)).toHaveLength(2);
+    expect(html).toContain('Full bar = 300.0% quota');
+  });
+
+  it('marks daily estimates as partial when records cannot be assigned to a date', () => {
+    testState.language = 'en';
+    const html = renderToStaticMarkup(createElement(TaskInsights, { jobs: [], analysis: {
+      period: 'today', startedAt: null, endedAt: '2026-09-27T01:00:00Z', timeZone: 'UTC', unpricedTokens: 0, untimedTokens: 50,
+      days: [{ date: '2026-09-27', costUsd: 10, usage: job.totalUsage!, unpricedTokens: 0 }]
+    }, allocation: { equivalent20x: { costPerPercentUsd: 2 } } as HistoryUsageAllocation, periodLabel: 'Today', section: 'trend', expanded: true }));
+    expect(html).toContain('5.0%+');
+    expect(html).toContain('Some records have no date');
+  });
+
+  it('renders separate overview, tasks and trends pages', () => {
+    const renderPage = (page: 'overview' | 'tasks' | 'trends') => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page })));
+    const overview = renderPage('overview');
+    expect(overview).toContain('account-stack');
+    expect(overview).toContain('scope-summary');
+    expect(overview).not.toContain('class="task-table"');
+    expect(overview).not.toContain('class="insights-panel"');
+    const tasks = renderPage('tasks');
+    expect(tasks).toContain('class="task-table"');
+    expect(tasks).not.toContain('account-stack');
+    expect(tasks).not.toContain('scope-summary');
+    const trends = renderPage('trends');
+    expect(trends).toContain('class="insights-panel" open');
+    expect(trends).toContain('rankings-grid');
+    expect(trends).toContain('estimation-basis');
+    expect(trends).not.toContain('class="task-table"');
+  });
+  it('shows only current usage in the overview while keeping saved accounts in the task picker', () => {
+    const makeUsage = (email: string, used: number) => {
+      const limit = { id: 'codex', primary: null, secondary: { label: 'Weekly', usedPercent: used, remainingPercent: 100 - used, windowDurationMins: 10080, resetsAt: '2026-09-29T00:00:00Z' } };
+      return { status: 'available', updatedAt: '2026-09-22T00:00:00Z', account: { type: 'chatgpt', email, planType: 'pro' }, limits: [limit], primaryLimit: limit };
+    };
+    const live = makeUsage('live@example.com', 20);
+    const old = makeUsage('history@example.com', 75);
+    const data = { ...snapshot, codexUsage: live, accountUsages: [{ id: 'live', current: true, usage: makeUsage('outdated@example.com', 40) }, { id: 'old', current: false, usage: old }] } as MonitorSnapshot;
+    testState.language = 'en';
+    const renderPage = (page: 'overview' | 'tasks') => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot: data, nowMs: Date.parse('2026-09-22T01:00:00Z'), connectionLabel: 'live', page })));
+    const html = renderPage('overview');
+    expect(html).toContain('live@example.com');
+    expect(html).not.toContain('outdated@example.com');
+    expect(html).not.toContain('history@example.com');
+    expect(html).toContain('Quota used 20%');
+    expect(html).toContain('Quota period');
+    expect(html).toContain('dateTime="2026-09-22T00:00:00.000Z"');
+    expect(html).toContain('dateTime="2026-09-29T00:00:00Z"');
+    expect(html).toContain('class="account-updated-at"');
+    expect(html).toContain('80%');
+    expect(html.match(/class="surface global-quota account-usage-row/g)).toHaveLength(1);
+    expect(html).not.toContain('This account is not being refreshed');
+    expect(html).not.toContain('class="account-radio"');
+    expect(html).not.toContain('account-page-picker');
+    const tasks = renderPage('tasks');
+    expect(tasks).toContain('account-page-picker');
+    expect(tasks).toContain('<option value="" selected="">live@example.com</option>');
+    expect(tasks).toContain('<option value="old">history@example.com</option>');
+    expect(tasks).not.toContain('account-usage-row');
+  });
+
   it('shows both equivalents in one cell without losing partial, zero, or missing values', () => {
-    const original = { current: job.currentAccountEquivalentPercent, across: job.estimated20xPercent, complete: job.estimated20xIsComplete };
+    const original = { current: job.currentAccountEquivalentPercent, across: job.lifetime20xPercent, complete: job.lifetime20xIsComplete };
     try {
       job.currentAccountEquivalentPercent = 0;
-      job.estimated20xPercent = 125.6;
-      job.estimated20xIsComplete = false;
+      job.lifetime20xPercent = 125.6;
+      job.lifetime20xIsComplete = false;
       const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
       const html = render();
       const table = html.slice(html.indexOf('<table'), html.indexOf('</table>'));
@@ -48,13 +159,13 @@ describe('full interface language rendering', () => {
       expect(table).toContain('125.6%+');
       expect(table).toContain('class="equivalent-divider"> / </span>');
       expect(table).not.toContain('class="metric-equivalent20x');
-      job.estimated20xPercent = null;
+      job.lifetime20xPercent = null;
       expect(render()).toContain('等待校准');
       expect(render()).toContain('0.0%+');
     } finally {
       job.currentAccountEquivalentPercent = original.current;
-      job.estimated20xPercent = original.across;
-      job.estimated20xIsComplete = original.complete;
+      job.lifetime20xPercent = original.across;
+      job.lifetime20xIsComplete = original.complete;
     }
   });
   beforeEach(() => { testState.language = 'zh'; testState.loading = false; testState.archiveMode = 'recent'; testState.error = null; testState.period = 'quota'; });
@@ -64,10 +175,10 @@ describe('full interface language rendering', () => {
       testState.period = period;
       const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
       const table = html.slice(html.indexOf('<table'), html.indexOf('</table>'));
-      expect(table).toContain('当前账号占比');
+      expect(table).toContain('所选账号占比');
       expect(table).toContain('6.7%+');
       expect(table).not.toContain('>2.0%');
-      expect(table).toContain('当前账号 · 本周期');
+      expect(table).toContain('所选账号 · 本周期');
       expect(html).toContain('按周额度重置时间匹配估算');
     }
   });
@@ -91,7 +202,7 @@ describe('full interface language rendering', () => {
       const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot: data, nowMs: Date.parse('2026-09-22T01:00:00Z'), connectionLabel: 'live' })));
       expect(html).toContain('80%');
       expect(html).toContain('old@example.com');
-      expect(html).toContain(language === 'en' ? 'Last confirmed account' : '上次确认的账号');
+      expect(html).toContain(language === 'en' ? 'Last recorded' : '最近记录');
       expect(html).toContain(language === 'en' ? 'Retrying automatically.' : '正在自动重试');
     }
   });
@@ -134,7 +245,7 @@ describe('full interface language rendering', () => {
     expect(zh).toContain('用量所属账号');
     expect(zh).toContain('账号未知');
     expect(zh).toContain('Monitor 使用的 Codex CLI 登录账号');
-    expect(zh).toContain('当前账号占比');
+    expect(zh).toContain('所选账号占比');
     expect(zh).toContain('已归档');
     expect(zh).toContain('1万');
     expect(zh).toContain('倒计时不会让这台电脑真正关机');
@@ -144,36 +255,36 @@ describe('full interface language rendering', () => {
     expect(zh).toContain('用户项目 Original'); // The separate project ranking is available even with table grouping off.
     expect(zh).toContain('统计所有归档');
     expect(zh).toContain('当前仅统计最近 30 个归档任务。');
-    expect(zh.match(/class="table-sort-button"/g)).toHaveLength(6);
+    expect(zh.match(/class="table-sort-button"/g)).toHaveLength(7);
     expect(zh).toContain('20x 等效消耗');
-    expect(zh).toContain('跨账号 · 本周期');
+    expect(zh).toContain('跨账号 · 任务累计');
     expect(zh).toContain('统计时间范围');
     expect(zh).toContain('等效消耗对比套餐');
-    expect(zh).toContain('时间范围影响跨账号等效消耗、费用、Token');
+    expect(zh).toContain('时间范围影响跨账号汇总等效消耗、费用、Token');
     expect(zh).toContain('value="pro5x"');
     expect(zh).toContain('value="plus"');
     expect(zh).toContain('aria-sort="descending"');
     expect(zh).toContain('按任务排序：升序');
-    expect(zh).toContain('value="usage:desc" selected');
+    expect(zh).toContain('value="equivalent20x:desc" selected');
     testState.language = 'en';
     const en = render();
     expect(en).toContain('Overall Codex usage');
-    expect(en).toContain('20x equivalent usage · Current account');
+    expect(en).toContain('20x equivalent usage · Selected account');
     expect(en).toContain('20x equivalent usage');
-    expect(en).toContain('Current account / Across accounts');
+    expect(en).toContain('Selected account · This period / Across accounts · Lifetime');
     expect(en).toContain('Equivalent usage comparison');
     expect(en).toContain('Statistics time range');
     expect(en).toContain('Archived');
     expect(en).toContain('10K');
     expect(en).toContain('Countdown will not shut down this computer');
     expect(en).toContain('用户任务 Original');
-    expect(en).not.toContain('当前账号占比');
+    expect(en).not.toContain('所选账号占比');
     expect(en).toContain('Calculate all archives');
     expect(en).toContain('aria-pressed="false">Group by project');
     expect(en).not.toContain('class="project-group-row"');
     expect(en).toContain('Statistics include only the 30 most recently archived tasks.');
     expect(en).toContain('Sort Task: Ascending');
-    expect(en).toContain('Sort Pro 20x equivalent usage · Current account: Ascending');
+    expect(en).toContain('Sort Pro 20x equivalent usage · Across accounts · Lifetime: Ascending');
   });
 
   it('localizes the task tree, transcript labels and inspector while preserving original messages', () => {

@@ -2,9 +2,36 @@ import { useEffect, useRef, useState } from 'react';
 import type { HistoryAnalysis, HistoryPeriod, HistoryArchiveMode, HistoryArchiveScope, HistoryJob, HistoryUsageAllocation } from '../../shared/monitor';
 import { api } from './api';
 
+interface TaskHistoryState {
+  accountKey: string;
+  accountId?: string;
+  analysis: HistoryAnalysis | null;
+  nextRefreshAt: number | null;
+  jobs: HistoryJob[];
+  allocation: HistoryUsageAllocation | null;
+  updatedAt: number | null;
+  error: string | null;
+  archives: HistoryArchiveScope;
+  loading: boolean;
+}
+
+export function historyAccountKey(accountReadyKey: string, accountId?: string): string {
+  return JSON.stringify([accountReadyKey, accountId ?? null]);
+}
+
+function emptyHistoryState(accountKey: string, mode: HistoryArchiveMode, accountId?: string): TaskHistoryState {
+  return { accountKey, accountId, jobs: [], allocation: null, analysis: null, nextRefreshAt: null, updatedAt: null,
+    error: null, archives: { mode, total: 0, included: 0 }, loading: true };
+}
+
+/** A new account must never display the previous account's data or failure state. */
+export function historyStateForAccount(state: TaskHistoryState, accountKey: string, mode: HistoryArchiveMode, accountId?: string): TaskHistoryState {
+  return state.accountKey === accountKey ? state : emptyHistoryState(accountKey, mode, accountId);
+}
+
 /** A rebuild applies once to the selected scope; remaining pages reuse it. */
 export async function loadHistoryPages(args: {
-  mode: HistoryArchiveMode; period: HistoryPeriod; signal: AbortSignal; forceRefresh?: boolean;
+  mode: HistoryArchiveMode; period: HistoryPeriod; accountId?: string; range?: {from: string; to: string}; signal: AbortSignal; forceRefresh?: boolean;
 }) {
   const jobs = new Map<string, HistoryJob>();
   let cursor: string | null = null;
@@ -15,7 +42,7 @@ export async function loadHistoryPages(args: {
   do {
     args.signal.throwIfAborted();
     const response = await api.fetchHistoryJobs({ sourceKinds: [], cursor, limit: 100, sortKey: 'createdAt', sortDirection: 'asc',
-      archiveMode: args.mode, period: args.period, signal: args.signal, forceRefresh: args.forceRefresh === true && cursor === null });
+      archiveMode: args.mode, period: args.period, accountId: args.accountId, range: args.range, signal: args.signal, forceRefresh: args.forceRefresh === true && cursor === null });
     args.signal.throwIfAborted();
     response.data.forEach(job => jobs.set(job.id, job));
     allocation = response.usageAllocation;
@@ -29,51 +56,45 @@ export async function loadHistoryPages(args: {
 }
 
 /** Load only the requested archive scope; publish complete pages atomically. */
-export function useTaskHistory(refreshIntervalMs = 30_000, period: HistoryPeriod = 'quota', accountReadyKey = '') {
+export function useTaskHistory(refreshIntervalMs = 30_000, period: HistoryPeriod = 'quota', accountReadyKey = '', accountId?: string, range?: {from: string; to: string}) {
   const [request, setRequest] = useState<{ mode: HistoryArchiveMode; version: number }>({ mode: 'recent', version: 0 });
   const rebuildPending = useRef(false);
-  const [state, setState] = useState<{
-    analysis: HistoryAnalysis | null;
-    nextRefreshAt: number | null;
-    jobs: HistoryJob[];
-    allocation: HistoryUsageAllocation | null;
-    updatedAt: number | null;
-    error: string | null;
-    archives: HistoryArchiveScope;
-    loading: boolean;
-  }>({ jobs: [], allocation: null, analysis: null, nextRefreshAt: null, updatedAt: null, error: null, archives: { mode: 'recent', total: 0, included: 0 }, loading: true });
+  const accountKey = historyAccountKey(accountReadyKey, accountId);
+  const [state, setState] = useState<TaskHistoryState>(() => emptyHistoryState(accountKey, 'recent', accountId));
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
     async function refresh() {
+      if (controller.signal.aborted) return;
       let succeeded = false;
       const forceRefresh = rebuildPending.current;
       rebuildPending.current = false;
-      setState(previous => ({ ...previous, loading: true, nextRefreshAt: null, error: null }));
+      setState(previous => ({ ...historyStateForAccount(previous, accountKey, request.mode, accountId), loading: true, nextRefreshAt: null, error: null }));
       try {
-        const loaded = await loadHistoryPages({ mode: request.mode, period, signal: controller.signal, forceRefresh });
+        const loaded = await loadHistoryPages({ mode: request.mode, period, accountId, range, signal: controller.signal, forceRefresh });
         if (controller.signal.aborted) return;
         succeeded = true;
-        setState({ ...loaded, loading: false, nextRefreshAt: null, updatedAt: Date.now(), error: null });
+        setState(previous => controller.signal.aborted ? previous : { ...loaded, accountKey, accountId, loading: false, nextRefreshAt: null, updatedAt: Date.now(), error: null });
       } catch (error) {
-        if (!controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : String(error) }));
+        if (!controller.signal.aborted) setState(previous => controller.signal.aborted ? previous : ({ ...historyStateForAccount(previous, accountKey, request.mode, accountId), loading: false, error: error instanceof Error ? error.message : String(error) }));
       } finally {
         if (!controller.signal.aborted && (succeeded || request.mode === 'recent')) {
           const nextRefreshAt = Date.now() + refreshIntervalMs;
-          setState(previous => ({ ...previous, nextRefreshAt }));
+          setState(previous => controller.signal.aborted ? previous : ({ ...previous, nextRefreshAt }));
           timer = window.setTimeout(refresh, refreshIntervalMs);
         }
       }
     }
     void refresh();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [request, refreshIntervalMs, period, accountReadyKey]);
-  return { ...state, requestedMode: request.mode, refreshNow: () => {
-    if (state.loading) return;
+  }, [request, refreshIntervalMs, period, accountKey, accountId, range]);
+  const visibleState = historyStateForAccount(state, accountKey, request.mode, accountId);
+  return { ...visibleState, requestedMode: request.mode, refreshNow: () => {
+    if (visibleState.loading) return;
     setState(previous => ({ ...previous, loading: true, nextRefreshAt: null }));
     setRequest(previous => ({ ...previous, version: previous.version + 1 }));
   }, rebuildStatistics: () => {
-    if (state.loading) return;
+    if (visibleState.loading) return;
     rebuildPending.current = true;
     setState(previous => ({ ...previous, loading: true, nextRefreshAt: null }));
     setRequest(previous => ({ ...previous, version: previous.version + 1 }));

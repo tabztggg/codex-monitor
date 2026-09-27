@@ -14,8 +14,13 @@ internal static class StandaloneMonitorHost {
         throw new FileNotFoundException("Monitor installation is incomplete.");
       Directory.CreateDirectory(logs);
       MonitorProcessGroup.OwnCurrentProcess();
-      string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
-        @"WindowsPowerShell\v1.0\powershell.exe");
+      string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+        @"PowerShell\7\pwsh.exe");
+      if (!File.Exists(powershell))
+        powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+          @".cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe");
+      if (!File.Exists(powershell))
+        throw new FileNotFoundException("PowerShell 7 was not found.", powershell);
       using (var child = MonitorBackgroundProcess.Start(powershell,
           "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + runner + "\"", root,
           Path.Combine(logs, "host-stdout.log"), Path.Combine(logs, "host-stderr.log"))) {

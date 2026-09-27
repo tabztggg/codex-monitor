@@ -17,8 +17,8 @@ If WScript.Arguments.Count > 0 Then
   If LCase(WScript.Arguments(0)) = "nobrowser" Then command = command & " -NoBrowser"
 End If
 
-command = Chr(34) & shell.ExpandEnvironmentStrings("%SystemRoot%") & _
-  "\System32\WindowsPowerShell\v1.0\powershell.exe" & Chr(34) & _
+command = Chr(34) & shell.ExpandEnvironmentStrings("%ProgramFiles%") & _
+  "\PowerShell\7\pwsh.exe" & Chr(34) & _
   " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & _
   Chr(34) & script & Chr(34) & command
 result = shell.Run(command, 0, True)

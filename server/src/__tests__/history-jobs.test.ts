@@ -819,3 +819,12 @@ function tokenCountEvent(
     }
   };
 }
+
+it.each([['gpt-6-luna',0.06],['gpt-6-sol',1.2]])('prices %s standard input and output', (model, cost) => {
+ const job=parseHistorySessionFile({sessionId:null,updatedAt:'2026-09-26T00:00:00Z',nowMs:Date.parse('2026-09-26T00:00:00Z'),fileContent:[
+ {type:'session_meta',payload:{id:'pricing'}}, {type:'turn_context',payload:{model}},
+ {timestamp:'2026-09-26T00:00:00Z',type:'event_msg',payload:{type:'token_count',info:{last_token_usage:{input_tokens:100000,cached_input_tokens:0,output_tokens:100000,total_tokens:200000}}}}
+ ].map(x=>JSON.stringify(x)).join('\n')});
+ expect(job?.totalEstimatedCostUsd).toBeCloseTo(Number(cost));
+ expect(job?.totalEstimatedCostIsComplete).toBe(true);
+});

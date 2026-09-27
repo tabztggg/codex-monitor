@@ -63,10 +63,14 @@ describe('explicit table layouts', () => {
     expect(html).toContain('value="full" selected');
     expect(tableHeader(html).match(/scope="col"/g)).toHaveLength(6);
     expect(html).toContain('<legend>Visible columns</legend>');
-    expect(tableHeader(html)).toContain('Pro 20x equiv.');
-    expect(tableHeader(html)).toContain('Current account / Across accounts');
+    expect(tableHeader(html)).toContain('Quota usage (Pro 20x equivalent)');
+    expect(tableHeader(html)).toContain('Selected account · This period');
+    expect(tableHeader(html)).toContain('Across accounts · Lifetime');
+    expect(tableHeader(html)).toContain('Sort Pro 20x equivalent usage · Selected account · This period: Descending');
     expect(html).toContain('value="usage:desc"');
-    expect(html).toContain('value="equivalent20x:desc"');
+    expect(html).toContain('value="equivalent20x:desc" selected');
+    expect(tableHeader(html)).toContain('Sort Pro 20x equivalent usage · Across accounts · Lifetime: Ascending');
+    expect(tableHeader(html)).toContain('aria-sort="descending"');
     expect(html).not.toContain('table-metric-choice');
   });
 

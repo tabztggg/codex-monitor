@@ -1,116 +1,94 @@
 # Codex Monitor
 
-Windows deployment: run `powershell -File scripts/Install-StandaloneMonitor.ps1` after building. It installs a desktop shortcut and a windowless logon task, independent of Codex. The previous Monitor hook is backed up and removed.
-
-Expand a task to view official lifetime quota usage and model, effort and speed breakdowns, including subtasks, with the query account and data cutoff. These totals are separate from current-period estimates. This uses the local Codex ChatGPT login and the desktop app's private query endpoint (which may change), plus a read-only thread index (Node.js 22.13+ recommended). It fetches only expanded tasks, caches for five minutes, and retains the same account's last good data on failure. `.cache/official-usage` contains no login credentials. It does not overwrite calibration parameters.
-
 **See where your Codex usage goes — by task, project, and time range.**
 
 [简体中文](README.md) | English
 
-A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor).
-This is an unofficial community project, not an OpenAI product or billing system.
+A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.4](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.4)** · Multi-account usage, service controls and simplified Windows deployment. See the [changelog](CHANGELOG.md).
+**[v0.4.5](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.5)** · Three dedicated pages, clearer metric scopes, and fixes for missing and duplicate usage. [Changelog](CHANGELOG.md)
 
-![Codex Monitor English dashboard: account quota, cross-account estimates and task details](assets/screenshots/overview-en.jpg)
+![Usage overview: current account quota, range totals and recent activity](assets/screenshots/v0.4.5-overview-en.png)
 
-Screenshots show the actual v0.4.4 interface with fictional accounts, tasks and usage.
+Screenshots show the actual v0.4.5 build with fictional accounts, tasks and usage.
 
 <details>
-<summary>More screenshots: project totals and daily trends</summary>
+<summary>Task details and trends</summary>
 
-![Project groups and usage totals](assets/screenshots/projects-en.jpg)
+![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.5-tasks-en.png)
 
-![Daily trends and project ranking](assets/screenshots/trends-en.jpg)
+![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.5-trends-en.png)
 
 </details>
 
-## Features
+## Three pages
 
-- **Task statistics:** recorded tokens, estimated costs, and one equivalent-usage column showing current account / across accounts. Project totals use the same pair; either value can be used for sorting.
-- **Cross-account comparison:** express local usage as Pro 20x, Pro 5x or Plus weekly allowances; totals can exceed 100%.
-- **Projects and trends:** optional project grouping with totals, daily trends and rankings; Today, Last 7 days, Current quota period or Task lifetime.
-- **Archives:** read unarchived tasks and the 30 most recently archived root tasks, including attributable children. Choose **Calculate all archives** to read more.
-- **Tables and languages:** search, filter, sort and choose columns. Switch Chinese/English; new visitors start in English and the choice is remembered.
-- **Incremental refresh:** reuse unchanged logs; refresh every 30 seconds, 1, 2, 5 or 10 minutes. Outages retain existing data and retries gradually slow down.
+- **Usage overview `/`:** the current login's quota, full quota period and update time; cross-account totals for the selected range, token breakdown, top 3 tasks and current activity.
+- **Task details `/tasks`:** search, filters, sorting, column settings and project totals. Browse historical account records **without changing the Codex login**. Expand a task for official lifetime quota and model, effort and speed breakdowns.
+- **Trends & methodology `/trends`:** daily cost/tokens, cross-account quota rankings for the selected range, data coverage and estimation details.
+
+By default, read unarchived tasks and the 30 most recently archived root tasks, including attributable children. **Calculate all archives** expands that scope. Incremental refresh supports 30 seconds or 1/2/5/10 minutes and retains existing values during outages. Chinese/English selection is remembered; new visitors start in English.
 
 ## Quick start
 
-On Windows, double-click **Codex Monitor.vbs** in the repository root (Node.js and Codex required). First launch installs dependencies, builds, deploys, creates a desktop shortcut, and enables logon startup. Later launches open the dashboard and restore a missing shortcut. Update with `wscript.exe "Codex Monitor.vbs" deploy`. Helpers are in `scripts/`; legacy entries are in `scripts/legacy/`.
-
-Requires **Node.js >=20 (22+ recommended)**, npm and an authenticated Codex installation supporting `codex app-server`.
+Requires **Node.js 22.13+ (recommended)**, npm and an authenticated Codex installation supporting `codex app-server`. Windows also requires **PowerShell 7**. Basic operation supports Node.js 20; official task details need a newer version capable of reading the thread index.
 
 ```bash
 git clone https://github.com/tabztggg/codex-monitor.git
 cd codex-monitor
-npm ci
-npm run build
 ```
 
-Windows PowerShell:
+**Windows:** double-click **Codex Monitor.vbs** in the repository root. First launch installs dependencies, builds, deploys, creates a desktop shortcut and enables windowless logon startup. Later launches start/open the dashboard. To update the installed copy:
 
 ```powershell
-$env:CODEX_MONITOR_HOST = '127.0.0.1'
-$env:CODEX_MONITOR_DRY_RUN = '1'
-npm start
+wscript.exe "Codex Monitor.vbs" deploy
 ```
 
-macOS / Linux:
+Monitor runs independently of Codex. The top-right buttons restart or stop Monitor; after stopping, use the desktop shortcut to start it again. [Windows deployment](docs/standalone-windows.md)
+
+**macOS/Linux, or manual operation:**
 
 ```bash
+npm ci
+npm run build
 CODEX_MONITOR_HOST=127.0.0.1 CODEX_MONITOR_DRY_RUN=1 npm start
 ```
 
-Open **[http://127.0.0.1:4201](http://127.0.0.1:4201)**. Keep the terminal running; press `Ctrl+C` to stop.
-These commands simulate shutdown actions without shutting down the computer. The dashboard needs no separate API key.
-If Codex is not found, set `CODEX_MONITOR_CODEX_PATH` to its executable.
+For manual operation in PowerShell 7, set `$env:CODEX_MONITOR_HOST = '127.0.0.1'` and `$env:CODEX_MONITOR_DRY_RUN = '1'`, then run `npm start`.
 
-For console-free background operation, logon startup, desktop shortcuts and installed-copy updates, see [standalone Windows deployment](docs/standalone-windows.md).
+Open **[http://127.0.0.1:4201](http://127.0.0.1:4201)**. Manual operation requires the terminal to stay open; `Ctrl+C` stops it. The manual commands above simulate shutdown without shutting down the computer. No separate API key is needed. If Codex is not found, set `CODEX_MONITOR_CODEX_PATH`.
 
-## Understand the numbers
+## Metric scopes
 
-| Metric | Meaning |
+| Display | Scope |
 | --- | --- |
-| Account quota | Quota for Monitor's current Codex CLI account, which may differ from the desktop app account. |
-| Plan equivalents · Current account | Replaces Quota %. The same calibration and display format as cross-account equivalents, limited to this quota period's records with matching weekly reset times. |
-| Plan equivalent usage | Estimated usage from included local records across accounts; one selected plan's weekly allowance equals 100%. |
-| Estimated cost / tokens | Recorded tokens and their API-equivalent USD value using a built-in price table, not a subscription bill. |
+| Overview account quota | Monitor's current Codex CLI login, which may differ from the desktop app login. Saved snapshots are timestamped. |
+| Left task quota value | **Selected account · This period**; historical accounts use their last recorded period. |
+| Right task quota value | **Across accounts · Task lifetime**, including all retained periods and attributed subtasks. |
+| Summary, cost, tokens, trends and rankings | **Cross-account records in the selected range:** Today, Last 7 days, Task lifetime or custom dates; Monitor time zone, inclusive end date. |
 
-The equivalent estimator assumes recorded **Pro accounts are all 20x**; logs cannot reliably distinguish 5x from 20x.
-Pro 20x, Pro 5x and Plus multiply both equivalent columns by 1, 4 and 20. The selector does not verify or change account tiers.
-Current account % always covers the current quota period; project rows sum their tasks. Logs lack reliable account IDs, so reset-time matching (within 60 seconds) is only an estimate. Accounts with the same reset time cannot be distinguished. Missing matches or prices produce partial or unavailable values.
-Missing logs, other-device usage and unpriced models affect accuracy.
+The time range does not change either task quota scope. Display filters such as search and hidden archives do not change range totals. Each side of the quota column has its own sort arrow; project rows sum their tasks.
 
-`--` means unavailable or unattributed, not zero; `+` indicates partial data.
-Initial calibration needs at least five percentage points of usable weekly-quota observations; existing values remain visible while calibration updates.
-Hiding archives, searching or filtering changes displayed rows, not totals for the selected scope. See [metric details](docs/setup-and-reference.md#metric-details).
+**One selected plan's weekly allowance equals 100%; equivalents are not a share of total consumption and may exceed 100%.** Estimation assumes all recorded Pro accounts are 20x; logs cannot reliably identify 5x/20x. Pro 20x, Pro 5x and Plus apply comparison factors of 1, 4 and 20 without changing account tiers. The account badge shows only the plan returned by the API.
+
+Account attribution matches weekly reset times within 60 seconds, not reliable account IDs; identical reset times cannot be distinguished. Cost is API-equivalent USD based on token prices, including priced GPT-6 Astra/Sol/Luna usage, not a subscription bill. Missing logs, other-device activity and unpriced models affect results. `--` means unavailable; `+` means partial data.
+
+Calibration uses recent valid quota changes and retains the previous value while updating in the background. The page identifies automatic, retained or manual calibration. Official task details are queried separately, cached per account for five minutes and retain same-account data on failure. The private endpoint may change or lag and does not overwrite local calibration. [Full metric details](docs/setup-and-reference.md#metric-details)
 
 ## Local data and remote access
 
-The backend listens on loopback by default, reads Codex logs and metadata, and writes caches to `.cache/` without rewriting original sessions.
-The local Codex app-server may still use the network to read account quota. Task details can contain private prompts, commands and paths.
+The backend listens on loopback by default, reads Codex logs and metadata, and caches in `.cache/` without rewriting original sessions. Official quota requests use the local Codex login and may access the network. Task details can contain prompts, commands and paths.
 
-**There is no built-in login or TLS; Origin checks are not authentication.** Remote access needs separate access controls.
-For cpolar or a reverse proxy, explicitly configure `CODEX_MONITOR_ALLOWED_ORIGINS`; the Windows standalone copy uses `allowedOrigins` in `standalone.json`.
-See [network access](docs/setup-and-reference.md#network-access) and [tunnel setup](docs/standalone-windows.md#reverse-proxy-or-tunnel).
+**There is no built-in login or TLS. Anyone who can access the page can read its data and, with a managed launcher, restart or stop Monitor.** Add your own access controls for public access; Origin checks are not authentication. cpolar/reverse proxies also require `CODEX_MONITOR_ALLOWED_ORIGINS`, or `allowedOrigins` in standalone Windows `standalone.json`. [Tunnel setup](docs/standalone-windows.md#reverse-proxy-or-tunnel)
 
 ## Documentation and development
 
 [Full reference](docs/setup-and-reference.md) · [Windows deployment](docs/standalone-windows.md) · [Changelog](CHANGELOG.md)
 
-Built with TypeScript, React, Vite, Express and WebSocket.
-Develop with `npm run dev`; check with `npm test`, `npx tsc --noEmit` and `npm run build`.
+Built with TypeScript, React, Vite, Express and WebSocket. Develop with `npm run dev`; check with `npm test`, `npx tsc --noEmit` and `npm run build`.
+
+Standalone UI preview: `npx vite --config web/vite.preview.config.ts`, on port 4202 by default. Set `CODEX_MONITOR_PREVIEW_API` to select a backend; this does not replace the installed service.
 
 ## Credits and license
 
-The original application was created by [manuelsh](https://github.com/manuelsh/codex-monitor); this version focuses on usability and usage analysis.
-This repository currently has no `LICENSE` file and does not claim MIT/Apache licensing. Check applicable upstream permissions before use or redistribution.
-
-### Service controls
-
-The Windows managed launcher enables Restart/Stop under the top-right Service menu. Local and remote controls require no password; anyone who can access the page can restart or stop Monitor. Stop affects Monitor only, not Windows or Codex. A stopped server cannot restart itself from its offline webpage: use the desktop shortcut or remote desktop. The shortcut opens an existing instance or starts one without a console; it runs independently of Codex. Deployment automatically creates the shortcut and enables logon startup.
-
-### Multiple account usage
-
-Use the quota card dropdown or previous/next buttons to view recorded accounts. Monitor retains the last confirmed usage per email across restarts, without credentials. Other accounts show the recording time, not live usage. An account appears after Monitor reads its usage while logged in. This view does not change your login or task statistics.
+The original application was created by [manuelsh](https://github.com/manuelsh/codex-monitor); this version focuses on usability and usage analysis. This repository currently has no `LICENSE` file and does not claim MIT/Apache licensing. Check applicable upstream permissions before use or redistribution.

@@ -326,3 +326,9 @@ describe('20x weekly equivalents', () => {
     expect(groups[0]).toMatchObject({ equivalent20xPercent: 400, equivalent20xIsComplete: false, jobs: [jobs[0]] });
   });
 });
+
+it('recalibrates from recent complete observations instead of old aggregate prices', () => {
+  const events = [event(0,0,0),event(1,20,200),event(2,40,40),event(3,60,60)];
+  expect(calibrate20x(events,start,end)).toEqual({costPerPercent:3,quotaPercent:20});
+  expect(calibrate20x([...events,event(4,80,null)],start,end)).toEqual({costPerPercent:3,quotaPercent:20});
+});

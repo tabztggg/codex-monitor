@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../LanguageContext';
 
 export function ServiceControls() {
@@ -7,6 +7,12 @@ export function ServiceControls() {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [instance, setInstance] = useState('');
+  const [pending, setPending] = useState<'restart' | 'stop' | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (pending) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [pending]);
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/service', { signal: controller.signal }).then(r => r.json()).then(v => {
@@ -15,7 +21,7 @@ export function ServiceControls() {
     return () => controller.abort();
   }, []);
   async function control(action: 'restart' | 'stop') {
-    if (!window.confirm(t(action === 'restart' ? 'Restart Monitor service?' : 'Stop Monitor? Use the desktop shortcut to start it again.'))) return;
+    setPending(null);
     setBusy(true);
     try {
       const response = await fetch('/api/service', { method: 'POST', headers: {
@@ -33,12 +39,18 @@ export function ServiceControls() {
           } catch { }
         }
         setStatus('Restart not confirmed. Try the desktop shortcut.');
+        setBusy(false);
       }
     } catch { setStatus('Service action not confirmed. Refresh to check its state.'); setBusy(false); }
   }
   return <div className="service-controls" role="group" aria-label={t('Service')}>
-    <button className="language-switch service-control-button" disabled={!enabled || busy} title={!enabled ? t('Available with a managed launcher.') : undefined} onClick={() => void control('restart')}>{t('Restart service')}</button>
-    <button className="language-switch service-control-button" disabled={!enabled || busy} title={!enabled ? t('Available with a managed launcher.') : undefined} onClick={() => void control('stop')}>{t('Stop service')}</button>
+    <button className="language-switch service-control-button" disabled={!enabled || busy} title={!enabled ? t('Available with a managed launcher.') : undefined} onClick={() => setPending('restart')}>{t('Restart service')}</button>
+    <button className="language-switch service-control-button" disabled={!enabled || busy} title={!enabled ? t('Available with a managed launcher.') : undefined} onClick={() => setPending('stop')}>{t('Stop service')}</button>
+    <dialog ref={dialog} className="service-dialog" aria-labelledby="service-dialog-title" onCancel={() => setPending(null)}>
+      <h2 id="service-dialog-title">{t(pending === 'stop' ? 'Stop Monitor? Use the desktop shortcut to start it again.' : 'Restart Monitor service?')}</h2>
+      {pending === 'restart' && <p>{t('The page reconnects when the service is ready.')}</p>}
+      <div className="service-dialog-actions"><button autoFocus className="small-control" onClick={() => setPending(null)}>{t('Cancel')}</button><button className="action-button" onClick={() => { if (pending) void control(pending); }}>{t(pending === 'stop' ? 'Confirm stop' : 'Confirm restart')}</button></div>
+    </dialog>
     {status && <small className="service-control-status" role="status">{t(status)}</small>}
   </div>;
 }

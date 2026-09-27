@@ -30,6 +30,16 @@ describe('selected usage periods', () => {
     }
     fs.writeFileSync(path.join(sessions, `rollout-${id}.jsonl`), lines.map(line => JSON.stringify(line)).join('\n'));
   }
+  it('includes both custom boundary dates and rejects invalid ranges', () => {
+    write('custom', [{at:at(3),tokens:10},{at:at(2),tokens:20},{at:at(1,23),tokens:30},{at:at(0),tokens:40}]);
+    const reader=new HistoryJobReader(sessions);
+    const result=reader.listJobs({nowMs:now,period:'custom',dateFrom:localDay(at(2)),dateTo:localDay(at(1))});
+    expect(result.data[0].periodMetrics?.usage?.totalTokens).toBe(50);
+    expect(result.analysis?.days).toHaveLength(2);
+    for (const [dateFrom,dateTo] of [['2026-02-30','2026-03-02'],['2026-09-22','2026-09-20'],['','2026-09-22']]) {
+      expect(()=>reader.listJobs({nowMs:now,period:'custom',dateFrom,dateTo})).toThrow('Invalid date range');
+    }
+  });
   it('uses calendar days, exact midday quota boundaries, and deduplicated counters without reparsing for each range', () => {
     write('root', [{ at: at(8), tokens: 100 }, { at: at(6), tokens: 200 }, { at: at(2, 11), tokens: 300 }, { at: at(2, 13), tokens: 400 }, { at: at(0), tokens: 500, repeat: true }]);
     const reader = new HistoryJobReader(sessions);

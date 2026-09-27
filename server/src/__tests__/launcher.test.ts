@@ -18,8 +18,8 @@ describe.skipIf(process.platform !== "win32")("Windows standalone origin configu
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     // Execute only the configuration block; no task, process group or child starts.
-    const powershell = path.join(process.env.SystemRoot ?? "C:/Windows", "System32/WindowsPowerShell/v1.0/powershell.exe");
-    const result = await exec(powershell, ["-NoProfile", "-NonInteractive", "-Command", `
+    const powershell7 = path.join(process.env.ProgramFiles ?? "C:/Program Files", "PowerShell/7/pwsh.exe");
+    const result = await exec(existsSync(powershell7) ? powershell7 : "pwsh.exe", ["-NoProfile", "-NonInteractive", "-Command", `
       $ErrorActionPreference = 'Stop'
       function Read-OriginConfig([string]$json) {
         $config = $json | ConvertFrom-Json

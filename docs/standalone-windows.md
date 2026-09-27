@@ -1,6 +1,6 @@
 # Standalone Windows deployment
 
-运行 `npm ci`、`npm run build` 后执行 `powershell -File scripts/Install-StandaloneMonitor.ps1`。自动部署、创建桌面快捷方式并启用 Windows 登录后无窗口自启动；保留配置与缓存，备份并移除旧 Monitor Hook。关闭 Codex 不影响 Monitor。
+运行 `npm ci`、`npm run build` 后使用 PowerShell 7 执行 `pwsh -File scripts/Install-StandaloneMonitor.ps1`。自动部署、创建桌面快捷方式并启用 Windows 登录后无窗口自启动；保留配置与缓存，备份并移除旧 Monitor Hook。关闭 Codex 不影响 Monitor。
 
 [English README](../README.en.md) · [中文说明](#中文说明)
 

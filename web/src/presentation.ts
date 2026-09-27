@@ -140,10 +140,31 @@ export function limitArchivedTasks(jobs: HistoryJob[], limit = 30): HistoryJob[]
   return jobs.filter(job => !job.archived || recentIds.has(job.id));
 }
 
-export function visibleTasks(jobs: HistoryJob[], activeIds: Set<string>, filter: TaskFilter, search: string, sort: TaskSortColumn, nowMs: number, hideArchived = false, language: Language = 'en', direction: SortDirection = 'desc') {
-  const day = new Date(nowMs); day.setHours(0, 0, 0, 0);
+function calendarFormatter(timeZone?: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function formattedCalendarDate(value: number | string | Date, formatter: Intl.DateTimeFormat): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const parts = formatter.formatToParts(date);
+  return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)?.value).join('-');
+}
+
+/** A date-input-compatible day in the Monitor's timezone; invalid dates stay unknown. */
+export function calendarDate(value: number | string | Date, timeZone?: string): string {
+  return formattedCalendarDate(value, calendarFormatter(timeZone));
+}
+
+export function visibleTasks(jobs: HistoryJob[], activeIds: Set<string>, filter: TaskFilter, search: string, sort: TaskSortColumn, nowMs: number, hideArchived = false, language: Language = 'en', direction: SortDirection = 'desc', timeZone?: string) {
+  // Use the Monitor's calendar day, including DST boundaries, instead of the viewing device's midnight.
+  const dayFormatter = filter === 'today' ? calendarFormatter(timeZone) : null;
+  const today = dayFormatter ? formattedCalendarDate(nowMs, dayFormatter) : '';
+  const updatedToday = (value: string) => {
+    return Boolean(today && dayFormatter && formattedCalendarDate(value, dayFormatter) === today);
+  };
   const query = search.trim().toLocaleLowerCase('en');
-  return jobs.filter(job => filter === 'all' || (filter === 'active' ? activeIds.has(job.id) : activeIds.has(job.id) || Date.parse(job.updatedAt) >= day.getTime()))
+  return jobs.filter(job => filter === 'all' || (filter === 'active' ? activeIds.has(job.id) : activeIds.has(job.id) || updatedToday(job.updatedAt)))
     .filter(job => !hideArchived || !job.archived)
     .filter(job => `${taskTitle(job, language)} ${job.project?.name ?? translate(language, 'Unassigned project')} ${job.cwd ?? ''} ${job.id}`.toLocaleLowerCase('en').includes(query))
     .sort((a, b) => {

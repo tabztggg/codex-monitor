@@ -12,6 +12,8 @@ const SAMPLE_VERSION = 3;
 /** Keep the last usable reference across resets, reduced archive scopes and restarts. */
 export class QuotaCalibration {
   private saved: SavedCalibration | null = null;
+  private currentPolicy = false;
+  private manual: {costPerPercent: number; updatedAt: number} | null = null;
   private readonly samples = new Map<string, QuotaCalibrationEvent>();
   private referenceSamplesKnown = false;
   private dirty = false;
@@ -19,12 +21,19 @@ export class QuotaCalibration {
   private saveFailed = false;
   private nextSaveAt = 0;
   constructor(private readonly file?: string) {
+    if (file) {
+      try {
+        const value = JSON.parse(readFileSync(file + '.manual.json', 'utf8'));
+        if (value.version === 1 && Number.isFinite(value.costPerPercent) && value.costPerPercent > 0 && validTimestamp(value.updatedAt)) this.manual = value;
+      } catch { /* Missing manual reference leaves automatic calibration active. */ }
+    }
     if (file && existsSync(file)) {
       try {
         const value = JSON.parse(readFileSync(file, 'utf8'));
         if (value?.version !== 1 || !Number.isFinite(value.costPerPercent) || value.costPerPercent <= 0 ||
             !Number.isFinite(value.quotaPercent) || value.quotaPercent < 5 ||
             !validTimestamp(value.windowStart) || !validTimestamp(value.updatedAt) || value.updatedAt < value.windowStart) throw new Error('Invalid calibration');
+        this.currentPolicy = value.calibrationPolicy === 2;
         this.saved = { version: 1, costPerPercent: value.costPerPercent, quotaPercent: value.quotaPercent,
           windowStart: value.windowStart, updatedAt: value.updatedAt };
         // Version 1 files without samples remain valid references. Do not replace
@@ -65,7 +74,7 @@ export class QuotaCalibration {
     const candidate = current && candidateStart === windowStart ? current : calibrationDetails(known, candidateStart, now + 1);
     let source: 'current' | 'previous' | 'unavailable' = this.saved ? 'previous' : 'unavailable';
     if (candidate.costPerPercent !== null && candidate.updatedAt !== null &&
-        (!this.saved || samplesChanged && candidate.updatedAt >= this.saved.updatedAt)) {
+        (!this.saved || (!this.currentPolicy || samplesChanged) && candidate.updatedAt >= this.saved.updatedAt)) {
       this.remember(candidate.costPerPercent, candidate.quotaPercent, candidateStart, candidate.updatedAt);
       source = windowStart === null ? 'previous' : 'current';
     } else if (events.length && current && current.costPerPercent !== null && this.saved &&
@@ -85,6 +94,8 @@ export class QuotaCalibration {
       }
     }
     this.persist(now);
+    if (this.manual) return { costPerPercent: this.manual.costPerPercent, quotaPercent: 100,
+      referenceQuotaPercent: 100, source: 'manual' as const, calibratedAt: new Date(this.manual.updatedAt).toISOString() };
     return { costPerPercent: this.saved?.costPerPercent ?? null, quotaPercent: windowStart === null ? 0 : candidate.quotaPercent,
       referenceQuotaPercent: this.saved?.quotaPercent ?? 0, source,
       calibratedAt: this.saved ? new Date(this.saved.updatedAt).toISOString() : null };
@@ -95,6 +106,7 @@ export class QuotaCalibration {
     if (JSON.stringify(next) !== JSON.stringify(this.saved)) this.referenceDirty = this.dirty = true;
     this.saved = next;
     this.referenceSamplesKnown = true;
+    this.currentPolicy = true;
   }
 
   private persist(now: number) {
@@ -103,7 +115,7 @@ export class QuotaCalibration {
     try {
       mkdirSync(path.dirname(this.file), { recursive: true });
       writeFileSync(this.file + '.tmp', JSON.stringify({ ...this.saved,
-        sampleVersion: SAMPLE_VERSION, samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
+        calibrationPolicy: 2, sampleVersion: SAMPLE_VERSION, samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
       renameSync(this.file + '.tmp', this.file);
       this.dirty = false;
       this.referenceDirty = this.saveFailed = false;
@@ -180,6 +192,7 @@ function calibrationDetails(events: QuotaCalibrationEvent[], start: number, end:
   let complete = true;
   let cost = 0;
   let quota = 0;
+  const recent: { cost: number; quota: number }[] = [];
   let updatedAt: number | null = null;
   const sorted = events.filter(e => e.at >= start && e.at < end).sort((a, b) =>
     a.at - b.at || (a.limit?.resetsAt ?? Infinity) - (b.limit?.resetsAt ?? Infinity) ||
@@ -242,7 +255,15 @@ function calibrationDetails(events: QuotaCalibrationEvent[], start: number, end:
       else pendingCost += group.cost;
       const delta = group.used - highWater!;
       if (delta > 0) {
-        if (complete && pendingCost > 0) { cost += pendingCost; quota += delta; updatedAt = at; }
+        if (complete && pendingCost > 0) {
+          recent.push({ cost: pendingCost, quota: delta });
+          cost += pendingCost; quota += delta; updatedAt = at;
+          // Retain whole observations covering the latest 20 percentage points.
+          // Never split a rounded quota increment or invent unpriced cost.
+          while (recent.length > 1 && quota - recent[0].quota >= 20) {
+            const removed = recent.shift()!; cost -= removed.cost; quota -= removed.quota;
+          }
+        }
         pendingCost = 0;
         complete = true;
       }

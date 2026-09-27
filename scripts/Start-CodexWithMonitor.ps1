@@ -58,7 +58,7 @@ function Start-CodexDesktopApp {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $monitorScript = Join-Path $repoRoot "scripts\Start-CodexMonitor.ps1"
-$powershellPath = (Get-Command powershell.exe).Source
+$powershellPath = (Get-Command pwsh.exe -ErrorAction Stop).Source
 
 Repair-ProcessPathEnvironment
 

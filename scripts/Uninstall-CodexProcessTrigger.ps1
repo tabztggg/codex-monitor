@@ -9,7 +9,7 @@ function Test-Administrator {
 }
 
 function Restart-Elevated {
-  $powershellPath = (Get-Command powershell.exe).Source
+  $powershellPath = (Get-Command pwsh.exe -ErrorAction Stop).Source
   Start-Process `
     -FilePath $powershellPath `
     -ArgumentList @(

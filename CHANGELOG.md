@@ -10,6 +10,15 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.6 — 2026-09-27
+
+- Windows 根入口和桌面快捷启动支持 Codex 自带的 PowerShell 7，修复未单独安装 PowerShell 7 时无法启动。
+- 后台子进程复用当前 PowerShell 路径，避免登录自启动因 PATH 不同而失败；界面与统计逻辑不变。
+
+验证：336 项测试通过、2 项跳过，类型检查与构建通过；本机部署和网页访问已验证，未实测 Windows 重启。
+
+English: Windows launchers now fall back to Codex-bundled PowerShell 7. Background runners reuse the same executable instead of depending on Task Scheduler's PATH. UI and statistics are unchanged.
+
 ## v0.4.5 — 2026-09-27
 
 - 总览、任务、趋势改为独立页面，更新中英文排版及首页截图；总览增加 Token 拆分、范围内消耗前 3 名与当前活动。

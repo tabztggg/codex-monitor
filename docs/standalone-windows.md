@@ -2,6 +2,10 @@
 
 运行 `npm ci`、`npm run build` 后使用 PowerShell 7 执行 `pwsh -File scripts/Install-StandaloneMonitor.ps1`。自动部署、创建桌面快捷方式并启用 Windows 登录后无窗口自启动；保留配置与缓存，备份并移除旧 Monitor Hook。关闭 Codex 不影响 Monitor。
 
+Windows 启动入口优先使用 `%ProgramFiles%\PowerShell\7\pwsh.exe`，不存在时使用 Codex 自带的 PowerShell 7；不会回退到 Windows PowerShell 5。后台子进程复用启动它的 PowerShell 7，避免计划任务的 PATH 不同导致启动失败。
+
+Windows launchers prefer the standard PowerShell 7 installation, then the Codex-bundled PowerShell 7. They do not fall back to Windows PowerShell 5. Child runners reuse the same PowerShell installation regardless of Task Scheduler's PATH.
+
 [English README](../README.en.md) · [中文说明](#中文说明)
 
 This page documents the per-user deployment configured on the maintainer's

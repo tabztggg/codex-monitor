@@ -27,7 +27,7 @@ try {
     # The outer job also makes Stop-ScheduledTask end an attempt or retry wait.
     for ($attempt = 0; $attempt -le 3; $attempt++) {
       $monitorProcess = [MonitorBackgroundProcess]::Start(
-        (Get-Command pwsh.exe -ErrorAction Stop).Source,
+        (Join-Path $PSHOME 'pwsh.exe'),
         ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Instance'),
         $installRoot, (Join-Path $installRoot 'logs\instance-stdout.log'), (Join-Path $installRoot 'logs\instance-stderr.log'))
       if (-not [MonitorProcessGroup]::Contains($monitorProcess.Handle)) { throw 'Instance did not inherit the Monitor process group.' }

@@ -1,9 +1,15 @@
 Option Explicit
-Dim shell, files, root, command, result, i
+Dim shell, files, root, command, result, i, powershell
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 root = files.GetParentFolderName(WScript.ScriptFullName)
-command = Chr(34) & shell.ExpandEnvironmentStrings("%ProgramFiles%") & "\PowerShell\7\pwsh.exe" & Chr(34) & _
+powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%ProgramFiles%"), "PowerShell\7\pwsh.exe")
+If Not files.FileExists(powershell) Then powershell = files.BuildPath(shell.ExpandEnvironmentStrings("%USERPROFILE%"), ".cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe")
+If Not files.FileExists(powershell) Then
+  MsgBox "PowerShell 7 was not found. Install PowerShell 7 before starting Codex Monitor.", vbExclamation, "Codex Monitor"
+  WScript.Quit 1
+End If
+command = Chr(34) & powershell & Chr(34) & _
   " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Chr(34) & files.BuildPath(root, "scripts\Start-DesktopEntry.ps1") & Chr(34)
 For i = 0 To WScript.Arguments.Count - 1
   Select Case LCase(WScript.Arguments(i))

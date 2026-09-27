@@ -6,11 +6,11 @@
 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.5](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.5)** · Three dedicated pages, clearer metric scopes, and fixes for missing and duplicate usage. [Changelog](CHANGELOG.md)
+**[v0.4.6](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.6)** · Fix Windows launcher paths; retain the new three-page dashboard. [Changelog](CHANGELOG.md)
 
 ![Usage overview: current account quota, range totals and recent activity](assets/screenshots/v0.4.5-overview-en.png)
 
-Screenshots show the actual v0.4.5 build with fictional accounts, tasks and usage.
+Current interface screenshots (introduced in v0.4.5, unchanged in v0.4.6) use fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
@@ -31,7 +31,7 @@ By default, read unarchived tasks and the 30 most recently archived root tasks, 
 
 ## Quick start
 
-Requires **Node.js 22.13+ (recommended)**, npm and an authenticated Codex installation supporting `codex app-server`. Windows also requires **PowerShell 7**. Basic operation supports Node.js 20; official task details need a newer version capable of reading the thread index.
+Requires **Node.js 22.13+ (recommended)**, npm and an authenticated Codex installation supporting `codex app-server`. Windows also requires **PowerShell 7**; launchers can use the Codex-bundled copy. Basic operation supports Node.js 20; official task details need a newer version capable of reading the thread index.
 
 ```bash
 git clone https://github.com/tabztggg/codex-monitor.git

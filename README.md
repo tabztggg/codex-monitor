@@ -6,11 +6,11 @@
 
 本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。非 OpenAI 官方产品，也不是计费系统。
 
-**[v0.4.5](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.5)** · 三页布局、明确统计范围、修复漏统计与重复计数。[更新日志](CHANGELOG.md)
+**[v0.4.6](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.6)** · 修复 Windows 启动路径，沿用新版三页界面。[更新日志](CHANGELOG.md)
 
 ![用量总览：当前账号额度、范围汇总与近期活动](assets/screenshots/v0.4.5-overview-zh.png)
 
-截图来自 v0.4.5 实际构建，账号、任务和用量均为虚构演示数据。
+当前界面截图（v0.4.5 起，v0.4.6 界面未变），账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
@@ -31,7 +31,7 @@
 
 ## 快速开始
 
-需要 **Node.js 22.13+（推荐）**、npm，以及已登录、支持 `codex app-server` 的 Codex。Windows 还需要 **PowerShell 7**。基础运行最低 Node.js 20；官方任务明细需要可读取线程索引的较新版本。
+需要 **Node.js 22.13+（推荐）**、npm，以及已登录、支持 `codex app-server` 的 Codex。Windows 还需要 **PowerShell 7**，启动器也可使用 Codex 自带的版本。基础运行最低 Node.js 20；官方任务明细需要可读取线程索引的较新版本。
 
 ```bash
 git clone https://github.com/tabztggg/codex-monitor.git

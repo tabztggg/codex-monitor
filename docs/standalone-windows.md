@@ -131,6 +131,10 @@ task information, so redact them before sharing.
 
 ## Updating the installed copy
 
+Click **Update**, to the left of **Restart service**, to install the latest `main` commit from `tabztggg/codex-monitor`. Git, npm and PowerShell 7 must be available. The fixed repository is downloaded and built in a staging directory while Monitor remains online; only a complete build triggers an automatic stop, runtime replacement and restart. Configuration, caches, calibration, task registration and the desktop shortcut are preserved. Failed installation or health checks restore the previous runtime. The page reports progress and reconnects after success. If the installed commit is already current, nothing restarts.
+
+The header checks version metadata on page load/focus and every 30 minutes while open. All clients share a 30-minute persistent cache; failed automatic checks retain the last result and wait at least 5 minutes before retrying. Click the combined **Up to date** / **Check failed · Retry** button to check manually, with a shared 5-minute minimum interval. **Update to…** opens the installation confirmation. Commit history is compared, so a patch with an unchanged version number is still visible. Health/status polling stays local. Update diagnostics are in `logs/service-update.log`, transaction backups in `backups/update-<operation-id>`. This does not pull or modify your development checkout. For manual updates:
+
 The installation uses a **deployed copy** of the built application. Editing,
 pulling, or building the source checkout does not update the installed `dist`.
 Restarting alone starts the currently deployed files again.
@@ -145,8 +149,7 @@ Restarting alone starts the currently deployed files again.
    and the registered task unless the update explicitly changes them.
 4. Start the installed task, check `Status` and its logs, then refresh the dashboard.
 
-Deployment remains a deliberate local step. No automatic source synchronization
-or update installation is configured by these launchers.
+Updates require an explicit button click or manual deployment; these launchers do not schedule automatic updates.
 
 ## 中文说明
 
@@ -195,8 +198,12 @@ Windows 启动器都会转到同一个已安装任务，避免重复启动。Sto
 重新构建或重启，都不会自动替换已安装的应用文件。
 ## 网页服务管理
 
-右上角「服务」提供重启／关闭 Monitor，不关闭 Windows 或 Codex。托管启动器使用退出码 42 请求立即重启，0 表示主动关闭、不重试；意外失败仍有限重试。
+右上角显示当前版本与仓库版本，状态与更新合为一个按钮：「已是最新」点击重新检查，「更新至…」高亮并进入更新确认，「检查失败 · 重试」重新查询。版本号未变的新提交也能识别。页面打开、重新聚焦及每 30 分钟自动检查，所有页面共用 30 分钟持久缓存；自动检查失败保留上次结果，至少 5 分钟后再尝试。手动检查可跳过长缓存，但最短间隔为 5 分钟。服务状态轮询不访问 GitHub，也不自动安装。
 
-本机和公网操作均无需口令；所有可访问页面的人都能重启或关闭 Monitor。关闭后需要桌面快捷方式、远程桌面或下一次 Windows 登录重新启动，离线网页不能自行唤醒服务。
+「更新」「重启服务」「关闭服务」不关闭 Windows 或 Codex。「更新」固定从本仓库 `main` 获取最新版，需要 Git、npm 和 PowerShell 7；先下载构建，准备完成才自动停止、替换、启动并检查健康状态。失败恢复旧版，保留配置、缓存和校准记录。已是最新提交则不重启；安装仍须点击「更新」。
+
+托管启动器使用退出码 43 请求应用已准备的更新，42 立即重启，0 主动关闭、不重试。更新诊断见 `logs/service-update.log`，旧程序保留在 `backups/update-<操作 ID>`；不会修改开发用源码仓库。
+
+本机和公网操作均无需口令；所有可访问页面的人都能更新、重启或关闭 Monitor。关闭后需要桌面快捷方式、远程桌面或下一次 Windows 登录重新启动，离线网页不能自行唤醒服务。
 
 重复部署会备份旧程序，保留 `standalone.json` 与 `.cache`，更新计划任务及桌面快捷方式。`-SkipDependencies` 仅用于已有匹配依赖的安装；默认执行 `npm ci --omit=dev`。开机自启动指当前用户登录后启动，登录前不运行。

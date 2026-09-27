@@ -6,28 +6,28 @@
 
 本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。非 OpenAI 官方产品，也不是计费系统。
 
-**[v0.4.6](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.6)** · 修复 Windows 启动路径，沿用新版三页界面。[更新日志](CHANGELOG.md)
+**[v0.4.7](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.7)** · 网页更新、版本提醒与低频刷新。[更新日志](CHANGELOG.md)
 
-![用量总览：当前账号额度、范围汇总与近期活动](assets/screenshots/v0.4.5-overview-zh.png)
+![用量总览：版本状态、剩余额度与时间、范围汇总](assets/screenshots/v0.4.7-overview-zh.jpg)
 
-当前界面截图（v0.4.5 起，v0.4.6 界面未变），账号、任务和用量均为虚构演示数据。
+v0.4.7 实际界面截图，账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
 
-![任务明细：账号选择、双口径额度与项目分组](assets/screenshots/v0.4.5-tasks-zh.png)
+![任务明细：账号选择、双口径额度与项目分组](assets/screenshots/v0.4.7-tasks-zh.jpg)
 
-![趋势与依据：每日消耗、项目和任务排行](assets/screenshots/v0.4.5-trends-zh.png)
+![趋势与依据：每日消耗、项目和任务排行](assets/screenshots/v0.4.7-trends-zh.jpg)
 
 </details>
 
 ## 三个页面
 
-- **用量总览 `/`**：当前登录账号的额度、完整周期和更新时间；所选范围的跨账号估算、费用、Token 拆分、消耗前 3 名与当前活动。
+- **用量总览 `/`**：当前登录账号的额度、完整周期和更新时间，双进度条对比剩余额度与剩余时间；所选范围的跨账号估算、费用、Token 拆分、消耗前 3 名与当前活动。
 - **任务明细 `/tasks`**：搜索、筛选、排序、列设置和项目合计。可查看历史账号记录，**不会切换 Codex 登录**。展开任务可查询官方累计额度及模型、推理强度、速度分布。
 - **趋势与依据 `/trends`**：每日费用／Token、所选范围的跨账号额度排行，以及数据覆盖和估算依据。
 
-默认读取未归档任务和最近 30 个归档主任务，包含可归属的子任务；选择“统计所有归档”才扩大读取。日志增量刷新支持 30 秒、1／2／5／10 分钟，断线保留旧值。中英文可切换并记住选择，新访问者默认英语。
+默认读取未归档任务和最近 30 个归档主任务，包含可归属的子任务；选择“统计所有归档”才扩大读取。任务统计默认每 10 分钟刷新，可选 30 秒、1／2／5／10／30／60 分钟，也可立即刷新。旧版高频设置首次升级为 10 分钟，之后记住你的选择。页面隐藏时暂停新的统计请求，返回后按需补刷，断线保留旧值。账号额度每 5 分钟更新、活动检测每 1 分钟；启用自动关机时活动检测恢复为 2 秒。中英文可切换并记住选择，新访问者默认英语。
 
 ## 快速开始
 
@@ -44,7 +44,7 @@ cd codex-monitor
 wscript.exe "Codex Monitor.vbs" deploy
 ```
 
-Monitor 独立于 Codex 运行。网页右上角可重启或关闭 Monitor；关闭后需用桌面快捷方式再次启动。[Windows 部署说明](docs/standalone-windows.md)
+Monitor 独立于 Codex 运行。网页右上角显示当前版本和仓库版本；状态与更新合为一个按钮：「已是最新」可重新检查，「更新至…」高亮提示，有检查故障时可重试。自动检查缓存 30 分钟，手动检查最短间隔 5 分钟。更新安装本仓库 `main` 最新提交（需要 Git、npm 和 PowerShell 7）：下载、构建时继续运行，准备好后自动停止、替换并重启；保留配置和用量缓存，安装或健康检查失败会回滚。旁边可重启或关闭 Monitor；关闭后需用桌面快捷方式再次启动。[Windows 部署说明](docs/standalone-windows.md)
 
 **macOS／Linux，或手动运行：**
 
@@ -79,7 +79,7 @@ PowerShell 7 手动运行时，先设置 `$env:CODEX_MONITOR_HOST = '127.0.0.1'`
 
 默认只监听本机，读取 Codex 日志和元数据，缓存写入 `.cache/`，不改写原始会话。官方额度查询使用本机 Codex 登录并可能联网；任务详情可能包含提示词、命令和路径。
 
-**没有内置登录认证或 TLS。任何能访问网页的人都能读取数据，并在托管启动器启用时重启／关闭 Monitor。** 公网访问需自行配置访问控制；Origin 检查不是身份认证。cpolar／反向代理还需设置 `CODEX_MONITOR_ALLOWED_ORIGINS`，Windows 独立安装使用 `standalone.json` 的 `allowedOrigins`。[隧道配置](docs/standalone-windows.md#reverse-proxy-or-tunnel)
+**没有内置登录认证或 TLS。任何能访问网页的人都能读取数据，并在托管启动器启用时更新／重启／关闭 Monitor。** 公网访问需自行配置访问控制；Origin 检查不是身份认证。cpolar／反向代理还需设置 `CODEX_MONITOR_ALLOWED_ORIGINS`，Windows 独立安装使用 `standalone.json` 的 `allowedOrigins`。[隧道配置](docs/standalone-windows.md#reverse-proxy-or-tunnel)
 
 ## 文档与开发
 

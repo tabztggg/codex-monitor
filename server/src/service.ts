@@ -14,6 +14,7 @@ import {
   emptyCodexUsage
 } from "./usage";
 import { asRecord, asString, asStringArray, cloneValue, toIsoDate } from "./utils";
+import { ACTIVE_SESSION_INTERVAL_MS, AUTOMATION_SESSION_INTERVAL_MS, ACCOUNT_USAGE_INTERVAL_MS, HISTORY_METADATA_TTL_MS } from '../../shared/polling';
 
 export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> {
   private readonly store = new MonitorStore();
@@ -29,6 +30,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   };
   private activeSessions: ActiveSession[] = [];
   private activeSessionPollHandle: NodeJS.Timeout | null = null;
+  private activeSessionPollIntervalMs = 0;
   private activeSessionRefreshPromise: Promise<void> | null = null;
   private codexUsage: CodexUsageSnapshot = emptyCodexUsage();
   private readonly accountUsageHistory = new AccountUsageHistory(path.resolve('.cache/account-usage.json'));
@@ -117,6 +119,9 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   public async armGlobalNoActiveSessionsAutomation(
     request: ArmGlobalAutomationRequest
   ): Promise<MonitorSnapshot> {
+    // The ordinary scan can be a minute old. Never arm an idle shutdown from
+    // that stale count; reconcile activity before starting its settle timer.
+    await this.refreshActiveSessions();
     this.automation.armGlobalNoActiveSessions({
       settleDelayMs: request.settleDelayMs,
       shutdownDelaySeconds: request.shutdownDelaySeconds,
@@ -255,7 +260,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     const nowMs = Date.now();
     if (
       this.historyThreadMetadataCache &&
-      nowMs - this.historyThreadMetadataCache.refreshedAtMs < 60_000
+      nowMs - this.historyThreadMetadataCache.refreshedAtMs < HISTORY_METADATA_TTL_MS
     ) {
       return this.historyThreadMetadataCache.data;
     }
@@ -390,17 +395,20 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
   }
 
   private emitSnapshot(): void {
+    if (this.activeSessionPollHandle) this.startActiveSessionPolling();
     this.emit("change", this.getSnapshot());
   }
 
   private startActiveSessionPolling(): void {
-    if (this.activeSessionPollHandle) {
-      return;
-    }
-
+    const sensitive = this.automation.getGlobalAutomation().policy.enabled ||
+      this.automation.getActiveShutdown().scheduled || this.store.listRuns().some(run => run.automationPolicy.enabled);
+    const intervalMs = sensitive ? AUTOMATION_SESSION_INTERVAL_MS : ACTIVE_SESSION_INTERVAL_MS;
+    if (this.activeSessionPollHandle && this.activeSessionPollIntervalMs === intervalMs) return;
+    if (this.activeSessionPollHandle) clearInterval(this.activeSessionPollHandle);
+    this.activeSessionPollIntervalMs = intervalMs;
     this.activeSessionPollHandle = setInterval(() => {
       void this.refreshActiveSessions();
-    }, 2000);
+    }, intervalMs);
   }
 
   private startCodexUsagePolling(): void {
@@ -410,7 +418,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
 
     this.codexUsagePollHandle = setInterval(() => {
       void this.refreshCodexUsage();
-    }, 60000);
+    }, ACCOUNT_USAGE_INTERVAL_MS);
   }
 
   private async refreshActiveSessions(): Promise<void> {

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import type { OfficialTaskUsage, OfficialUsageData } from '../../../shared/monitor';
 import { api } from '../api';
 import { useI18n } from '../LanguageContext';
+import { OFFICIAL_DETAIL_INTERVAL_MS } from '../../../shared/polling';
+import { startVisiblePolling } from '../visible-polling';
 
 export function officialShares(data: OfficialUsageData, dimension: 'model' | 'effort' | 'speed') {
   const sums = new Map<string, number>();
@@ -19,19 +21,18 @@ export function OfficialTaskUsagePanel({ threadId }: { threadId: string }) {
   const [failed, setFailed] = useState(false);
   const { t, locale, dateTime } = useI18n();
   useEffect(() => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    const load = async () => {
-      if (document.hidden) { timer = setTimeout(() => void load(), 30_000); return; }
+    let followUp = false;
+    return startVisiblePolling({ intervalMs: OFFICIAL_DETAIL_INTERVAL_MS, task: async signal => {
       try {
-        const next = await api.fetchOfficialTaskUsage(threadId, controller.signal);
-        if (!controller.signal.aborted) { setUsage(next); setFailed(false); }
-      } catch { if (!controller.signal.aborted) setFailed(true); }
-      // Only an expanded, visible detail checks the local cache. Provider TTL is five minutes.
-      if (!controller.signal.aborted) timer = setTimeout(() => void load(), 30_000);
-    };
-    void load();
-    return () => { controller.abort(); clearTimeout(timer); };
+        const next = await api.fetchOfficialTaskUsage(threadId, signal);
+        if (!signal.aborted) { setUsage(next); setFailed(false); }
+        // A stale cache is returned before its background request finishes. Check
+        // once more after its 15-second timeout, then return to the slow schedule.
+        if (next.refreshing && !followUp) { followUp = true; return 30_000; }
+      } catch { if (!signal.aborted) setFailed(true); }
+      followUp = false;
+      return OFFICIAL_DETAIL_INTERVAL_MS;
+    } });
   }, [threadId]);
   const number = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 2 });
   const name = (value: string) => ({ low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Maximum'),
@@ -53,6 +54,6 @@ export function OfficialTaskUsagePanel({ threadId }: { threadId: string }) {
       <p className="muted-note">{t('Data through')}: {data.dataAsOf ? dateTime(data.dataAsOf) : t('Unavailable')} · {t('Updated at {time}', { time: dateTime(data.fetchedAt) })}</p>
       {(usage?.stale || usage?.refreshing || failed) && <p role="status">{t('Showing the last confirmed official data; background updates may be delayed.')}</p>}
     </>}
-    <p className="muted-note">{t('Query account')}: {usage?.account ?? t('CLI account')} · {t('Official data can lag behind live usage. Cached for five minutes; read only when a task is expanded.')}</p>
+    <p className="muted-note">{t('Query account')}: {usage?.account ?? t('CLI account')} · {t('Official data may lag. Refreshes every 10 minutes while expanded and visible; cached for at least five minutes.')}</p>
   </section>;
 }

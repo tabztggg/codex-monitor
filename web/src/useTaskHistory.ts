@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { HistoryAnalysis, HistoryPeriod, HistoryArchiveMode, HistoryArchiveScope, HistoryJob, HistoryUsageAllocation } from '../../shared/monitor';
 import { api } from './api';
+import { DEFAULT_HISTORY_INTERVAL_MS } from '../../shared/polling';
+import { startVisiblePolling } from './visible-polling';
 
 interface TaskHistoryState {
   accountKey: string;
@@ -56,37 +58,31 @@ export async function loadHistoryPages(args: {
 }
 
 /** Load only the requested archive scope; publish complete pages atomically. */
-export function useTaskHistory(refreshIntervalMs = 30_000, period: HistoryPeriod = 'quota', accountReadyKey = '', accountId?: string, range?: {from: string; to: string}) {
+export function useTaskHistory(refreshIntervalMs = DEFAULT_HISTORY_INTERVAL_MS, period: HistoryPeriod = 'quota', accountReadyKey = '', accountId?: string, range?: {from: string; to: string}) {
   const [request, setRequest] = useState<{ mode: HistoryArchiveMode; version: number }>({ mode: 'recent', version: 0 });
   const rebuildPending = useRef(false);
   const accountKey = historyAccountKey(accountReadyKey, accountId);
   const [state, setState] = useState<TaskHistoryState>(() => emptyHistoryState(accountKey, 'recent', accountId));
   useEffect(() => {
-    const controller = new AbortController();
-    let timer: number | undefined;
-    async function refresh() {
-      if (controller.signal.aborted) return;
-      let succeeded = false;
-      const forceRefresh = rebuildPending.current;
-      rebuildPending.current = false;
-      setState(previous => ({ ...historyStateForAccount(previous, accountKey, request.mode, accountId), loading: true, nextRefreshAt: null, error: null }));
-      try {
-        const loaded = await loadHistoryPages({ mode: request.mode, period, accountId, range, signal: controller.signal, forceRefresh });
-        if (controller.signal.aborted) return;
-        succeeded = true;
-        setState(previous => controller.signal.aborted ? previous : { ...loaded, accountKey, accountId, loading: false, nextRefreshAt: null, updatedAt: Date.now(), error: null });
-      } catch (error) {
-        if (!controller.signal.aborted) setState(previous => controller.signal.aborted ? previous : ({ ...historyStateForAccount(previous, accountKey, request.mode, accountId), loading: false, error: error instanceof Error ? error.message : String(error) }));
-      } finally {
-        if (!controller.signal.aborted && (succeeded || request.mode === 'recent')) {
-          const nextRefreshAt = Date.now() + refreshIntervalMs;
-          setState(previous => controller.signal.aborted ? previous : ({ ...previous, nextRefreshAt }));
-          timer = window.setTimeout(refresh, refreshIntervalMs);
+    return startVisiblePolling({
+      intervalMs: refreshIntervalMs,
+      onSchedule: nextRefreshAt => setState(previous => previous.nextRefreshAt === nextRefreshAt ? previous : ({ ...previous, nextRefreshAt })),
+      task: async signal => {
+        let succeeded = false;
+        const forceRefresh = rebuildPending.current;
+        rebuildPending.current = false;
+        setState(previous => ({ ...historyStateForAccount(previous, accountKey, request.mode, accountId), loading: true, nextRefreshAt: null, error: null }));
+        try {
+          const loaded = await loadHistoryPages({ mode: request.mode, period, accountId, range, signal, forceRefresh });
+          if (signal.aborted) return;
+          succeeded = true;
+          setState(previous => signal.aborted ? previous : { ...loaded, accountKey, accountId, loading: false, nextRefreshAt: null, updatedAt: Date.now(), error: null });
+        } catch (error) {
+          if (!signal.aborted) setState(previous => signal.aborted ? previous : ({ ...historyStateForAccount(previous, accountKey, request.mode, accountId), loading: false, error: error instanceof Error ? error.message : String(error) }));
         }
+        return succeeded || request.mode === 'recent' ? refreshIntervalMs : null;
       }
-    }
-    void refresh();
-    return () => { controller.abort(); window.clearTimeout(timer); };
+    });
   }, [request, refreshIntervalMs, period, accountKey, accountId, range]);
   const visibleState = historyStateForAccount(state, accountKey, request.mode, accountId);
   return { ...visibleState, requestedMode: request.mode, refreshNow: () => {

@@ -30,7 +30,8 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
   const rankValue = (g: typeof groups[number]) => comparePlanUsage(g.equivalent20xPercent, comparisonPlan);
   const quotaLabel = (n: number | null, complete: boolean) => formatUsagePercent(n, locale) + (n !== null && !complete ? '+' : '');
   const taskRankValue = (job: HistoryJob) => comparePlanUsage(job.estimated20xPercent, comparisonPlan);
-  const rankedTasks = [...jobs].filter(job => taskRankValue(job) !== null).sort((a, b) => taskRankValue(b)! - taskRankValue(a)!).slice(0, 5);
+  const rankedTasks = useMemo(() => [...jobs].filter(job => comparePlanUsage(job.estimated20xPercent, comparisonPlan) !== null)
+    .sort((a, b) => comparePlanUsage(b.estimated20xPercent, comparisonPlan)! - comparePlanUsage(a.estimated20xPercent, comparisonPlan)!).slice(0, 5), [jobs, comparisonPlan]);
   const rankScale = Math.max(100, ...groups.map(g => rankValue(g) ?? 0), ...rankedTasks.map(job => taskRankValue(job) ?? 0));
   const barWidth = (n: number | null) => Math.max(0, n ?? 0) / rankScale * 100;
   const dayComplete = (day: typeof days[number]) => (analysis?.untimedTokens ?? 0) === 0 && (metric === 'tokens' || day.unpricedTokens === 0);

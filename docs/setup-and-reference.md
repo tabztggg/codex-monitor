@@ -239,13 +239,23 @@ from selected source logs without editing the logs or silently scanning all arch
 
 ### Refresh and preferences
 
-Task refresh defaults to 30 seconds after the preceding request completes.
-Options are 30 seconds, 1, 2, 5, and 10 minutes. Manual refresh resets the
-countdown; changing the interval also refreshes immediately. The frontend
+Task refresh defaults to 10 minutes after the preceding request completes.
+Options are 30 seconds, 1, 2, 5, 10, 30, and 60 minutes. Older fast preferences
+migrate to 10 minutes once; later choices are preserved. Manual refresh resets
+the deadline; changing the interval also refreshes immediately. The frontend
 cancels superseded requests and publishes all pages together. Failures retain
 old data with an error. A failed all-archive request requires explicit retry.
 
-Account quota polls every 60 seconds; active sessions poll every 2 seconds.
+Hidden pages cancel scheduled statistics/detail polls and the dashboard clock.
+An in-flight read can finish; returning fetches once if overdue, without duplicate
+requests. Expanded official details refresh every 10 minutes, with one 30-second
+follow-up if the provider is still refreshing a cached result. Metadata is cached
+for 10 minutes. The ordinary dashboard clock ticks once a minute, not once a second.
+
+Account quota polls every 5 minutes; active sessions poll every minute.
+Arming shutdown automation first reconciles current activity, then enables
+2-second activity checks and a visible 1-second countdown until disarmed.
+Account-change notifications still trigger an immediate identity/quota read.
 Live snapshots arrive over WebSocket. Task refresh settings do not alter those
 backend schedules. Language, interval, columns, and density are remembered in
 browser storage, separately for each browser and origin. New visitors use

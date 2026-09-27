@@ -128,7 +128,9 @@ describe('full interface language rendering', () => {
     expect(html).toContain('live@example.com');
     expect(html).not.toContain('outdated@example.com');
     expect(html).not.toContain('history@example.com');
-    expect(html).toContain('Quota used 20%');
+    expect(html).toContain('20% <span>Quota used</span>');
+    expect(html).toContain('aria-label="Remaining quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80"');
+    expect(html).toContain('aria-label="Time remaining in this period"');
     expect(html).toContain('Quota period');
     expect(html).toContain('dateTime="2026-09-22T00:00:00.000Z"');
     expect(html).toContain('dateTime="2026-09-29T00:00:00Z"');

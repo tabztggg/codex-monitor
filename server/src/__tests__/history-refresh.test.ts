@@ -59,7 +59,7 @@ describe('scoped manual history rebuild', () => {
 });
 
 describe('history metadata reuse', () => {
-  it('shares concurrent metadata pagination, caches it for 60 seconds, and forwards scoped rebuilds', async () => {
+  it('shares concurrent metadata pagination, caches it for 10 minutes, and forwards scoped rebuilds', async () => {
     let now = 1_000;
     vi.spyOn(Date, 'now').mockImplementation(() => now);
     const client = Object.assign(new EventEmitter(), {
@@ -80,7 +80,7 @@ describe('history metadata reuse', () => {
     expect(firstRead).toMatchObject({ archiveMode: 'recent', forceRefresh: true });
     expect([...(firstRead.metadataById?.keys() ?? [])]).toEqual(['first', 'second']);
     expect(reader.listJobs.mock.calls[1][0]).toMatchObject({ archiveMode: 'recent', cursor: 'next', forceRefresh: false });
-    now += 59_999;
+    now += 599_999;
     await service.listHistoryJobs({});
     expect(client.request).toHaveBeenCalledTimes(2);
     now += 1;

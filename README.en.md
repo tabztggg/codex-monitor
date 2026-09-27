@@ -6,28 +6,28 @@
 
 A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
 
-**[v0.4.6](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.6)** · Fix Windows launcher paths; retain the new three-page dashboard. [Changelog](CHANGELOG.md)
+**[v0.4.7](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.7)** · In-app updates, version alerts and lower-overhead refresh. [Changelog](CHANGELOG.md)
 
-![Usage overview: current account quota, range totals and recent activity](assets/screenshots/v0.4.5-overview-en.png)
+![Usage overview: version status, remaining quota and time, range totals](assets/screenshots/v0.4.7-overview-en.jpg)
 
-Current interface screenshots (introduced in v0.4.5, unchanged in v0.4.6) use fictional accounts, tasks and usage.
+Screenshots of the actual v0.4.7 interface use fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
-![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.5-tasks-en.png)
+![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.7-tasks-en.jpg)
 
-![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.5-trends-en.png)
+![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.7-trends-en.jpg)
 
 </details>
 
 ## Three pages
 
-- **Usage overview `/`:** the current login's quota, full quota period and update time; cross-account totals for the selected range, token breakdown, top 3 tasks and current activity.
+- **Usage overview `/`:** the current login's quota, full quota period and update time, with paired bars comparing remaining quota and time; cross-account totals for the selected range, token breakdown, top 3 tasks and current activity.
 - **Task details `/tasks`:** search, filters, sorting, column settings and project totals. Browse historical account records **without changing the Codex login**. Expand a task for official lifetime quota and model, effort and speed breakdowns.
 - **Trends & methodology `/trends`:** daily cost/tokens, cross-account quota rankings for the selected range, data coverage and estimation details.
 
-By default, read unarchived tasks and the 30 most recently archived root tasks, including attributable children. **Calculate all archives** expands that scope. Incremental refresh supports 30 seconds or 1/2/5/10 minutes and retains existing values during outages. Chinese/English selection is remembered; new visitors start in English.
+By default, read unarchived tasks and the 30 most recently archived root tasks, including attributable children. **Calculate all archives** expands that scope. Task statistics refresh every 10 minutes by default; choose 30 seconds or 1/2/5/10/30/60 minutes, or refresh manually. Older fast settings migrate to 10 minutes once; subsequent choices are remembered. Hidden pages pause new statistics requests and catch up when due on return; outages retain existing values. Account quota polls every 5 minutes and activity every minute, with 2-second activity checks while shutdown automation is armed. Chinese/English selection is remembered; new visitors start in English.
 
 ## Quick start
 
@@ -44,7 +44,7 @@ cd codex-monitor
 wscript.exe "Codex Monitor.vbs" deploy
 ```
 
-Monitor runs independently of Codex. The top-right buttons restart or stop Monitor; after stopping, use the desktop shortcut to start it again. [Windows deployment](docs/standalone-windows.md)
+Monitor runs independently of Codex. The header shows installed and repository versions with one status/action button: **Up to date** checks again, **Update to…** highlights an available update, and failed checks can be retried. Automatic checks are cached for 30 minutes; manual checks have a 5-minute minimum interval. Updating installs this repository's latest `main` commit (requires Git, npm and PowerShell 7). Downloads and builds run while Monitor stays online; it then stops, replaces the runtime and restarts, preserving configuration and usage caches. Installation or health-check failures roll back. The adjacent buttons restart or stop Monitor; after stopping, use the desktop shortcut to start it again. [Windows deployment](docs/standalone-windows.md)
 
 **macOS/Linux, or manual operation:**
 
@@ -79,7 +79,7 @@ Calibration uses recent valid quota changes and retains the previous value while
 
 The backend listens on loopback by default, reads Codex logs and metadata, and caches in `.cache/` without rewriting original sessions. Official quota requests use the local Codex login and may access the network. Task details can contain prompts, commands and paths.
 
-**There is no built-in login or TLS. Anyone who can access the page can read its data and, with a managed launcher, restart or stop Monitor.** Add your own access controls for public access; Origin checks are not authentication. cpolar/reverse proxies also require `CODEX_MONITOR_ALLOWED_ORIGINS`, or `allowedOrigins` in standalone Windows `standalone.json`. [Tunnel setup](docs/standalone-windows.md#reverse-proxy-or-tunnel)
+**There is no built-in login or TLS. Anyone who can access the page can read its data and, with a managed launcher, update, restart or stop Monitor.** Add your own access controls for public access; Origin checks are not authentication. cpolar/reverse proxies also require `CODEX_MONITOR_ALLOWED_ORIGINS`, or `allowedOrigins` in standalone Windows `standalone.json`. [Tunnel setup](docs/standalone-windows.md#reverse-proxy-or-tunnel)
 
 ## Documentation and development
 

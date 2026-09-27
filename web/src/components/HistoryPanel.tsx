@@ -11,8 +11,9 @@ import { OverviewDataQuality } from './OverviewDataQuality';
 import { OfficialTaskUsagePanel } from './OfficialTaskUsagePanel';
 import { formatEstimatedCost, formatTokenCount, formatUsagePercent, comparePlanUsage, comparisonPlans, isComparisonPlan, type ComparisonPlan } from '../usage-display';
 import { parseTableView, tableColumns, taskColumns as columns, type TableView } from '../table-view';
+import { DEFAULT_HISTORY_INTERVAL_MS } from '../../../shared/polling';
+import { readRefreshInterval, refreshIntervals, refreshPreferenceKey } from '../refresh-preferences';
 
-const refreshIntervals = [30_000, 60_000, 120_000, 300_000, 600_000];
 const periods: Record<HistoryPeriod, string> = { custom: 'Custom dates', quota: 'Current quota period', today: 'Today', '7d': 'Last 7 days', lifetime: 'Task lifetime' };
 function readView() {
   try { return parseTableView(window.localStorage.getItem('codex-monitor-table-view')); }
@@ -25,8 +26,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   const i18n = useI18n();
   const { t, locale, language, dateTime, label } = i18n;
   const [interval, setInterval] = useState(() => {
-    try { const saved = Number(window.localStorage.getItem('codex-monitor-refresh-interval-ms')); if (refreshIntervals.includes(saved)) return saved; } catch { /* Storage is optional. */ }
-    return 30_000;
+    try { return readRefreshInterval(window.localStorage); } catch { return DEFAULT_HISTORY_INTERVAL_MS; }
   });
   const [comparisonPlan, setComparisonPlan] = useState<ComparisonPlan>(() => {
     try { const saved = window.localStorage.getItem('codex-monitor-comparison-plan'); if (isComparisonPlan(saved)) return saved; } catch { /* Storage is optional. */ }
@@ -56,7 +56,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   const todayDate = calendarDate(nowMs, analysis?.timeZone);
   const [view, setView] = useState(readView);
   useEffect(() => { try { window.localStorage.setItem('codex-monitor-table-view', JSON.stringify(view)); } catch { /* Storage is optional. */ } }, [view]);
-  useEffect(() => { try { window.localStorage.setItem('codex-monitor-refresh-interval-ms', String(interval)); } catch { /* Storage is optional. */ } }, [interval]);
+  useEffect(() => { try { window.localStorage.setItem(refreshPreferenceKey, String(interval)); } catch { /* Storage is optional. */ } }, [interval]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<TaskFilter>('all');
   const [hideArchived, setHideArchived] = useState(false);
@@ -125,12 +125,14 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       totalEstimatedCostIsComplete: job.periodMetrics ? job.periodMetrics.costComplete : job.totalEstimatedCostIsComplete
     }));
   }, [jobs, snapshot.activeSessions, activePeriod]);
-  const displayed = visibleTasks(mergedJobs.map(job => ({ ...job, estimated20xPercent: job.lifetime20xPercent })), activeIds, filter, search, sort, nowMs, hideArchived, language, direction, analysis?.timeZone);
-  const projectGroups = groupByProject ? groupTasksByProject(mergedJobs.map(job => ({ ...job, estimated20xPercent: job.lifetime20xPercent, estimated20xIsComplete: job.lifetime20xIsComplete })), displayed, sort, direction, activeIds, language).filter(g => !search.trim() || g.jobs.length > 0) : [];
+  const filterTime = Math.floor(nowMs / 60_000) * 60_000;
+  const displayed = useMemo(() => visibleTasks(mergedJobs.map(job => ({ ...job, estimated20xPercent: job.lifetime20xPercent })), activeIds, filter, search, sort, filterTime, hideArchived, language, direction, analysis?.timeZone),
+    [mergedJobs, activeIds, filter, search, sort, filterTime, hideArchived, language, direction, analysis?.timeZone]);
+  const projectGroups = useMemo(() => groupByProject ? groupTasksByProject(mergedJobs.map(job => ({ ...job, estimated20xPercent: job.lifetime20xPercent, estimated20xIsComplete: job.lifetime20xIsComplete })), displayed, sort, direction, activeIds, language).filter(g => !search.trim() || g.jobs.length > 0) : [],
+    [groupByProject, mergedJobs, displayed, sort, direction, activeIds, language, search]);
   const sections = groupByProject ? projectGroups.map(group => ({ id: group.id, group, jobs: collapsed.has(group.id) ? [] : group.jobs })) : [{ id: 'ungrouped', group: null, jobs: displayed }];
   const headerSortKey = (key: TaskSortColumn): TaskSortColumn => key === 'usage' && sort === 'equivalent20x' ? 'equivalent20x' : key;
   const nextDirection = (key: TaskSortColumn): SortDirection => sort === key ? direction === 'asc' ? 'desc' : 'asc' : key === 'task' || key === 'status' ? 'asc' : 'desc';
-  const seconds = nextRefreshAt ? Math.min(interval / 1000, Math.max(0, Math.ceil((nextRefreshAt - nowMs) / 1000))) : 0;
   const quotaTitle = t('Selected account usage uses the same calibration as cross-account equivalents, counting only this quota period’s records with a matching weekly reset (within 60 seconds). Missing matches and prices are excluded. Matching reset times estimate account identity; they do not prove it. One {plan} week = 100%.', { plan: planLabel });
   const equivalentPair = (current: number | null | undefined, currentComplete: boolean | undefined, across: number | null | undefined, acrossComplete: boolean | undefined) => <span className="equivalent-pair" title={pairScope}>
     <span className={current != null ? 'value-quota' : 'value-muted'} title={quotaTitle} aria-label={t('Selected account · This period')}>{formatUsagePercent(comparePlanUsage(current ?? null, comparisonPlan), locale)}{current != null && !currentComplete ? '+' : ''}</span>
@@ -160,7 +162,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
         <details className="view-settings refresh-menu"><summary aria-label={t('More actions')} title={t('More actions')}>···</summary><div className="view-settings-content">
           <span className={`history-refresh ${error ? 'stale' : ''}`}>{t(error ? 'Update failed · showing last data' : loading ? 'Refreshing…' : 'Auto-updating')}</span>
           {updatedAt && <span className="muted-note">{t('Last successful refresh: {time}', { time: dateTime(new Date(updatedAt).toISOString()) })}</span>}
-          <span className="refresh-countdown">{loading ? t('Refreshing…') : nextRefreshAt ? t('Next refresh in {time}', { time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }) : t('Automatic refresh paused')}</span>
+          <span className="refresh-countdown">{loading ? t('Refreshing…') : nextRefreshAt ? t('Next refresh at {time}', { time: dateTime(new Date(nextRefreshAt).toISOString()) }) : t('Automatic refresh paused')}</span>
           <button type="button" className="small-control" disabled={loading} onClick={rebuildStatistics} title={t('Re-read logs in the current archive scope. Saved quota attribution is preserved.')}>{t('Rebuild statistics')}</button>
         </div></details>
       </div>

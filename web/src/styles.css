@@ -816,6 +816,12 @@ a {
 .quota-number > span { font-size: 13px; color: var(--ink); letter-spacing: 0; font-weight: 400; margin-left: 5px; }
 .quota-remaining-meter { height: 9px; background: var(--line); border-radius: 6px; margin: 9px 0; overflow: hidden; }
 .quota-remaining-meter > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.quota-meter-pair { display: grid; gap: 9px; margin-top: 10px; }
+.quota-meter-label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.quota-meter-label b { color: var(--accent-blue); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.quota-meter-pair .quota-remaining-meter { height: 6px; margin: 5px 0 0; }
+.quota-time-row .quota-meter-label b, .quota-time-row .quota-meter-label > span { color: var(--good); }
+.account-usage-row .quota-remaining-meter.quota-time-meter > span { background: var(--good); }
 .quota-stat-line { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
 .quota-stat-line b { color: var(--good); font-variant-numeric: tabular-nums; }
 .pace-note { cursor: pointer; color: var(--muted); font-size: 11px; margin-top: 8px; line-height: 1.5; }
@@ -1058,11 +1064,37 @@ a {
 .official-usage-breakdowns li strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .equivalent-pair { display: inline-flex; align-items: baseline; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .equivalent-divider { color: var(--muted); padding: 0 7px; font-weight: 400; }
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
-.service-controls { position: relative; display: flex; align-items: center; gap: 8px; }
-.service-control-button { color: var(--text); white-space: nowrap; }
+.topbar { flex-wrap: wrap; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+.service-controls { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.service-version-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; padding-right: 4px; font-size: 11px; }
+.service-version-values { display: grid; gap: 3px; margin: 0; min-width: 0; }
+.service-version-values > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.service-version-values dt { color: var(--muted); white-space: nowrap; }
+.service-version-values dd { margin: 0; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.service-version-commit { margin-left: 5px; color: var(--muted); font-size: 10px; }
+.service-version-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.service-version-button.service-version-current { color: var(--muted); }
+.service-version-button.service-version-retry { color: var(--warn); }
+.service-update-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--warn); }
+.service-control-button { color: var(--ink); white-space: nowrap; }
+.service-control-update-available { color: var(--ink); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 24%, var(--surface)); font-weight: 650; box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 35%, transparent); }
+.service-control-update-available:hover:not(:disabled) { background: color-mix(in srgb, var(--warn) 36%, var(--surface)); }
 .service-control-button:disabled { opacity: .5; cursor: not-allowed; }
-.service-control-status { position: absolute; right: 0; top: calc(100% + 8px); width: 260px; padding: 10px 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; line-height: 1.5; }.quota-account-switcher { display: flex; gap: 6px; align-items: center; margin-top: 12px; min-width: 0; }
+.service-control-status { position: absolute; z-index: 20; right: 0; top: calc(100% + 8px); width: min(340px, calc(100vw - 32px)); padding: 10px 30px 10px 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; line-height: 1.5; box-shadow: var(--shadow); overflow-wrap: anywhere; }
+.service-status-dismiss { position: absolute; top: 6px; right: 6px; border: 0; border-radius: 4px; padding: 2px 5px; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+.service-status-dismiss:hover { color: var(--ink); background: var(--surface-soft); }
+.service-control-status-error { border-color: var(--alert); }
+.service-update-version, .service-update-error { display: block; margin-top: 4px; color: var(--muted); }
+.service-update-error { max-height: 180px; overflow-y: auto; }
+@media (max-width: 650px) {
+  .topbar-actions, .service-controls { max-width: 100%; flex-wrap: wrap; }
+  .topbar-actions { margin-left: 0; }
+}
+@media (max-width: 480px) {
+  .service-version-summary { flex-basis: 100%; }
+}
+.quota-account-switcher { display: flex; gap: 6px; align-items: center; margin-top: 12px; min-width: 0; }
 .quota-account-switcher select { flex: 1; min-width: 0; width: 0; text-overflow: ellipsis; }
 .quota-account-switcher button { flex-shrink: 0; padding-inline: 10px; }
 .quota-account-switcher button:disabled { opacity: .4; cursor: default; }

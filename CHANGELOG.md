@@ -10,6 +10,16 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.4.7 — 2026-09-27
+
+- 网页增加“更新”：从本仓库 `main` 下载构建后，自动停止、安装并重启；保留配置与缓存，失败回滚。
+- 页头显示当前／仓库版本，状态与更新合为单个按钮，支持重新检查与失败重试；用量总览恢复剩余额度与剩余时间双进度条。
+- 降低后台开销：任务默认 10 分钟、账号额度 5 分钟、活动检测 1 分钟；支持 30／60 分钟刷新，隐藏页面暂停统计轮询，自动关机保留快速活动检测。
+
+验证：391 项测试通过、2 项跳过；类型检查、构建及本机部署通过。更新中英文首页截图，均使用演示数据。
+
+English: Add an on-demand repository update button with staged builds, restart and rollback; show installed/repository versions and update alerts. Restore paired quota/time remaining bars. Slow ordinary polling, pause hidden-page statistics, and retain fast activity checks for shutdown automation.
+
 ## v0.4.6 — 2026-09-27
 
 - Windows 根入口和桌面快捷启动支持 Codex 自带的 PowerShell 7，修复未单独安装 PowerShell 7 时无法启动。

@@ -1,0 +1,231 @@
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import { RepositoryVersionChecker, VERSION_CACHE_MS, VERSION_MANUAL_CACHE_MS, VERSION_RETRY_MS } from '../service-version';
+import { installServiceControl } from '../service-control';
+import { ServiceUpdater } from '../service-update';
+
+const currentCommit = '1'.repeat(40), remoteCommit = '2'.repeat(40);
+let root: string;
+let time: number;
+beforeEach(() => { root = mkdtempSync(path.join(os.tmpdir(), 'monitor-version-test-')); time = Date.UTC(2026, 8, 27); });
+afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+function setup(options: { commit?: string | null; version?: string; remoteVersion?: string; remoteCommit?: string; localChanges?: boolean } = {}) {
+  const request = vi.fn<typeof fetch>(async input => new Response(JSON.stringify(String(input).includes('/compare/')
+    ? { status: 'ahead', ahead_by: 1, behind_by: 0 } : String(input).includes('api.github.com')
+    ? { object: { sha: options.remoteCommit ?? remoteCommit, type: 'commit' } }
+    : { name: 'codex-monitor', version: options.remoteVersion ?? '0.4.7' }), { status: 200 }));
+  const deployment = { version: options.version ?? '0.4.6', commit: options.commit === undefined ? currentCommit : options.commit, localChanges: options.localChanges ?? false };
+  const create = () => new RepositoryVersionChecker({ root, deployment, fetch: request, now: () => time });
+  return { request, deployment, create, checker: create() };
+}
+
+it('compares the installed build with main and pins the version read to that revision', async () => {
+  const { checker, request } = setup();
+  expect(await checker.check()).toMatchObject({ currentVersion: '0.4.6', repositoryVersion: '0.4.7', repositoryCommit: remoteCommit,
+    updateAvailable: true, status: 'available', stale: false, checkedAt: new Date(time).toISOString() });
+  expect(request.mock.calls.map(call => call[0])).toEqual([
+    'https://api.github.com/repos/tabztggg/codex-monitor/git/ref/heads/main',
+    `https://raw.githubusercontent.com/tabztggg/codex-monitor/${remoteCommit}/package.json`,
+    `https://api.github.com/repos/tabztggg/codex-monitor/compare/${currentCommit}...${remoteCommit}?per_page=1`,
+  ]);
+  for (const [, options] of request.mock.calls) {
+    expect(options?.signal).toBeInstanceOf(AbortSignal);
+    expect(options?.redirect).toBe('error');
+    expect(options?.headers).not.toHaveProperty('Authorization');
+  }
+});
+
+it('detects new commits with an unchanged package version', async () => {
+  const { checker } = setup({ remoteVersion: '0.4.6' });
+  expect(await checker.check()).toMatchObject({ currentVersion: '0.4.6', repositoryVersion: '0.4.6', updateAvailable: true, status: 'available' });
+});
+
+it.each([
+  [{ status: 'behind', ahead_by: 0, behind_by: 2 }, false],
+  [{ status: 'diverged', ahead_by: 2, behind_by: 1 }, null],
+  [{ status: 'ahead', ahead_by: 1, behind_by: 1 }, null],
+] as const)('requires a confirmed forward update (%j)', async (comparison, available) => {
+  const { checker, request } = setup();
+  const original = request.getMockImplementation()!;
+  request.mockImplementation((input, options) => String(input).includes('/compare/')
+    ? Promise.resolve(new Response(JSON.stringify(comparison))) : original(input, options));
+  expect(await checker.check()).toMatchObject({ updateAvailable: available, status: available === null ? 'unavailable' : 'current' });
+});
+
+it('keeps fetched metadata when commit comparison fails, without guessing update availability', async () => {
+  const { checker, request } = setup();
+  const original = request.getMockImplementation()!;
+  request.mockImplementation((input, options) => String(input).includes('/compare/')
+    ? Promise.resolve(new Response('{}', { status: 404 })) : original(input, options));
+  expect(await checker.check()).toMatchObject({ repositoryVersion: '0.4.7', repositoryCommit: remoteCommit,
+    updateAvailable: null, status: 'unavailable', stale: true });
+});
+
+it('invalidates the comparison cache when a different build has been installed', async () => {
+  const { checker, request, deployment } = setup();
+  await checker.check();
+  const next = new RepositoryVersionChecker({ root, deployment: { ...deployment, commit: remoteCommit, version: '0.4.7' }, fetch: request, now: () => time });
+  expect(await next.check()).toMatchObject({ currentVersion: '0.4.7', updateAvailable: false, status: 'current' });
+  expect(request).toHaveBeenCalledTimes(5);
+});
+
+it('identifies a matching repository commit while retaining the local-change marker', async () => {
+  const { checker } = setup({ remoteCommit: currentCommit, remoteVersion: '0.4.6', localChanges: true });
+  expect(await checker.check()).toMatchObject({ updateAvailable: false, status: 'current', localChanges: true });
+});
+
+it.each(['0.4.6', '0.4.7', 'unknown'])('does not infer update availability from version %s without an installed commit', async version => {
+  const { checker } = setup({ commit: null, version, remoteVersion: '0.4.6' });
+  expect(await checker.check()).toMatchObject({ updateAvailable: null, status: 'unavailable', repositoryVersion: '0.4.6', stale: false });
+});
+
+it('deduplicates concurrent clients and reuses a 30 minute cache across restarts', async () => {
+  const { checker, request, create } = setup();
+  await Promise.all(Array.from({ length: 20 }, () => checker.check()));
+  expect(request).toHaveBeenCalledTimes(3);
+  time += VERSION_CACHE_MS - 1;
+  await create().check();
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(3);
+  time++;
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(6);
+});
+
+it('lets manual checks bypass a successful cache after a shared, persisted 5 minute cooldown', async () => {
+  const { checker, request, create } = setup();
+  const known = await checker.check();
+  time += VERSION_MANUAL_CACHE_MS - 1;
+  expect(await checker.check(true)).toEqual(known);
+  expect(await create().check(true)).toEqual(known);
+  expect(request).toHaveBeenCalledTimes(3);
+  time++;
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(3);
+  const results = await Promise.all(Array.from({ length: 20 }, () => checker.check(true)));
+  expect(request).toHaveBeenCalledTimes(6);
+  for (const result of results) expect(result).toMatchObject({ status: 'available', checkedAt: new Date(time).toISOString() });
+  expect(await create().check(true)).toEqual(results[0]);
+  expect(request).toHaveBeenCalledTimes(6);
+});
+
+it('shares an in-flight manual refresh with automatic and manual readers', async () => {
+  const { checker, request } = setup();
+  await checker.check();
+  time += VERSION_MANUAL_CACHE_MS;
+  const original = request.getMockImplementation()!;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  request.mockImplementationOnce(async (input, options) => { await gate; return original(input, options); });
+  const refresh = checker.check(true);
+  expect(checker.check()).toBe(refresh);
+  expect(checker.check(true)).toBe(refresh);
+  expect(request).toHaveBeenCalledTimes(4);
+  release();
+  expect(await refresh).toMatchObject({ status: 'available', checkedAt: new Date(time).toISOString() });
+  expect(request).toHaveBeenCalledTimes(6);
+});
+
+it.each([false, true])('lets manual checks retry failures after 5 minutes, preserving prior results when present (%s)', async withPreviousResult => {
+  const { checker, request, create } = setup();
+  const original = request.getMockImplementation()!;
+  const known = withPreviousResult ? await checker.check() : null;
+  if (withPreviousResult) time += VERSION_MANUAL_CACHE_MS;
+  request.mockRejectedValue(new Error('offline'));
+  const failed = await checker.check(true);
+  expect(failed).toMatchObject({ status: 'unavailable', stale: true,
+    repositoryVersion: known?.repositoryVersion ?? null, checkedAt: known?.checkedAt ?? null });
+  const failedCallCount = request.mock.calls.length;
+  time += VERSION_MANUAL_CACHE_MS - 1;
+  const cached = await Promise.all(Array.from({ length: 20 }, () => checker.check(true)));
+  for (const result of cached) expect(result).toEqual(failed);
+  expect(await create().check(true)).toEqual(failed);
+  expect(request).toHaveBeenCalledTimes(failedCallCount);
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(failedCallCount);
+  time++;
+  request.mockImplementation(original);
+  expect(await checker.check(true)).toMatchObject({ status: 'available', stale: false, checkedAt: new Date(time).toISOString() });
+  expect(request).toHaveBeenCalledTimes(failedCallCount + 3);
+});
+
+it('retains the last successful result on failure and applies a persisted retry cooldown', async () => {
+  const { checker, request, create } = setup();
+  const known = await checker.check();
+  time += VERSION_CACHE_MS;
+  request.mockRejectedValue(new Error('offline'));
+  expect(await checker.check()).toMatchObject({ repositoryVersion: '0.4.7', repositoryCommit: remoteCommit,
+    updateAvailable: true, stale: true, status: 'unavailable', checkedAt: known.checkedAt });
+  for (let i = 0; i < 10; i++) await checker.check();
+  await create().check();
+  expect(request).toHaveBeenCalledTimes(4);
+  time += VERSION_RETRY_MS;
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(5);
+});
+
+it('shows unknown on an initial rate limit instead of claiming the installed version is current', async () => {
+  const { checker, request } = setup();
+  request.mockResolvedValue(new Response('{}', { status: 429 }));
+  expect(await checker.check()).toMatchObject({ currentVersion: '0.4.6', repositoryVersion: null,
+    updateAvailable: null, status: 'unavailable', stale: true, checkedAt: null });
+  await checker.check();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it.each(['wrong package', 'bad version', 'bad commit'])('rejects %s without reporting an update', async kind => {
+  const { checker, request } = setup();
+  request.mockImplementation(async input => new Response(JSON.stringify(String(input).includes('api.github.com')
+    ? { object: { sha: kind === 'bad commit' ? '../../main' : remoteCommit, type: 'commit' } }
+    : { name: kind === 'wrong package' ? 'other' : 'codex-monitor', version: kind === 'bad version' ? '<markup>' : '0.4.7' })));
+  expect(await checker.check()).toMatchObject({ repositoryVersion: null, updateAvailable: null, status: 'unavailable' });
+  if (kind === 'bad commit') expect(request).toHaveBeenCalledTimes(1);
+});
+
+it('ignores corrupt, foreign, or future-dated persistent results', async () => {
+  const { checker, request, create } = setup();
+  await checker.check();
+  const file = path.join(root, '.cache/service-version.json');
+  const good = JSON.parse(readFileSync(file, 'utf8'));
+  for (const value of ['{bad', JSON.stringify({ ...good, repository: 'other/project' }), JSON.stringify({ ...good, attemptedAt: time + 1 })]) {
+    writeFileSync(file, value);
+    await create().check();
+  }
+  expect(request).toHaveBeenCalledTimes(12);
+});
+
+it('keeps health/status reads offline and exposes version checks only through the dedicated read-only route', async () => {
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.4.6' }));
+  mkdirSync(path.join(root, '.cache'), { recursive: true });
+  const { checker, request } = setup();
+  const exits = vi.fn(), command = vi.fn(async () => '');
+  const app = express(); app.use(express.json());
+  installServiceControl(app, true, exits,
+    (instance, onReady) => new ServiceUpdater({ root, instance, onReady, supported: true, command }), () => checker);
+  const server = createServer(app);
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  try {
+    await fetch(`${base}/api/service`); await fetch(`${base}/api/service/health`);
+    expect(request).not.toHaveBeenCalled();
+    const response = await fetch(`${base}/api/service/versions?repository=ignored&force=true`);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toMatchObject({ status: 'available', repositoryVersion: '0.4.7' });
+    expect(request).toHaveBeenCalledTimes(3);
+    time += VERSION_MANUAL_CACHE_MS;
+    for (const query of ['', '?refresh=0', '?refresh=true', '?refresh=01', '?refresh=1&refresh=1', '?refresh[]=1', '?refresh[value]=1', '?force=true']) {
+      await fetch(`${base}/api/service/versions${query}`);
+      expect(request).toHaveBeenCalledTimes(3);
+    }
+    const refreshed = await fetch(`${base}/api/service/versions?refresh=1`);
+    expect(refreshed.headers.get('cache-control')).toBe('no-store');
+    expect(await refreshed.json()).toMatchObject({ status: 'available', checkedAt: new Date(time).toISOString() });
+    expect(request).toHaveBeenCalledTimes(6);
+    await fetch(`${base}/api/service/versions?refresh=1`);
+    expect(request).toHaveBeenCalledTimes(6);
+    expect(command).not.toHaveBeenCalled(); expect(exits).not.toHaveBeenCalled();
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});

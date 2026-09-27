@@ -15,6 +15,8 @@ import { overallUsageWindow, quotaPace } from "./presentation";
 import { useMonitorState } from "./useMonitorState";
 import { LanguageSwitch, useI18n } from './LanguageContext';
 import type { Translate } from './localization';
+import { DASHBOARD_CLOCK_INTERVAL_MS } from '../../shared/polling';
+import { startVisiblePolling } from './visible-polling';
 
 const EMPTY_SNAPSHOT: MonitorSnapshot = {
   generatedAt: "",
@@ -67,7 +69,9 @@ export default function App() {
   const { t, error: errorText } = useI18n();
   const { snapshot, error, connectionLabel } = useMonitorState();
   const safeSnapshot = snapshot ?? EMPTY_SNAPSHOT;
-  const nowMs = useNow(1000);
+  const needsCountdown = safeSnapshot.globalAutomation.policy.enabled || safeSnapshot.activeShutdown.scheduled ||
+    safeSnapshot.runs.some(run => run.automationPolicy.enabled);
+  const nowMs = useNow(needsCountdown ? 1000 : DASHBOARD_CLOCK_INTERVAL_MS);
   const topbarRef = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
@@ -264,6 +268,7 @@ function AccountUsageRow({
   const remaining = unavailable || expired ? null : window.remainingPercent;
   const difference = unavailable ? null : pace?.difference ?? null;
   const elapsed = unavailable ? null : pace?.elapsed ?? null;
+  const remainingTime = elapsed === null ? null : 100 - elapsed;
   const heading = difference === null ? "Pace unavailable" : difference > 5 ? "Usage is ahead of elapsed time" : difference < -5 ? "Usage is below the proportional pace" : "Usage is in line with elapsed time";
   const resetAt = window?.resetsAt && Number.isFinite(Date.parse(window.resetsAt)) ? window.resetsAt : null;
   const periodFormatter = new Intl.DateTimeFormat(locale, {
@@ -299,12 +304,19 @@ function AccountUsageRow({
         ) : <>
           <div className="quota-balance">
             <div className="quota-number">{formatPercent(used)} <span>{t('Quota used')}</span></div>
-            <div className="usage-meter quota-remaining-meter" role="img" aria-label={`${t('Quota used')} ${formatPercent(used)}`}>
-              <span style={{ width: `${clampMeterPercent(used)}%` }} />
-            </div>
-            <div className="quota-stat-line">
-              <span>{t('remaining')} <b>{formatPercent(remaining)}</b></span>
-              <span>{t('Time elapsed')} <b>{formatPercent(elapsed)}</b></span>
+            <div className="quota-meter-pair">
+              <div className="quota-meter-row">
+                <div className="quota-meter-label"><span>{t('Remaining quota')}</span><b>{formatPercent(remaining)}</b></div>
+                <div className="usage-meter quota-remaining-meter" role="progressbar" aria-label={t('Remaining quota')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining === null ? undefined : clampMeterPercent(remaining)} aria-valuetext={formatPercent(remaining)}>
+                  <span style={{ width: `${clampMeterPercent(remaining)}%` }} />
+                </div>
+              </div>
+              <div className="quota-meter-row quota-time-row">
+                <div className="quota-meter-label"><span>{t('Time remaining in this period')}</span><b>{formatPercent(remainingTime)}</b></div>
+                <div className="usage-meter quota-remaining-meter quota-time-meter" role="progressbar" aria-label={t('Time remaining in this period')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={remainingTime === null ? undefined : clampMeterPercent(remainingTime)} aria-valuetext={formatPercent(remainingTime)}>
+                  <span style={{ width: `${clampMeterPercent(remainingTime)}%` }} />
+                </div>
+              </div>
             </div>
             <details className="quota-pace">
               <summary className={`pace-note ${difference !== null && difference > 5 ? "fast" : ""}`}>{expired ? t('Waiting for the renewed quota') : t(heading)}</summary>
@@ -601,15 +613,7 @@ function automationDescription(snapshot: MonitorSnapshot, nowMs: number, t: Tran
 function useNow(intervalMs: number): number {
   const [nowMs, setNowMs] = useState(Date.now());
 
-  useEffect(() => {
-    const handle = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, intervalMs);
-
-    return () => {
-      window.clearInterval(handle);
-    };
-  }, [intervalMs]);
+  useEffect(() => startVisiblePolling({ intervalMs, task: async () => { setNowMs(Date.now()); } }), [intervalMs]);
 
   return nowMs;
 }

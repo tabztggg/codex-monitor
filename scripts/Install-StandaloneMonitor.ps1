@@ -24,7 +24,7 @@ if ($task) {
   Export-ScheduledTask -TaskName $config.taskName | Set-Content (Join-Path $backup 'scheduled-task.xml')
 }
 & (Join-Path $PSScriptRoot 'Build-StandaloneMonitorHost.ps1')
-foreach ($name in @('dist','standalone.json','Run-StandaloneMonitor.exe','Run-StandaloneMonitor.ps1','Manage-StandaloneMonitor.ps1','Start-CodexMonitorHidden.vbs')) {
+foreach ($name in @('dist','standalone.json','deployment.json','Run-StandaloneMonitor.exe','Run-StandaloneMonitor.ps1','Manage-StandaloneMonitor.ps1','Start-CodexMonitorHidden.vbs','Update-StandaloneMonitor.ps1')) {
   $old=Join-Path $InstallRoot $name
   if(Test-Path $old){Copy-Item -LiteralPath $old -Destination $backup -Recurse}
 }
@@ -50,12 +50,28 @@ Get-CimInstance Win32_Process -Filter "Name='CodexMonitorCompanion.exe' OR Name=
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 if($task){Stop-ScheduledTask -TaskName $config.taskName}
 $config | ConvertTo-Json -Depth 10 | Set-Content $configFile -Encoding UTF8
-foreach($name in @('Run-StandaloneMonitor.ps1','Manage-StandaloneMonitor.ps1','Start-CodexMonitorHidden.vbs','StandaloneMonitorRuntime.cs')){Copy-Item (Join-Path $PSScriptRoot $name) $InstallRoot -Force}
+foreach($name in @('Run-StandaloneMonitor.ps1','Manage-StandaloneMonitor.ps1','Start-CodexMonitorHidden.vbs','StandaloneMonitorRuntime.cs','Update-StandaloneMonitor.ps1')){Copy-Item (Join-Path $PSScriptRoot $name) $InstallRoot -Force}
 Copy-Item (Join-Path $repo '.cache/standalone-host/Run-StandaloneMonitor.exe') $InstallRoot -Force
 Copy-Item (Join-Path $repo 'dist') $InstallRoot -Recurse -Force
 Copy-Item (Join-Path $repo 'package.json'),(Join-Path $repo 'package-lock.json') $InstallRoot -Force
 if(-not $SkipDependencies){Push-Location $InstallRoot;try{npm ci --omit=dev; if($LASTEXITCODE -ne 0){throw 'Dependency installation failed'}}finally{Pop-Location}}
 elseif(-not(Test-Path (Join-Path $InstallRoot 'node_modules'))){throw 'Dependencies missing; rerun without SkipDependencies'}
+$commit = $null
+$dirty = $null
+if (Get-Command git -ErrorAction SilentlyContinue) {
+  $gitRoot = & git -C $repo rev-parse --show-toplevel 2>$null
+  if ($LASTEXITCODE -eq 0 -and [IO.Path]::GetFullPath([string]$gitRoot) -eq [IO.Path]::GetFullPath($repo)) {
+    $candidate = & git -C $repo rev-parse HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $candidate -match '^[0-9a-f]{40}$') {
+      $commit = [string]$candidate
+      $changes = & git -C $repo status --porcelain --untracked-files=normal 2>$null
+      if ($LASTEXITCODE -eq 0) { $dirty = [bool]$changes }
+    }
+  }
+}
+$package = Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json
+@{version=$package.version;commit=$commit;dirty=$dirty;installedAt=[DateTimeOffset]::UtcNow.ToString('o');repository='https://github.com/tabztggg/codex-monitor'} |
+  ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot 'deployment.json') -Encoding utf8
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
 $action=New-ScheduledTaskAction -Execute (Join-Path $InstallRoot 'Run-StandaloneMonitor.exe') -Argument ('"'+(Join-Path $InstallRoot 'Run-StandaloneMonitor.ps1')+'"') -WorkingDirectory $InstallRoot
 $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user

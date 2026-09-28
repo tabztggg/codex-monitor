@@ -58,7 +58,8 @@ jobs:
       - name: Validate Debian installer
         if: runner.os == 'Linux'
         run: |
-          sudo dpkg -i release/*.deb
+          sudo apt-get update
+          sudo apt-get install -y ./release/*.deb
           test -x /opt/codex-monitor/codex-monitor
           npm run package:smoke -- /opt/codex-monitor
           /opt/codex-monitor/runtime/node /opt/codex-monitor/dist/launcher/integration.mjs install /opt/codex-monitor

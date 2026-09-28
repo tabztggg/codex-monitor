@@ -26,6 +26,8 @@ import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
 import { readProjectResolver } from './project-metadata';
 import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
 import { IncrementalSessionLog } from './session-log-reader';
+import { modelUsageForTask, mergeModelUsage, type ModelUsageEvent } from './history-analytics';
+import { estimateApiEquivalentCost, HISTORY_PRICING } from './history-pricing';
 
 type SessionFile = {
   path: string;
@@ -40,6 +42,8 @@ type CachedHistoryJob = {
   size: number;
   parsedAtMs: number;
   usageWindowStartedAtMs: number | null;
+  /** Daily groupings are local-calendar values, unlike event timestamps. */
+  timeZone?: string;
   job: ParsedHistoryJob | null;
   ctimeMs?: number;
   identity?: string;
@@ -55,6 +59,7 @@ type CompactHistoryData = {
 };
 
 type ParsedHistoryJob = HistoryJob & {
+  modelUsageVersion?: 1;
   usageEvents?: ParsedUsageEvent[];
   parsedTurns?: ParsedTurn[];
   dailyUsage?: HistoryUsageDay[];
@@ -68,7 +73,7 @@ type ParsedHistoryJob = HistoryJob & {
   isSubagent: boolean;
 };
 
-type ParsedUsageEvent = {
+type ParsedUsageEvent = ModelUsageEvent & {
   id: string | null;
   at: number | null;
   usage: TokenUsage;
@@ -96,13 +101,6 @@ type ParsedTurn = {
   durationMs: number | null;
 };
 
-type ModelPricing = {
-  input: number;
-  cachedInput: number;
-  cacheWriteInput: number;
-  output: number;
-};
-
 type UsageWindow = {
   usedPercent: number;
   startedAtMs: number;
@@ -113,25 +111,8 @@ type UsageWindow = {
 
 const ROLLING_USAGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-// Standard API prices in USD per million tokens, GPT-6 rates verified 2026-09-26: https://developers.openai.com/api/docs/pricing
-// This is an API-equivalent estimate: ChatGPT plan usage is not billed this way.
-const MODEL_PRICING: Record<string, ModelPricing> = {
-  "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 10 },
-  "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWriteInput: 0.125, output: 0.5 },
-  "gpt-6-astra": { input: 10, cachedInput: 1, cacheWriteInput: 12.5, output: 50 },
-  "gpt-5.6": { input: 4, cachedInput: 0.4, cacheWriteInput: 5, output: 20 },
-  "gpt-5.6-sol": { input: 4, cachedInput: 0.4, cacheWriteInput: 5, output: 20 },
-  "gpt-5.6-terra": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 12 },
-  "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, cacheWriteInput: 0.25, output: 1.2 },
-  "gpt-5.5": { input: 5, cachedInput: 0.5, cacheWriteInput: 6.25, output: 30 },
-  "gpt-5.4-mini": { input: 0.75, cachedInput: 0.075, cacheWriteInput: 0.9375, output: 4.5 },
-  "gpt-5.3-codex": { input: 1.75, cachedInput: 0.175, cacheWriteInput: 2.1875, output: 14 },
-  "gpt-5.2-codex": { input: 1.75, cachedInput: 0.175, cacheWriteInput: 2.1875, output: 14 },
-  "gpt-5-codex": { input: 1.25, cachedInput: 0.125, cacheWriteInput: 1.5625, output: 10 }
-};
-
 const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
-const ARCHIVE_CACHE_VERSION = 3;
+const ARCHIVE_CACHE_VERSION = 4;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
@@ -172,6 +153,7 @@ export class HistoryJobReader {
     forceRefresh?: boolean;
   }): HistoryJobListResponse {
     const nowMs = args.nowMs ?? Date.now();
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const period = args.period ?? 'quota';
     const parseDay = (v?: string) => {
       if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error('Invalid date range');
@@ -236,11 +218,13 @@ export class HistoryJobReader {
     const parsedJobs = sessionFiles
       .map((file) => {
         const previous = this.cache.get(file.path);
-        const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null, Boolean(args.forceRefresh));
+        const job = this.readJob(file, nowMs, args.usageWindow?.startedAtMs ?? null, timeZone, Boolean(args.forceRefresh));
         const archived = archivedPaths.has(file.path);
         const next = this.cache.get(file.path);
         if (archived && (previous?.compact !== next?.compact || previous?.mtimeMs !== next?.mtimeMs || previous?.size !== next?.size ||
+            previous?.timeZone !== next?.timeZone ||
             previous?.job?.quotaCalibrationVersion !== next?.job?.quotaCalibrationVersion ||
+            previous?.job?.modelUsageVersion !== next?.job?.modelUsageVersion ||
             Boolean(previous?.job?.usageEvents) !== Boolean(next?.job?.usageEvents) ||
             Boolean(previous?.job?.parsedTurns) !== Boolean(next?.job?.parsedTurns))) this.archiveCacheDirty = true;
         return job ? { ...job, archived } : null;
@@ -263,10 +247,9 @@ export class HistoryJobReader {
     const ledger = this.attribution.read(key);
     const selectedDays = new Map<string, HistoryUsageDay[]>();
     const selectedStart = customStart ?? periodStart(period, nowMs, window?.startedAtMs ?? null);
-    const allJobs = consolidated.map(({ parsedTurns: _turns, usageEvents: _usageEvents, quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, hasIncompleteUsage = false, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
+    const allJobs = consolidated.map(({ parsedTurns: _turns, usageEvents: _usageEvents, modelUsageVersion: _modelVersion, quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, hasIncompleteUsage = false, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
       const days = (period === 'quota' ? quotaDailyUsage ?? [] : dailyUsage ?? [])
         .filter(day => (!selectedStart || day.date >= localDay(selectedStart)) && day.date <= localDay(selectedEnd));
-      selectedDays.set(job.id, days);
       const usage = period === 'lifetime' ? job.totalUsage : period === 'quota' ? job.sinceResetUsage
         : days.reduce<TokenUsage | null>((sum, day) => addUsage(sum, day.usage), null);
       const priced = days.filter(day => day.costUsd !== null);
@@ -274,8 +257,25 @@ export class HistoryJobReader {
         : priced.length ? priced.reduce((sum, day) => sum + day.costUsd!, 0) : null;
       const unpriced = period === 'lifetime' ? totalUnpricedTokens : period === 'quota' ? job.sinceResetUnpricedTokens ?? 0 : days.reduce((sum, day) => sum + day.unpricedTokens, 0);
       const available = period !== 'quota' || Boolean(window && weekEnd > nowMs);
+      const selectedEvents = available ? (_usageEvents ?? []).filter(event => !event.duplicate &&
+        (period === 'lifetime' || event.at !== null && event.at >= (selectedStart ?? 0) && event.at <= selectedEnd)) : [];
+      const scopeComplete = !hasIncompleteUsage && (period === 'lifetime' || untimedTokens === 0);
+      const models = modelUsageForTask(selectedEvents, scopeComplete);
+      const eventsByDay = new Map<string, ParsedUsageEvent[]>();
+      for (const event of selectedEvents) if (event.at !== null && event.at <= selectedEnd) {
+        const date = localDay(event.at);
+        const daily = eventsByDay.get(date) ?? [];
+        daily.push(event);
+        eventsByDay.set(date, daily);
+      }
+      const modelDays = available ? days.map(day => ({ ...day,
+        models: modelUsageForTask(eventsByDay.get(day.date) ?? [], !hasIncompleteUsage && untimedTokens === 0)
+      })) : [];
+      selectedDays.set(job.id, modelDays);
       const emptyKnown = available && Boolean(job.totalUsage) && !usage && untimedTokens === 0 && !hasIncompleteUsage;
       const periodMetrics: HistoryPeriodMetrics = {
+        days: modelDays,
+        models,
         tokensComplete: available && !hasIncompleteUsage && Boolean(usage || emptyKnown) && (period === 'lifetime' || untimedTokens === 0),
         usage: available ? usage ?? (emptyKnown ? { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 } : null) : null,
         costUsd: available ? cost ?? (emptyKnown ? 0 : null) : null,
@@ -310,8 +310,10 @@ export class HistoryJobReader {
     return {
       analysis: {
         period, startedAt: selectedStart === null ? null : new Date(selectedStart).toISOString(),
-        endedAt: new Date(selectedEnd).toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        days: mergeDays(...jobs.map(job => selectedDays.get(job.id))),
+        endedAt: new Date(selectedEnd).toISOString(), timeZone,
+        days: mergeAnalysisDays(jobs.map(job => selectedDays.get(job.id))),
+        models: mergeModelUsage(...jobs.map(job => job.periodMetrics?.models)),
+        pricing: cloneValue(HISTORY_PRICING),
         unpricedTokens: jobs.reduce((sum, job) => sum + (job.periodMetrics?.unpricedTokens ?? 0), 0),
         untimedTokens: jobs.reduce((sum, job) => sum + (job.periodMetrics?.untimedTokens ?? 0), 0)
       },
@@ -335,12 +337,13 @@ export class HistoryJobReader {
     file: SessionFile,
     nowMs: number,
     usageWindowStartedAtMs: number | null,
+    timeZone: string,
     forceRefresh = false
   ): ParsedHistoryJob | null {
     const cached = this.cache.get(file.path);
     const unchanged = Boolean(!forceRefresh && cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.job?.quotaCalibrationVersion === 7 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.timeZone === timeZone && cached?.job?.quotaCalibrationVersion === 7 && cached.job.modelUsageVersion === 1 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -371,7 +374,7 @@ export class HistoryJobReader {
       if (job) job.preview = compact.preview;
       this.cache.set(file.path, {
         mtimeMs: file.mtimeMs, size: file.size, ctimeMs: file.ctimeMs, identity: file.identity,
-        parsedAtMs: nowMs, usageWindowStartedAtMs, job, compact
+        parsedAtMs: nowMs, usageWindowStartedAtMs, timeZone, job, compact
       });
       return cloneValue(job);
     } catch (error) {
@@ -449,7 +452,7 @@ export class HistoryJobReader {
     try {
       const stored = JSON.parse(readFileSync(this.archiveCacheFile, 'utf8'));
       // Bump the version whenever the parser or model pricing changes.
-      if (stored.version !== ARCHIVE_CACHE_VERSION || stored.root !== path.resolve(this.archivedRoot) || !Array.isArray(stored.entries)) return;
+      if (![3, ARCHIVE_CACHE_VERSION].includes(stored.version) || stored.root !== path.resolve(this.archivedRoot) || !Array.isArray(stored.entries)) return;
       const entries = stored.entries as [string, CachedHistoryJob][];
       for (const [file, cached] of entries) {
         const relative = path.relative(this.archivedRoot, file);
@@ -462,8 +465,8 @@ export class HistoryJobReader {
         }
       }
       for (const [file, cached] of entries) {
-        // Version 2 summaries predate the compact numeric timeline. Keep their
-        // optional upgrade lazy: only selected archives are read to populate it.
+        // Version 3 already retained model contexts in the compact timeline.
+        // Upgrade selected summaries in memory; no transcript reread is needed.
         this.cache.set(file, cached);
       }
     } catch (error) {
@@ -635,6 +638,16 @@ function readSessionNames(indexPath: string): Map<string, string> {
   return names;
 }
 
+function mergeAnalysisDays(sets: (HistoryUsageDay[] | undefined)[]): HistoryUsageDay[] {
+  const modelsByDay = new Map<string, HistoryUsageDay['models'][]>();
+  for (const set of sets) for (const day of set ?? []) {
+    const models = modelsByDay.get(day.date) ?? [];
+    models.push(day.models);
+    modelsByDay.set(day.date, models);
+  }
+  return mergeDays(...sets).map(day => ({ ...day, models: mergeModelUsage(...modelsByDay.get(day.date) ?? []) }));
+}
+
 function mergeJobsByTask(jobs: ParsedHistoryJob[], nowMs: number, usageWindowStartedAtMs: number | null): ParsedHistoryJob[] {
   const merged = new Map<string, ParsedHistoryJob>();
 
@@ -755,6 +768,7 @@ function mergeUsageEvents(left: ParsedUsageEvent[], right: ParsedUsageEvent[]): 
     // A complete rollout can prove that a fragment starts with a rate-limit
     // refresh rather than a new response. Preserve that stronger evidence.
     if (!previous || (!previous.duplicate && event.duplicate) ||
+        (!previous.duplicate && !event.duplicate && previous.model === null && event.model !== null) ||
         (!previous.duplicate && !event.duplicate && previous.cost === null && event.cost !== null)) {
       identified.set(event.id, event);
     }
@@ -764,8 +778,8 @@ function mergeUsageEvents(left: ParsedUsageEvent[], right: ParsedUsageEvent[]): 
 
 function summarizeUsageEvents(events: ParsedUsageEvent[], nowMs: number, windowStart: number | null) {
   const usage = events.filter(event => !event.duplicate);
-  const recent = usage.filter(event => event.at !== null && event.at >= nowMs - ROLLING_USAGE_WINDOW_MS);
-  const quota = usage.filter(event => windowStart !== null && event.at !== null && event.at >= windowStart);
+  const recent = usage.filter(event => event.at !== null && event.at >= nowMs - ROLLING_USAGE_WINDOW_MS && event.at <= nowMs);
+  const quota = usage.filter(event => windowStart !== null && event.at !== null && event.at >= windowStart && event.at <= nowMs);
   const sumUsage = (values: ParsedUsageEvent[]) => values.reduce<TokenUsage | null>((sum, event) => addUsage(sum, event.usage), null);
   const sumCost = (values: ParsedUsageEvent[]) => values.some(event => event.cost !== null)
     ? values.reduce((sum, event) => sum + (event.cost ?? 0), 0) : null;
@@ -808,6 +822,9 @@ function consolidateSubagentUsage(jobs: ParsedHistoryJob[]): ParsedHistoryJob[] 
     }
 
     target.updatedAt = latestIso(target.updatedAt, job.updatedAt);
+    // Different child sessions are independent streams: identical counters and
+    // timestamps across them are not evidence of a duplicate response.
+    target.usageEvents = [...target.usageEvents ?? [], ...job.usageEvents ?? []];
     target.dailyUsage = mergeDays(target.dailyUsage, job.dailyUsage);
     target.quotaDailyUsage = mergeDays(target.quotaDailyUsage, job.quotaDailyUsage);
     target.quotaCalibrationEvents = [...target.quotaCalibrationEvents ?? [], ...job.quotaCalibrationEvents ?? []];
@@ -1091,7 +1108,7 @@ export function parseHistorySessionFile(args: {
         asString(payload?.model_provider) ??
         asString(payload?.modelProvider) ??
         modelProvider;
-      activeModel = asString(payload?.model) ?? activeModel;
+      activeModel = asString(payload?.model)?.trim() || null;
       continue;
     }
 
@@ -1154,7 +1171,8 @@ export function parseHistorySessionFile(args: {
         const occurrence = key === null ? 0 : (usageEventOccurrences.get(key) ?? 0) + 1;
         if (key !== null) usageEventOccurrences.set(key, occurrence);
         usageEvents.push({ id: key === null ? null : createHash('sha256').update(`${key}:${occurrence}`).digest('hex'),
-          at: recordTimestampMs, usage: increment, cost: incrementCost, duplicate });
+          at: recordTimestampMs, usage: increment, cost: incrementCost, duplicate,
+          model: activeModel, tokensComplete: incrementComplete });
       }
       if (recordTimestampMs !== null && recordTimestampMs <= args.nowMs) {
         const sampleId = calibrationSampleId(sessionId, recordTimestampMs, increment, cumulative, payload?.rate_limits);
@@ -1205,6 +1223,7 @@ export function parseHistorySessionFile(args: {
       if (
         increment &&
         recordTimestampMs !== null &&
+        recordTimestampMs <= args.nowMs &&
         recordTimestampMs >= args.nowMs - ROLLING_USAGE_WINDOW_MS
       ) {
         last24HoursUsage = addTokenUsage(last24HoursUsage, increment);
@@ -1221,6 +1240,7 @@ export function parseHistorySessionFile(args: {
         args.usageWindowStartedAtMs !== null &&
         args.usageWindowStartedAtMs !== undefined &&
         recordTimestampMs !== null &&
+        recordTimestampMs <= args.nowMs &&
         recordTimestampMs >= args.usageWindowStartedAtMs
       ) {
         sinceResetUsage = addTokenUsage(sinceResetUsage, increment);
@@ -1254,6 +1274,7 @@ export function parseHistorySessionFile(args: {
   return {
     id: sessionId,
     usageEvents,
+    modelUsageVersion: 1,
     parsedTurns: sortedTurns,
     quotaCalibrationEvents,
     quotaCalibrationVersion: 7,
@@ -1638,32 +1659,6 @@ function addTokenUsage(
       (total?.reasoningOutputTokens ?? 0) + increment.reasoningOutputTokens,
     totalTokens: (total?.totalTokens ?? 0) + increment.totalTokens
   };
-}
-
-function estimateApiEquivalentCost(
-  usage: TokenUsage,
-  model: string | null
-): number | null {
-  const pricing = model ? MODEL_PRICING[model] : null;
-  if (!pricing) {
-    return null;
-  }
-
-  const highContext = usage.inputTokens > 272000;
-  const inputMultiplier = highContext ? 2 : 1;
-  const outputMultiplier = highContext ? 1.5 : 1;
-  const cachedInput = Math.min(usage.cachedInputTokens, usage.inputTokens);
-  const uncachedInput = Math.max(0, usage.inputTokens - cachedInput);
-
-  return (
-    (uncachedInput * pricing.input * inputMultiplier +
-      cachedInput * pricing.cachedInput * inputMultiplier +
-      (usage.cacheWriteInputTokens ?? 0) *
-        pricing.cacheWriteInput *
-        inputMultiplier +
-      usage.outputTokens * pricing.output * outputMultiplier) /
-    1_000_000
-  );
 }
 
 function normalizeSourceKind(value: unknown): SourceKind | "unknown" | null {

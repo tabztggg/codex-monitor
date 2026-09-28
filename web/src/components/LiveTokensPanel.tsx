@@ -9,8 +9,9 @@ import './LiveTokensPanel.css';
 export const LIVE_TOKEN_POLL_MS = 5_000;
 export const LIVE_TOKEN_TIMEOUT_MS = 4_000;
 export const LIVE_TOKEN_STALE_MS = 15_000;
-type LiveTokenSeconds = LiveTokenWindow['seconds'];
+type LiveTokenSeconds = 1 | LiveTokenWindow['seconds'];
 const timeWindows = [
+  { seconds: 1, key: 'oneMinute', label: '1 s', description: 'Per-second average over the last minute' },
   { seconds: 60, key: 'oneMinute', label: '1 min', description: 'Last 1 minute' },
   { seconds: 300, key: 'fiveMinutes', label: '5 min', description: 'Last 5 minutes' },
   { seconds: 1200, key: 'twentyMinutes', label: '20 min', description: 'Last 20 minutes' },
@@ -104,11 +105,15 @@ export function LiveTokensView({ snapshot, failed = false, seconds, nowMs, onSel
   const updatedMs = snapshot ? Date.parse(snapshot.updatedAt) : NaN;
   const stale = ready && (failed || !Number.isFinite(updatedMs) || nowMs - updatedMs > LIVE_TOKEN_STALE_MS);
   const available = ready && !!window;
+  const perSecond = seconds === 1;
   const empty = available && window.sampleCount === 0;
-  const warming = !!snapshot && nowMs - Date.parse(snapshot.startedAt) < seconds * 1000;
+  const warming = !!snapshot && nowMs - Date.parse(snapshot.startedAt) < (perSecond ? 60 : seconds) * 1000;
   const cacheHit = available ? liveTokenCacheHitPercent(window) : null;
   const number = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 1 });
-  const count = (value: number | undefined) => available && value !== undefined ? formatTokenCount(value, locale) : '--';
+  const tokenTitle = (value: number | undefined) => available && value !== undefined
+    ? (perSecond ? value / 60 : value).toLocaleString(locale, { maximumFractionDigits: perSecond ? 2 : 1 }) : undefined;
+  const count = (value: number | undefined) => available && value !== undefined
+    ? perSecond ? (value / 60).toLocaleString(locale, { notation: 'compact', maximumFractionDigits: 2 }) : formatTokenCount(value, locale) : '--';
   const unavailable = window?.status === 'unavailable' || (!ready && failed);
   const state = stale ? 'Stale snapshot' : unavailable ? 'Unavailable' : !ready ? 'Collecting reports' : empty ? 'No reports in this window' : 'Recent reports';
   return <section className={`live-tokens-panel${stale ? ' live-tokens-stale' : ''}`} aria-label={t('Live token reports')}>
@@ -120,12 +125,12 @@ export function LiveTokensView({ snapshot, failed = false, seconds, nowMs, onSel
           aria-label={t(description)} onClick={() => onSelect(value)}>{t(label)}</button>)}
       </div>
     </div>
-    <p className="live-tokens-scope">{t('Local chats · Across accounts')}</p>
+    <p className="live-tokens-scope">{t('Local chats · Across accounts')}{perSecond ? ` · ${t('Per-second average · Last minute ÷ 60')}` : ''}</p>
     <dl className="live-tokens-metrics">
-      <div><dt>{t('Input')}</dt><dd title={available ? number(window.inputTokens) : undefined}>{count(window?.inputTokens)}</dd><small>{t('Includes cached input')}</small></div>
-      <div><dt>{t('Output')}</dt><dd title={available ? number(window.outputTokens) : undefined}>{count(window?.outputTokens)}</dd><small>{t('Includes reasoning output')}</small></div>
+      <div><dt>{t(perSecond ? 'Input (tok/s)' : 'Input')}</dt><dd title={tokenTitle(window?.inputTokens)}>{count(window?.inputTokens)}</dd><small>{t('Includes cached input')}</small></div>
+      <div><dt>{t(perSecond ? 'Output (tok/s)' : 'Output')}</dt><dd title={tokenTitle(window?.outputTokens)}>{count(window?.outputTokens)}</dd><small>{t('Includes reasoning output')}</small></div>
       <div><dt>{t('Cache hit')}</dt><dd>{cacheHit === null ? '--' : `${number(cacheHit)}%`}</dd><small>{t('Cached input / input')}</small></div>
-      <div><dt>{t('Reporting tasks')}</dt><dd>{available ? number(window.taskCount) : '--'}</dd><small>{t('Tasks with reports in this window')}</small></div>
+      <div><dt>{t('Reporting tasks')}</dt><dd>{available ? number(window.taskCount) : '--'}</dd><small>{t(perSecond ? 'Tasks reporting in the last minute' : 'Tasks with reports in this window')}</small></div>
     </dl>
     {snapshot && !stale && !unavailable && (warming || !ready) && <p className="live-tokens-observation">{t('Collecting since {time}', { time: time(snapshot.startedAt) })}{warming ? ` · ${t('Window still filling')}` : ''}</p>}
     {stale && <p className="live-tokens-warning" role="status">{t('Current window unavailable. Showing the last received snapshot.')}</p>}
@@ -135,6 +140,7 @@ export function LiveTokensView({ snapshot, failed = false, seconds, nowMs, onSel
       <details className="live-tokens-details">
         <summary><span className="live-tokens-memory">{t('Memory only · 1 hour')}</span><span className="live-tokens-details-label">{t('About these numbers')}</span></summary>
         <div className="live-tokens-details-content">
+          {perSecond && <p>{t('Per-second input and output are the last minute totals divided by 60, not measurements sampled every second. Cache hit and task count use the same minute.')}</p>}
           <p>{t('Windows count token reports when Monitor receives them, not when tokens are generated.')}</p>
           <p>{t('These statistics stay in memory for a rolling hour and clear when Monitor restarts. No history is saved.')}</p>
           <p>{t('Independent of account and date filters. Reports cannot be attributed to the current login. New tasks may take up to one minute to appear.')}</p>

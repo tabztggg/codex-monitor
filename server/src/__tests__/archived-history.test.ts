@@ -140,7 +140,7 @@ describe('archived task history', () => {
     const result = new HistoryJobReader(sessions, ledger).listJobs({ nowMs });
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toMatchObject({ id: 'recoverable', totalUsage: { totalTokens: 123 } });
-    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(3);
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(4);
   });
 
   it('retries a transient read error without requiring a log modification or restart', () => {

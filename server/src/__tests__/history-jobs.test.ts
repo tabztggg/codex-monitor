@@ -687,7 +687,8 @@ describe("MonitorService history jobs", () => {
       }}
     });
     notify(20);
-    writeSessionFile(sessionsRoot, '019e1b12-0000-7000-8000-000000000090', new Date(now).toISOString(), 'cli', 'new activity', { totalTokens: 100 });
+    // The helper emits its usage event 500 ms after the supplied task start.
+    writeSessionFile(sessionsRoot, '019e1b12-0000-7000-8000-000000000090', new Date(now - 1000).toISOString(), 'cli', 'new activity', { totalTokens: 100 });
     notify(22);
     notify(22, 'codex', -1);
     notify(80, 'codex_bengalfox');

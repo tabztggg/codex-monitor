@@ -91,7 +91,7 @@ describe('history source and usage integrity', () => {
     vi.mocked(fs.openSync).mockClear();
     expect(new HistoryJobReader(sessions, ledger).listJobs(options).data[0].totalUsage?.totalTokens).toBe(50);
     expect(vi.mocked(fs.openSync).mock.calls.some(call => String(call[0]) === file)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(3);
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).version).toBe(4);
   });
 
   it.each(['directory', 'stat', 'read'])('fails a %s error without returning or persisting a false empty snapshot', failure => {

@@ -8,29 +8,29 @@ This version builds on [manuelsh/codex-monitor](https://github.com/manuelsh/code
 
 This is an unofficial project. Account quota comes from Codex; task quota equivalents and costs are estimates for comparing usage, not actual charges.
 
-**[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · Fix quota updates after account switches and clarify version checks and retries. [Changelog](CHANGELOG.md)
+**[v0.5.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.0)** · Bundled-runtime installers, five usage-analysis features and per-second token averages. [Changelog](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-overview-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-overview-en.jpg">
-  <img alt="Usage overview: live tokens, remaining quota and time, range totals" src="assets/screenshots/v0.4.12-overview-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-overview-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-overview-en.jpg">
+  <img alt="Usage overview: account quota and live tokens" src="assets/screenshots/v0.5.0-overview-en.jpg">
 </picture>
 
-Screenshots of the actual v0.4.12 interface adapt to light and dark themes and use fictional accounts, tasks and usage.
+These 1280 × 720 views show parts of the v0.5.0 interface in light and dark themes, using fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-tasks-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-tasks-en.jpg">
-  <img alt="Task details: account selection, paired quota estimates and project groups" src="assets/screenshots/v0.4.12-tasks-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-tasks-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-tasks-en.jpg">
+  <img alt="Usage table on the task details page" src="assets/screenshots/v0.5.0-tasks-en.jpg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-trends-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-trends-en.jpg">
-  <img alt="Trends and methodology: daily usage and project/task rankings" src="assets/screenshots/v0.4.12-trends-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-trends-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-trends-en.jpg">
+  <img alt="Model usage comparison and cache efficiency on the trends page" src="assets/screenshots/v0.5.0-trends-en.jpg">
 </picture>
 
 </details>
@@ -41,9 +41,21 @@ The overview shows account quota, recent tokens, range totals, then rankings and
 
 - **Usage overview `/`:** the current login's quota, full quota period and update time, with paired bars comparing remaining quota and time; cross-account totals for the selected range, token breakdown, top 3 tasks and current activity.
 - **Task details `/tasks`:** search, filters, sorting, column settings and project totals. Browse historical account records **without changing the Codex login**. Expand a task for official lifetime quota and model, effort and speed breakdowns.
-- **Trends & methodology `/trends`:** daily cost/tokens, cross-account quota rankings for the selected range, data coverage and estimation details.
+- **Trends & methodology `/trends`:** cross-account model comparison, daily cost/tokens/cache hit, day-level task drilldown, range rankings and pricing details.
 
-Live tokens on the overview offer **1-minute / 5-minute / 20-minute / 1-hour** windows: input, output, cache hit rate and reporting tasks. These cover local chats across accounts, timed when Monitor receives usage reports. At most the latest hour remains in bounded memory; restarting resets the counters and creates no new history files. While the overview is visible, known active/recent logs are read incrementally every 5 seconds; the existing minute activity scan discovers new chats. Account and full-history polling remain unchanged. Each window reports its own collection or missing-data state, and methodology is folded under Details.
+Five analysis features in v0.5.0:
+
+| Feature | Where and how |
+| --- | --- |
+| Model comparison | Trends: sort models by input, output, total tokens, cache hit, task count or API-equivalent cost within the selected period. |
+| Daily trends and task drilldown | Trends: bars stack usage by model. Select a day for its models and tasks; task links preserve that date. |
+| Historical cache efficiency | Trends: total cached input divided by total input, including daily rates. Cached tokens are never counted twice. |
+| Pricing basis | Below the model table: stored rates, sources, per-model check dates, pricing coverage, unpriced models and assumptions. |
+| Report export | Statistics toolbar: download offline HTML, CSV or JSON on demand for the selected period/archive scope, including hidden and search-filtered tasks. |
+
+Attribution follows recorded model switches; unknown models and incomplete data remain explicit. Costs are API-equivalent estimates, not subscription bills; official task-lifetime usage stays separate. Reports use task/project aliases by default, with optional display names. They omit account identity, paths, session IDs and conversation text, and create no periodic snapshots.
+
+Live tokens offer **1-second / 1-minute / 5-minute / 20-minute / 1-hour** views of input, output, cache hit and reporting tasks. **The 1-second view divides the last minute's input/output by 60; it is not sampled every second.** Cache hit and task count still describe that minute. These cover local chats across accounts at report-receipt time, remain in memory for up to one hour and reset on restart. Visible pages read logs incrementally every 5 seconds and discover new chats every minute; account and full-history polling are unchanged.
 
 By default, read unarchived tasks and the 30 most recently archived root tasks, including attributable children. **Calculate all archives** expands that scope. Task statistics refresh every 10 minutes by default; choose 30 seconds or 1/2/5/10/30/60 minutes, or refresh manually. Older fast settings migrate to 10 minutes once; subsequent choices are remembered. Hidden pages pause new statistics requests and catch up when due on return; outages retain existing values. Account quota polls every 5 minutes and activity every minute, with 2-second activity checks while shutdown automation is armed. Chinese/English selection is remembered; new visitors start in English.
 
@@ -53,9 +65,9 @@ Each history page has a 60-second deadline to allow an initial rebuild of large 
 
 ## Quick start
 
-**Installers:** Starting with v0.5.0, Windows EXE, macOS PKG and Linux DEB/portable packages include the runtime; Node and Git are not needed on the user's machine. [Releases](https://github.com/tabztggg/codex-monitor/releases) · [Installation, migration and removal](docs/installation-packages.md). Until these packages are published, the source installation below remains available.
+**Installers:** Windows x64 EXE, macOS Intel/Apple Silicon PKG, and Linux x64/ARM64 DEB/portable packages include Node.js and Codex CLI; no separate Node, Git or npm installation is needed. [Releases](https://github.com/tabztggg/codex-monitor/releases) · [Installation, migration and removal](docs/installation-packages.md). Packages are unsigned and not notarized. Choose the matching platform and architecture, and verify files against `SHA256SUMS.txt`.
 
-The Windows installer automatically prepares **Node.js/npm, Git, PowerShell 7 and Codex CLI**, reusing compatible installations first. Sign in to Codex yourself before using account features. Manual installation on other platforms requires Node.js 22.13+ (recommended), npm and Codex with `codex app-server` support; basic operation supports Node.js 20.
+**Source installation (VBS launchers below):** Windows automatically prepares **Node.js/npm, Git, PowerShell 7 and Codex CLI**, reusing compatible installations first. Sign in to Codex yourself before using account features. Manual installation on other platforms requires Node.js 22.13+ (recommended), npm and Codex with `codex app-server` support; basic operation supports Node.js 20.
 
 Without Git, [download the source ZIP](https://github.com/tabztggg/codex-monitor/archive/refs/heads/main.zip), extract it, and double-click **Install Codex Monitor.vbs**. With Git installed, clone instead:
 

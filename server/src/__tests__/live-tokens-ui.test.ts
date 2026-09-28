@@ -21,7 +21,7 @@ const snapshot = (overrides: Partial<LiveTokenSnapshot> = {}): LiveTokenSnapshot
   lastEventAt: new Date(nowMs - 1_000).toISOString(), status: 'ready', scope: 'local',
   windows: { oneMinute: windowData(60), fiveMinutes: windowData(300, 6000), twentyMinutes: windowData(1200, 20_000), oneHour: windowData(3600, 60_000) }, ...overrides
 });
-const render = (data: LiveTokenSnapshot | null, options: { seconds?: LiveTokenWindow['seconds']; failed?: boolean; nowMs?: number } = {}) => renderToStaticMarkup(createElement(LiveTokensView, {
+const render = (data: LiveTokenSnapshot | null, options: { seconds?: 1 | LiveTokenWindow['seconds']; failed?: boolean; nowMs?: number } = {}) => renderToStaticMarkup(createElement(LiveTokensView, {
   snapshot: data, seconds: options.seconds ?? 60, failed: options.failed ?? false, nowMs: options.nowMs ?? nowMs, onSelect: () => {}
 }));
 
@@ -57,6 +57,37 @@ describe('live token presentation', () => {
     expect(one).toContain('Includes cached input');
     expect(one).toContain('Includes reasoning output');
     expect(one).not.toContain('tok/s');
+  });
+
+  it('derives the per-second view from the last minute without scaling ratios or task counts', () => {
+    const data = snapshot();
+    const html = render(data, { seconds: 1 });
+    expect(html).toContain('aria-pressed="true" aria-label="Per-second average over the last minute">1 s');
+    expect(html).toContain('Input (tok/s)</dt><dd title="16.67">16.67</dd>');
+    expect(html).toContain('Output (tok/s)</dt><dd title="3.33">3.33</dd>');
+    expect(html).toContain('Cache hit</dt><dd>50%</dd>');
+    expect(html).toContain('Reporting tasks</dt><dd>1</dd>');
+    expect(html).toContain('Tasks reporting in the last minute');
+    expect(html).toContain('Per-second average · Last minute ÷ 60');
+    expect(data.windows.oneMinute.inputTokens).toBe(1000);
+    const low = snapshot({ windows: { ...data.windows, oneMinute: windowData(60, 1) } });
+    expect(render(low, { seconds: 1 })).toContain('title="0.02">0.02</dd>');
+  });
+
+  it('keeps the full-minute warmup and failure semantics for per-second averages', () => {
+    const data = snapshot({ startedAt: new Date(nowMs - 20_000).toISOString() });
+    const html = render(data, { seconds: 1 });
+    expect(html).toContain('Window still filling');
+    expect(html).toContain('title="16.67">16.67</dd>');
+    expect(render(null, { seconds: 1 }).match(/<dd>--<\/dd>/g)).toHaveLength(4);
+    const unavailable = { ...data, windows: { ...data.windows, oneMinute: { ...data.windows.oneMinute, status: 'unavailable' as const } } };
+    const loaded = receiveLiveTokenSnapshot({ snapshot: null, lastReady: {}, failed: false }, data);
+    const selected = selectLiveTokenSnapshot(receiveLiveTokenSnapshot(loaded, unavailable), 1);
+    expect(selected).toEqual({ snapshot: data, failed: true });
+    expect(render(selected.snapshot, { seconds: 1, failed: selected.failed })).toContain('Stale snapshot');
+    testState.language = 'zh';
+    const chinese = render(data, { seconds: 1 });
+    for (const text of ['>1 秒</button>', '输入（Token/秒）', '输出（Token/秒）', '每秒均值 · 最近 1 分钟 ÷ 60', '并非逐秒采集']) expect(chinese).toContain(text);
   });
 
   it('distinguishes no reports from initial collecting or unavailable data', () => {

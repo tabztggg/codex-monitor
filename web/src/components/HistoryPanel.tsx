@@ -7,6 +7,8 @@ import { api } from '../api';
 import { useI18n } from '../LanguageContext';
 import type { I18n, Translate } from '../localization';
 import { TaskInsights } from './TaskInsights';
+import { ReportExport } from './ReportExport';
+import { ModelAnalytics } from './ModelAnalytics';
 import { OverviewHighlights } from './OverviewHighlights';
 import { LiveTokensPanel } from './LiveTokensPanel';
 import { OverviewDataQuality } from './OverviewDataQuality';
@@ -15,6 +17,7 @@ import { formatEstimatedCost, formatTokenCount, formatUsagePercent, comparePlanU
 import { parseTableView, tableColumns, taskColumns as columns, type TableView } from '../table-view';
 import { DEFAULT_HISTORY_INTERVAL_MS } from '../../../shared/polling';
 import { readRefreshInterval, refreshIntervals, refreshPreferenceKey } from '../refresh-preferences';
+import { taskRangeFromSearch } from '../task-range-link';
 
 const periods: Record<HistoryPeriod, string> = { custom: 'Custom dates', quota: 'Current quota period', today: 'Today', '7d': 'Last 7 days', lifetime: 'Task lifetime' };
 function readView() {
@@ -44,10 +47,16 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
     ? `${equivalentTitle} · ${c.key === 'usage' ? t('Selected account · This period') : `${t('Across accounts')} · ${t('Lifetime')}`}` : columnTitle(c);
   const columnHeading = (c: typeof columns[number]) => c.key === 'usage' || c.key === 'equivalent20x' ? t('Quota usage ({plan} equivalent)', { plan: planLabel })
     : c.key === 'cost' ? t('Est. cost') : c.key === 'tokens' ? t('Tokens') : columnTitle(c);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [range, setRange] = useState<{from: string; to: string}>();
-  const [period, setPeriod] = useState<HistoryPeriod>('today');
+  const linkedRange = useMemo(() => taskRangeFromSearch(location.search), [location.search]);
+  const [dateFrom, setDateFrom] = useState(linkedRange?.from ?? '');
+  const [dateTo, setDateTo] = useState(linkedRange?.to ?? '');
+  const [range, setRange] = useState<{from: string; to: string} | undefined>(linkedRange);
+  const [period, setPeriod] = useState<HistoryPeriod>(linkedRange ? 'custom' : 'today');
+  useEffect(() => {
+    if (!linkedRange || page !== 'tasks') return;
+    setDateFrom(linkedRange.from); setDateTo(linkedRange.to);
+    setRange(linkedRange); setPeriod('custom');
+  }, [linkedRange, page]);
   // Retry the initial history read as soon as the account/window becomes ready.
   // Ignore quota percentages and reset timestamp jitter so normal updates still
   // respect the chosen refresh interval.
@@ -195,6 +204,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
           <div className="period-control"><span id="statistics-range-label">{t('Statistics time range')}</span><div className="period-buttons" role="group" aria-labelledby="statistics-range-label" aria-describedby="statistics-range-help">{(['today', '7d', 'lifetime'] as const).map(key => <button type="button" key={key} aria-pressed={period === key} onClick={() => setPeriod(key)}>{t(key === 'lifetime' ? 'Task lifetime' : key === '7d' ? '7 days' : 'Today')}</button>)}</div></div>
           <div className="custom-date-range"><input type="date" aria-label={t('Start date')} value={dateFrom} max={todayDate} onChange={e => setDateFrom(e.target.value)} /><span>–</span><input type="date" aria-label={t('End date')} value={dateTo} min={dateFrom} max={todayDate} onChange={e => setDateTo(e.target.value)} /><button type="button" className="small-control" disabled={!dateFrom || !dateTo || dateFrom > dateTo || dateTo > todayDate} onClick={() => { setRange({from:dateFrom,to:dateTo}); setPeriod('custom'); }}>{t('Apply dates')}</button></div>
           <label className="inline-field comparison-control"><span>{t('Equivalent usage comparison')}</span><select title={t('Equivalent usage comparison')} aria-describedby="comparison-plan-help" value={comparisonPlan} onChange={e => { if (isComparisonPlan(e.target.value)) setComparisonPlan(e.target.value); }}>{Object.entries(comparisonPlans).map(([key, plan]) => <option value={key} key={key}>{plan.label}</option>)}</select></label>
+          <ReportExport jobs={mergedJobs} analysis={analysis} allocation={allocation} archives={archives} pricing={analysis?.pricing ?? null} disabled={loading || !analysis} />
         </div>
       </div>
       {page !== 'overview' && page !== 'all' && <p className="statistics-applies">{t(page === 'tasks' ? 'Time range applies to cost and tokens. Quota columns keep their own periods.' : 'Equivalent usage · Cost · Tokens')}</p>}
@@ -271,6 +281,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
     </section>}
     {(page === 'all' || page === 'trends') && <>
     <div id="task-trends"><TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="trend" expanded={page === 'trends'} /></div>
+    <ModelAnalytics analysis={analysis} periodLabel={t(periods[activePeriod])} />
     <details className="metric-explanation" id="estimation-basis" ref={basisRef}><summary>{t('Statistics help and estimation basis')}</summary>
       <p>{statisticsRangeHelp}</p>
       <p>{comparisonPlanHelp}</p>

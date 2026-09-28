@@ -1,0 +1,39 @@
+.model-analytics { margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font-size: 13px; }
+.model-analytics-heading { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.model-analytics-heading h3, .historical-cache h4, .day-usage-details h4 { margin: 0; font-size: 14px; font-weight: 650; }
+.model-table-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+.model-usage-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.model-usage-table caption { text-align: left; padding: 10px 12px; color: var(--muted); font-size: 12px; }
+.model-usage-table th, .model-usage-table td { padding: 10px 12px; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.model-usage-table thead th { background: var(--surface-raised); color: var(--muted); font-weight: 500; }
+.model-usage-table th:first-child { text-align: left; }
+.model-usage-table tbody th { font-weight: 500; }
+.model-usage-table thead button { padding: 2px 0; border: 0; border-radius: 2px; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: inherit; }
+.model-usage-table small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+.model-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; flex-shrink: 0; }
+.historical-cache { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.historical-cache dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0 0; }
+.historical-cache dt { color: var(--muted); font-size: 11px; }
+.historical-cache dd { margin: 5px 0 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.model-price-basis { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.model-price-basis > summary { cursor: pointer; padding: 4px 0; }
+.pricing-coverage { display: flex; flex-wrap: wrap; gap: 16px 28px; font-size: 12px; }
+.pricing-coverage dt { color: var(--muted); }
+.pricing-coverage dd { margin: 5px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.model-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; margin: 12px 0; color: var(--muted); font-size: 11px; }
+.model-legend li { display: inline-flex; align-items: center; }
+.trend-bar.model-trend-stack { display: flex; flex-direction: column-reverse; overflow: hidden; background: transparent; }
+.model-trend-segment { display: block; width: 100%; flex-shrink: 0; }
+.trend-missing { font-size: 14px; color: var(--muted); align-self: center; }
+.day-usage-details { margin: 18px 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); }
+.day-usage-details > summary { cursor: pointer; font-weight: 600; }
+.day-usage-details > p { margin: 8px 0 12px; }
+.day-task-list { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.day-task-list th, .day-task-list td { padding: 9px 10px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+.day-task-list th:first-child, .day-task-list td:first-child { text-align: left; white-space: normal; min-width: 180px; }
+.day-task-list thead th { color: var(--muted); font-weight: 500; }
+.day-task-list a { overflow-wrap: anywhere; }
+.day-task-scroll { max-height: 420px; }
+.day-usage-details .model-table-scroll + h4 { margin-top: 18px; }
+.model-table-scroll:focus-visible, .model-usage-table button:focus-visible, .model-price-basis summary:focus-visible, .trend-day:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+@media (max-width: 700px) { .historical-cache dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .day-usage-details { padding: 10px; } }

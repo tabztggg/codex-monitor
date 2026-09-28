@@ -340,13 +340,46 @@ export interface HistoryUsageAllocation {
 
 export type HistoryArchiveMode = 'recent' | 'all';
 export type HistoryPeriod = 'quota' | 'today' | '7d' | 'lifetime' | 'custom';
+/** Observed incremental usage, grouped by the model at the time of the event. */
+export interface HistoryModelUsage {
+  /** Null means the log did not establish the model. */
+  model: string | null;
+  usage: TokenUsage;
+  costUsd: number | null;
+  unpricedTokens: number;
+  /** Distinct principal tasks in this slice, including consolidated subagents. */
+  taskCount: number;
+  tokensComplete: boolean;
+  costComplete: boolean;
+}
+export interface HistoryModelPricing {
+  model: string;
+  input: number;
+  cachedInput: number;
+  cacheWriteInput: number;
+  output: number;
+  /** Null means the retained rate has no recorded verification date. */
+  verifiedAt?: string | null;
+}
+export interface HistoryPricingCatalog {
+  currency: 'USD';
+  unit: 'perMillionTokens';
+  verifiedAt: string;
+  sourceUrl: string;
+  models: HistoryModelPricing[];
+  highContext: { inputTokensThreshold: number; inputMultiplier: number; outputMultiplier: number };
+  note: string;
+}
 export interface HistoryUsageDay {
   date: string;
   usage: TokenUsage;
   costUsd: number | null;
   unpricedTokens: number;
+  models?: HistoryModelUsage[];
 }
 export interface HistoryPeriodMetrics {
+  days?: HistoryUsageDay[];
+  models?: HistoryModelUsage[];
   tokensComplete: boolean;
   usage: TokenUsage | null;
   costUsd: number | null;
@@ -355,6 +388,8 @@ export interface HistoryPeriodMetrics {
   untimedTokens: number;
 }
 export interface HistoryAnalysis {
+  models?: HistoryModelUsage[];
+  pricing?: HistoryPricingCatalog;
   period: HistoryPeriod;
   startedAt: string | null;
   endedAt: string;

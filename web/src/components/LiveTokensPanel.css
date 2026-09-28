@@ -16,7 +16,7 @@
 .live-tokens-status[data-state="ready"] { color: var(--good); }
 .live-tokens-status[data-state="collecting"], .live-tokens-status[data-state="stale"] { color: var(--warn); }
 .live-tokens-status[data-state="unavailable"] { color: var(--alert); }
-.live-tokens-range { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--surface-raised) 70%, transparent); }
+.live-tokens-range { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--surface-raised) 70%, transparent); }
 .live-tokens-range button { min-width: 0; border: 1px solid transparent; border-left-color: var(--line); padding: 8px 16px; color: var(--ink); background: transparent; font-size: 13px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
 .live-tokens-range button:first-child { border-left-color: transparent; border-radius: 5px 0 0 5px; }
 .live-tokens-range button:last-child { border-radius: 0 5px 5px 0; }

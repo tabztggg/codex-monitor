@@ -8,29 +8,29 @@ Codex Monitor 是一个在本机运行的网页工具，用来查看 Codex 还�
 
 这是个非官方工具。账号额度来自 Codex，任务的等效消耗和费用是估算值，用来比较用量，不代表实际账单。
 
-**[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · 修复账号切换后的额度同步，完善版本检查提示与重试。[更新日志](CHANGELOG.md)
+**[v0.5.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.0)** · 带运行环境的安装包、5 项用量分析、实时 Token 每秒均值。[更新日志](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-overview-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-overview-zh.jpg">
-  <img alt="用量总览：实时 Token、剩余额度与时间、范围汇总" src="assets/screenshots/v0.4.12-overview-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-overview-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-overview-zh.jpg">
+  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.0-overview-zh.jpg">
 </picture>
 
-v0.4.12 实际界面截图，随深浅色主题切换；账号、任务和用量均为虚构演示数据。
+v0.5.0 界面局部截图（1280 × 720），随深浅色主题切换；账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-tasks-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-tasks-zh.jpg">
-  <img alt="任务明细：账号选择、双口径额度与项目分组" src="assets/screenshots/v0.4.12-tasks-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-tasks-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-tasks-zh.jpg">
+  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.0-tasks-zh.jpg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-trends-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-trends-zh.jpg">
-  <img alt="趋势与依据：每日消耗、项目和任务排行" src="assets/screenshots/v0.4.12-trends-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-trends-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-trends-zh.jpg">
+  <img alt="趋势与依据页的模型用量对比与缓存效率" src="assets/screenshots/v0.5.0-trends-zh.jpg">
 </picture>
 
 </details>
@@ -41,9 +41,21 @@ v0.4.12 实际界面截图，随深浅色主题切换；账号、任务和用量
 
 - **用量总览 `/`**：当前登录账号的额度、完整周期和更新时间，双进度条对比剩余额度与剩余时间；所选范围的跨账号估算、费用、Token 拆分、消耗前 3 名与当前活动。
 - **任务明细 `/tasks`**：搜索、筛选、排序、列设置和项目合计。可查看历史账号记录，**不会切换 Codex 登录**。展开任务可查询官方累计额度及模型、推理强度、速度分布。
-- **趋势与依据 `/trends`**：每日费用／Token、所选范围的跨账号额度排行，以及数据覆盖和估算依据。
+- **趋势与依据 `/trends`**：跨账号模型对比、每日费用／Token／缓存命中率、当天任务下钻、范围排行与价格依据。
 
-首页实时 Token 可切换最近 **1 分钟／5 分钟／20 分钟／1 小时**：输入、输出、缓存命中率和有记录任务数。口径为本机聊天（跨账号），按 Monitor 收到记录的时间统计；最多在内存保留最近 1 小时，重启重新累计，不新增历史文件。首页可见时每 5 秒增量读取已发现的活跃／近期日志，新聊天随每分钟活动扫描发现；不增加账号接口或全量历史查询频率。各时间窗分别显示收集或缺失状态，数据口径折叠在“说明”中。
+v0.5.0 的 5 项分析功能：
+
+| 功能 | 入口与用途 |
+| --- | --- |
+| 模型对比 | 趋势页：按所选范围比较输入、输出、总 Token、缓存命中率、任务数和 API 等价费用，可排序。 |
+| 日趋势与任务下钻 | 趋势页：柱形按模型堆叠；点击日期查看当天模型和任务，打开任务时保留日期。 |
+| 历史缓存效率 | 趋势页：总缓存输入 ÷ 总输入，支持每日查看；缓存不重复计入总 Token。 |
+| 价格依据 | 模型表下方：单价、来源、逐模型核对日期、定价覆盖率、未定价模型及计价假设。 |
+| 报告导出 | 统计栏：按需下载离线 HTML／CSV／JSON，覆盖所选日期和归档范围，不受搜索或隐藏行影响。 |
+
+模型归属跟随日志中的实际切换，未知模型和缺失数据明确标记。费用是 API 等价估算，不是套餐账单；任务的官方累计用量仍独立显示。导出默认用任务／项目别名，可选显示名称；不导出账号身份、路径、会话 ID 或聊天原文，也不定期保存快照。
+
+首页实时 Token 可切换 **1 秒／1 分钟／5 分钟／20 分钟／1 小时**，显示输入、输出、缓存命中率和任务数。**“1 秒”是最近 1 分钟输入／输出除以 60 的均值**，不是逐秒采样；命中率和任务数仍按该分钟统计。数据覆盖本机跨账号聊天，按收到记录的时间计入，内存最多保留 1 小时，重启重新累计。可见时每 5 秒增量读取日志，每分钟发现新聊天；账号和全量历史查询频率不变。
 
 默认读取未归档任务和最近 30 个归档主任务，包含可归属的子任务；选择“统计所有归档”才扩大读取。任务统计默认每 10 分钟刷新，可选 30 秒、1／2／5／10／30／60 分钟，也可立即刷新。旧版高频设置首次升级为 10 分钟，之后记住你的选择。页面隐藏时暂停新的统计请求，返回后按需补刷，断线保留旧值。账号额度每 5 分钟更新、活动检测每 1 分钟；启用自动关机时活动检测恢复为 2 秒。中英文可切换并记住选择，新访问者默认英语。
 
@@ -53,9 +65,9 @@ v0.4.12 实际界面截图，随深浅色主题切换；账号、任务和用量
 
 ## 快速开始
 
-**安装包：** v0.5.0 起提供 Windows EXE、macOS PKG、Linux DEB／便携包，内置运行环境，无需另装 Node 或 Git。[下载 Releases](https://github.com/tabztggg/codex-monitor/releases) · [安装、迁移与卸载说明](docs/installation-packages.md)。尚未发布的安装包请等待构建完成；以下源码方式仍可使用。
+**安装包：** Windows x64 EXE、macOS Intel／Apple Silicon PKG、Linux x64／ARM64 DEB 与便携包，内置 Node.js 和 Codex CLI，无需另装 Node、Git 或 npm。[下载 Releases](https://github.com/tabztggg/codex-monitor/releases) · [安装、迁移与卸载说明](docs/installation-packages.md)。安装包未签名、未做 Apple 公证；请按系统和架构下载，并用 `SHA256SUMS.txt` 核对文件。
 
-Windows 一键安装会检查并自动准备 **Node.js/npm、Git、PowerShell 7 和 Codex CLI**，优先复用已有可用版本。使用前需自行登录 Codex。其他平台手动安装需要 Node.js 22.13+（推荐）、npm 和支持 `codex app-server` 的 Codex；基础运行最低 Node.js 20。
+**源码安装（以下 VBS 入口）：** Windows 会检查并自动准备 **Node.js/npm、Git、PowerShell 7 和 Codex CLI**，优先复用已有可用版本。使用前需自行登录 Codex。其他平台手动安装需要 Node.js 22.13+（推荐）、npm 和支持 `codex app-server` 的 Codex；基础运行最低 Node.js 20。
 
 没装 Git 也可以直接[下载源码 ZIP](https://github.com/tabztggg/codex-monitor/archive/refs/heads/main.zip)，解压后双击 **Install Codex Monitor.vbs**。已有 Git 可用以下命令获取源码：
 

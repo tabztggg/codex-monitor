@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")/../Resources/app" && pwd)
+"$HERE/runtime/node" "$HERE/dist/launcher/integration.mjs" install "$HERE"
+exec "$HERE/codex-monitor" open

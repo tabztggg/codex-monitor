@@ -572,6 +572,13 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     this.emitSnapshot();
   }
 
+  public shutdown(): void {
+    if (this.activeSessionPollHandle) clearInterval(this.activeSessionPollHandle);
+    if (this.codexUsagePollHandle) clearInterval(this.codexUsagePollHandle);
+    this.currentAccountSource?.shutdown?.();
+    this.client.shutdown();
+  }
+
   private async checkAccountIdentity(manual = false): Promise<void> {
     if (!this.currentAccountSource) return;
     if (this.accountIdentityCheck) return this.accountIdentityCheck;

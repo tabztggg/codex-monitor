@@ -7,6 +7,7 @@ import { CodexAppServerClient } from './codex-client';
 import { emptyCodexUsage, readAccountUsage, staleCodexUsage } from './usage';
 
 export interface CurrentAccountSource {
+  shutdown?(): void;
   hasChanged(): Promise<boolean>;
   read(previous: CodexUsageSnapshot): Promise<CodexUsageSnapshot>;
 }
@@ -46,6 +47,8 @@ export async function readAuthIdentityFingerprint(home: string): Promise<string 
  * auth.json/keychain. Each low-frequency quota read gets a fresh private client. */
 export class FreshCurrentAccountSource implements CurrentAccountSource {
   private identity: string | undefined;
+  private stopped = false;
+  private readonly clients = new Set<UsageClient>();
   constructor(
     private readonly createClient: () => UsageClient = () => new CodexAppServerClient(),
     private readonly fingerprint = () => readAuthIdentityFingerprint(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex')),
@@ -58,8 +61,11 @@ export class FreshCurrentAccountSource implements CurrentAccountSource {
     return changed;
   }
   async read(previous: CodexUsageSnapshot): Promise<CodexUsageSnapshot> {
+    if (this.stopped) return previous;
     const before = await this.fingerprint();
+    if (this.stopped) return previous;
     const client = this.createClient();
+    this.clients.add(client);
     try {
       const next = await readAccountUsage(client, previous);
       const after = await this.fingerprint();
@@ -70,6 +76,11 @@ export class FreshCurrentAccountSource implements CurrentAccountSource {
         ? staleCodexUsage(previous, 'Account changed while reading usage. Waiting for the next refresh.')
         : emptyCodexUsage('unavailable', 'Account changed while reading usage. Waiting for the next refresh.');
       return next;
-    } finally { client.shutdown(); }
+    } finally { this.clients.delete(client); client.shutdown(); }
+  }
+  shutdown(): void {
+    this.stopped = true;
+    for (const client of this.clients) client.shutdown();
+    this.clients.clear();
   }
 }

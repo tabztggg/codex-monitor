@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "0.4.12",
+  "version": "0.5.0",
   "description": "Simple local dashboard for monitoring Codex sessions.",
   "private": true,
   "type": "module",
@@ -15,6 +15,8 @@
     "build:server": "tsup server/src/index.ts --sourcemap --format esm --platform node --out-dir dist/server",
     "build:web": "vite build --config web/vite.config.ts",
     "start": "node dist/server/index.js",
+    "package": "node scripts/package/build.mjs",
+    "package:smoke": "node scripts/package/smoke.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -23,6 +25,7 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.0",
+    "tar": "7.5.22",
     "ws": "^8.20.0"
   },
   "devDependencies": {

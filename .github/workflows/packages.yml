@@ -1,0 +1,106 @@
+name: Build installation packages
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            key: win32-x64
+          - os: macos-15-intel
+            key: darwin-x64
+          - os: macos-15
+            key: darwin-arm64
+          - os: ubuntu-24.04
+            key: linux-x64
+          - os: ubuntu-24.04-arm
+            key: linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - name: Canonical Windows temporary paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - run: npm ci
+      - run: npm test -- --testTimeout=30000
+      - run: npx tsc --noEmit
+      - run: npm run package
+      - run: npm run package:smoke
+      - name: Windows install and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/package/Test-WindowsPackage.ps1
+      - name: Validate macOS installer
+        if: runner.os == 'macOS'
+        run: |
+          pkgutil --payload-files release/*.pkg | grep 'Codex Monitor.app/Contents/MacOS/CodexMonitor'
+          for script in scripts/package/posix/* scripts/package/macos/preinstall scripts/package/macos/app-launcher; do sh -n "$script"; done
+          sudo installer -pkg release/*.pkg -target /
+          APP='/Applications/Codex Monitor.app/Contents/Resources/app'
+          npm run package:smoke -- "$APP"
+          "$APP/runtime/node" "$APP/dist/launcher/integration.mjs" install "$APP"
+          plutil -lint "$HOME/Library/LaunchAgents/cn.codexmonitor.package.plist"
+          "$APP/runtime/node" "$APP/dist/launcher/integration.mjs" uninstall "$APP"
+          test ! -e "$HOME/Library/LaunchAgents/cn.codexmonitor.package.plist"
+      - name: Validate Debian installer
+        if: runner.os == 'Linux'
+        run: |
+          sudo dpkg -i release/*.deb
+          test -x /opt/codex-monitor/codex-monitor
+          npm run package:smoke -- /opt/codex-monitor
+          /opt/codex-monitor/runtime/node /opt/codex-monitor/dist/launcher/integration.mjs install /opt/codex-monitor
+          test -f "$HOME/.config/autostart/codex-monitor.desktop"
+          sudo dpkg -r codex-monitor
+          test ! -e "$HOME/.config/autostart/codex-monitor.desktop"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.key }}
+          compression-level: 0
+          path: |
+            release/*.exe
+            release/*.pkg
+            release/*.deb
+            release/*.tar.gz
+            release/manifest-*.json
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: release
+      - run: node scripts/package/manifest.mjs release
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Codex Monitor v$VERSION" --notes-file docs/releases/v$VERSION.md --draft
+          gh release upload "$GITHUB_REF_NAME" release/*.exe release/*.pkg release/*.deb release/*.tar.gz release/package-manifest.json release/SHA256SUMS.txt
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest

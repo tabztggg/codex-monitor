@@ -4,20 +4,25 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { ServiceUpdater } from './service-update';
 import { RepositoryVersionChecker } from './service-version';
+import { PackageUpdater } from './package-release';
 
 // Origin validation is applied by index.ts before these routes.
 export function installServiceControl(app: Express, enabled: boolean, exit: (code: number) => void,
   createUpdater?: (instance: string, onReady: () => void) => ServiceUpdater,
   createVersionChecker?: (deployment: ServiceUpdater['deployment']) => Pick<RepositoryVersionChecker, 'check'>) {
-  const instance = randomUUID();
+  const suppliedInstance = process.env.CODEX_MONITOR_INSTANCE;
+  const instance = process.env.CODEX_MONITOR_DISTRIBUTION === 'package' && suppliedInstance && /^[a-f0-9-]{36}$/.test(suppliedInstance) ? suppliedInstance : randomUUID();
   const onUpdateReady = () => setTimeout(() => exit(43), 300);
-  const updater = createUpdater ? createUpdater(instance, onUpdateReady) : new ServiceUpdater({
+  const packaged = process.env.CODEX_MONITOR_DISTRIBUTION === 'package';
+  const updater = createUpdater ? createUpdater(instance, onUpdateReady) : packaged && enabled ? new PackageUpdater({
+    appRoot: process.env.CODEX_MONITOR_APP_ROOT ?? process.cwd(), dataRoot: process.cwd(), instance, onReady: onUpdateReady
+  }) : new ServiceUpdater({
     root: process.cwd(), instance, onReady: onUpdateReady,
     supported: enabled && process.platform === 'win32' && process.env.CODEX_MONITOR_UPDATE_ENABLED === '1'
       && existsSync(path.join(process.cwd(), 'Update-StandaloneMonitor.ps1'))
   });
   const versions = createVersionChecker ? createVersionChecker(updater.deployment)
-    : new RepositoryVersionChecker({ root: process.cwd(), deployment: updater.deployment });
+    : new RepositoryVersionChecker({ root: process.cwd(), deployment: updater.deployment, channel: packaged ? 'release' : 'source' });
   let pending = false;
   app.get('/api/service', (_request, response) => {
     response.setHeader('Cache-Control', 'no-store');

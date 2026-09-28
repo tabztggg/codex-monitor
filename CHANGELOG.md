@@ -10,6 +10,14 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.5.0 — 待发布 / Unreleased
+
+- 增加 Windows EXE、macOS PKG、Linux DEB／便携包的构建和发布流程，内置 Node 与 Codex CLI。
+- 安装包支持快捷启动、登录自启动、独立数据目录、稳定 Release 更新与失败回退。
+- 修复隐藏路径的页面路由，完善退出时的子进程清理。
+
+English: Add bundled-runtime installers, shortcuts, login startup and stable-release updates with rollback; preserve user data and fix packaged routes/process shutdown.
+
 ## v0.4.12 — 2026-09-28
 
 - 修复切换登录后仍显示旧账号额度；每分钟检测本地身份变化，“立即刷新”同步读取账号，旧通知不会覆盖新额度。

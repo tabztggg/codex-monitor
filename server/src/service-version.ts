@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { RepositoryVersionStatus, VersionCheckError } from '../../shared/service-version';
+import { latestPackage, newerVersion, PackageMetadataError } from './package-release';
 
 const REPOSITORY = 'tabztggg/codex-monitor';
 export const VERSION_CACHE_MS = 30 * 60_000;
@@ -52,6 +53,7 @@ function validError(value: unknown): value is VersionCheckError {
 }
 interface Options {
   root: string;
+  channel?: 'source' | 'release';
   deployment: { version: string; commit: string | null; localChanges: boolean };
   now?: () => number;
   fetch?: typeof fetch;
@@ -78,7 +80,7 @@ export class RepositoryVersionChecker {
   private cached: CachedVersion | null = null;
   private inFlight: Promise<RepositoryVersionStatus> | null = null;
   constructor(private readonly options: Options) {
-    this.file = path.join(options.root, '.cache/service-version.json');
+    this.file = path.join(options.root, options.channel === 'release' ? '.cache/package-version.json' : '.cache/service-version.json');
     this.now = options.now ?? Date.now;
     this.request = options.fetch ?? fetch;
     try {
@@ -156,6 +158,13 @@ export class RepositoryVersionChecker {
     const currentCommit = this.options.deployment.commit;
     let stage: VersionCheckError['stage'] = 'revision';
     try {
+      if (this.options.channel === 'release') {
+        const { manifest } = await latestPackage(this.request);
+        const time = this.now();
+        this.cached = { repository: REPOSITORY, currentCommit, currentVersion: this.options.deployment.version,
+          remote: { version: manifest.version, commit: manifest.commit }, updateAvailable: newerVersion(manifest.version, this.options.deployment.version),
+          checkedAt: time, attemptedAt: time, failed: false, lastError: null };
+      } else {
       const ref = await this.json(`https://api.github.com/repos/${REPOSITORY}/git/ref/heads/main`, stage) as { object?: { sha?: string; type?: string } };
       const commit = ref?.object?.sha;
       if (!commit || !commitPattern.test(commit) || ref.object?.type !== 'commit') throw new CheckFailure({ kind: 'invalid-response', stage });
@@ -186,11 +195,12 @@ export class RepositoryVersionChecker {
       const time = this.now();
       this.cached = { repository: REPOSITORY, currentCommit, currentVersion: this.options.deployment.version,
         remote, updateAvailable, checkedAt: time, attemptedAt: time, failed: false, lastError: null };
+      }
     } catch (error) {
       this.cached = { repository: REPOSITORY, currentCommit, currentVersion: this.options.deployment.version,
         remote: this.cached?.remote ?? null, updateAvailable: this.cached?.updateAvailable ?? null,
         checkedAt: this.cached?.checkedAt ?? null, attemptedAt: this.now(), failed: true,
-        lastError: error instanceof CheckFailure ? error.detail : transportFailure(error, stage) };
+        lastError: error instanceof CheckFailure || error instanceof PackageMetadataError ? error.detail : transportFailure(error, stage) };
     }
     try {
       mkdirSync(path.dirname(this.file), { recursive: true });

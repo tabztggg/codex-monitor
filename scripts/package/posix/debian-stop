@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+APP='/opt/codex-monitor'
+if [ ! -f "$APP/distribution.json" ]; then exit 0; fi
+getent passwd | while IFS=: read -r USER_NAME _ USER_ID _ _ USER_HOME _; do
+  if [ "$USER_ID" -lt 1000 ] || [ ! -d "$USER_HOME" ]; then continue; fi
+  DATA="$USER_HOME/.local/state/codex-monitor"
+  if [ ! -f "$DATA/.cache/manager.json" ]; then continue; fi
+  runuser -u "$USER_NAME" -- env HOME="$USER_HOME" CODEX_MONITOR_DATA_HOME="$DATA" \
+    "$APP/runtime/node" "$APP/dist/launcher/main.mjs" stop
+done

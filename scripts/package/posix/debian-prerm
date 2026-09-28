@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+# Upgrade keeps user startup entries. Removal disables only entries owned by /opt.
+/opt/codex-monitor/package-stop
+if [ "${1:-}" != remove ]; then exit 0; fi
+getent passwd | while IFS=: read -r USER_NAME _ USER_ID _ _ USER_HOME _; do
+  if [ "$USER_ID" -lt 1000 ] || [ ! -d "$USER_HOME" ]; then continue; fi
+  runuser -u "$USER_NAME" -- env HOME="$USER_HOME" /opt/codex-monitor/runtime/node \
+    /opt/codex-monitor/dist/launcher/integration.mjs uninstall /opt/codex-monitor
+done

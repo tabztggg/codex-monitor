@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+APP='/Applications/Codex Monitor.app/Contents/Resources/app'
+if [ ! -f "$APP/distribution.json" ]; then exit 0; fi
+for USER_HOME in /Users/*; do
+  DATA="$USER_HOME/Library/Application Support/CodexMonitor"
+  if [ ! -f "$DATA/.cache/manager.json" ]; then continue; fi
+  OWNER=$(/usr/bin/stat -f '%u' "$USER_HOME")
+  /usr/bin/sudo -u "#$OWNER" /usr/bin/env HOME="$USER_HOME" CODEX_MONITOR_DATA_HOME="$DATA" \
+    "$APP/runtime/node" "$APP/dist/launcher/main.mjs" stop
+done

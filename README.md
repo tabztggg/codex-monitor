@@ -53,6 +53,8 @@ v0.4.12 实际界面截图，随深浅色主题切换；账号、任务和用量
 
 ## 快速开始
 
+**安装包：** v0.5.0 起提供 Windows EXE、macOS PKG、Linux DEB／便携包，内置运行环境，无需另装 Node 或 Git。[下载 Releases](https://github.com/tabztggg/codex-monitor/releases) · [安装、迁移与卸载说明](docs/installation-packages.md)。尚未发布的安装包请等待构建完成；以下源码方式仍可使用。
+
 Windows 一键安装会检查并自动准备 **Node.js/npm、Git、PowerShell 7 和 Codex CLI**，优先复用已有可用版本。使用前需自行登录 Codex。其他平台手动安装需要 Node.js 22.13+（推荐）、npm 和支持 `codex app-server` 的 Codex；基础运行最低 Node.js 20。
 
 没装 Git 也可以直接[下载源码 ZIP](https://github.com/tabztggg/codex-monitor/archive/refs/heads/main.zip)，解压后双击 **Install Codex Monitor.vbs**。已有 Git 可用以下命令获取源码：

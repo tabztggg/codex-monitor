@@ -53,6 +53,8 @@ Each history page has a 60-second deadline to allow an initial rebuild of large 
 
 ## Quick start
 
+**Installers:** Starting with v0.5.0, Windows EXE, macOS PKG and Linux DEB/portable packages include the runtime; Node and Git are not needed on the user's machine. [Releases](https://github.com/tabztggg/codex-monitor/releases) · [Installation, migration and removal](docs/installation-packages.md). Until these packages are published, the source installation below remains available.
+
 The Windows installer automatically prepares **Node.js/npm, Git, PowerShell 7 and Codex CLI**, reusing compatible installations first. Sign in to Codex yourself before using account features. Manual installation on other platforms requires Node.js 22.13+ (recommended), npm and Codex with `codex app-server` support; basic operation supports Node.js 20.
 
 Without Git, [download the source ZIP](https://github.com/tabztggg/codex-monitor/archive/refs/heads/main.zip), extract it, and double-click **Install Codex Monitor.vbs**. With Git installed, clone instead:

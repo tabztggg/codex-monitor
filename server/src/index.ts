@@ -36,7 +36,21 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
-installServiceControl(app, process.env.CODEX_MONITOR_MANAGED === '1', code => process.exit(code));
+let exiting = false;
+function shutdown(code = 0) {
+  if (exiting) return;
+  exiting = true;
+  service.shutdown();
+  for (const socket of wss.clients) socket.terminate();
+  server.close();
+  // Allow private Codex clients to close before the supervisor replaces this server.
+  setTimeout(() => process.exit(code), 250);
+}
+installServiceControl(app, process.env.CODEX_MONITOR_MANAGED === '1', shutdown);
+process.on('SIGTERM', () => shutdown());
+process.on('SIGINT', () => shutdown());
+process.on('message', message => { if ((message as { type?: string })?.type === 'shutdown') shutdown(); });
+if (process.env.CODEX_MONITOR_DISTRIBUTION === 'package') process.on('disconnect', () => shutdown());
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
@@ -189,7 +203,7 @@ app.get("/api/history/jobs", async (request, response) => {
   }
 });
 
-const webDistPath = path.resolve(process.cwd(), "dist/web");
+const webDistPath = path.resolve(process.env.CODEX_MONITOR_APP_ROOT ?? process.cwd(), "dist/web");
 if (existsSync(webDistPath)) {
   app.use(express.static(webDistPath));
   app.use((request, response, next) => {
@@ -198,7 +212,7 @@ if (existsSync(webDistPath)) {
       return;
     }
 
-    response.sendFile(path.join(webDistPath, "index.html"));
+    response.sendFile('index.html', { root: webDistPath });
   });
 }
 

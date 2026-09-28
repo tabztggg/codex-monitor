@@ -8,16 +8,28 @@
 
 **[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · 修复账号切换后的额度同步，完善版本检查提示与重试。[更新日志](CHANGELOG.md)
 
-![用量总览：实时 Token、剩余额度与时间、范围汇总](assets/screenshots/v0.4.12-overview-zh.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-overview-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-overview-zh.jpg">
+  <img alt="用量总览：实时 Token、剩余额度与时间、范围汇总" src="assets/screenshots/v0.4.12-overview-zh.jpg">
+</picture>
 
-v0.4.12 实际界面截图，账号、任务和用量均为虚构演示数据。
+v0.4.12 实际界面截图，随深浅色主题切换；账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
 
-![任务明细：账号选择、双口径额度与项目分组](assets/screenshots/v0.4.12-tasks-zh.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-tasks-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-tasks-zh.jpg">
+  <img alt="任务明细：账号选择、双口径额度与项目分组" src="assets/screenshots/v0.4.12-tasks-zh.jpg">
+</picture>
 
-![趋势与依据：每日消耗、项目和任务排行](assets/screenshots/v0.4.12-trends-zh.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-trends-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-trends-zh.jpg">
+  <img alt="趋势与依据：每日消耗、项目和任务排行" src="assets/screenshots/v0.4.12-trends-zh.jpg">
+</picture>
 
 </details>
 

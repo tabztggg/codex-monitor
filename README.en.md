@@ -8,16 +8,28 @@ A local Codex usage dashboard with usability and reporting improvements built on
 
 **[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · Fix quota updates after account switches and clarify version checks and retries. [Changelog](CHANGELOG.md)
 
-![Usage overview: live tokens, remaining quota and time, range totals](assets/screenshots/v0.4.12-overview-en.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-overview-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-overview-en.jpg">
+  <img alt="Usage overview: live tokens, remaining quota and time, range totals" src="assets/screenshots/v0.4.12-overview-en.jpg">
+</picture>
 
-Screenshots of the actual v0.4.12 interface use fictional accounts, tasks and usage.
+Screenshots of the actual v0.4.12 interface adapt to light and dark themes and use fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
-![Task details: account selection, paired quota estimates and project groups](assets/screenshots/v0.4.12-tasks-en.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-tasks-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-tasks-en.jpg">
+  <img alt="Task details: account selection, paired quota estimates and project groups" src="assets/screenshots/v0.4.12-tasks-en.jpg">
+</picture>
 
-![Trends and methodology: daily usage and project/task rankings](assets/screenshots/v0.4.12-trends-en.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.4.12-trends-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.4.12-trends-en.jpg">
+  <img alt="Trends and methodology: daily usage and project/task rankings" src="assets/screenshots/v0.4.12-trends-en.jpg">
+</picture>
 
 </details>
 

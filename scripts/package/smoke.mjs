@@ -44,7 +44,14 @@ try {
   await command('start'); assert.equal((await health(url)).instance, before.instance, 'Repeated start must reuse instance');
   const marker = path.join(data, '.cache/smoke-preserved.json'); writeJson(marker, { retained: true });
   await command('restart');
-  await waitFor(async () => { const result = await health(url); return result && result.instance !== before.instance; }, 'restart');
+  // HTTP becomes ready before the manager observes it and publishes the new instance.
+  // Wait for both to agree so the next stop exercises a fully managed restart.
+  await waitFor(async () => {
+    const result = await health(url);
+    if (!result || result.instance === before.instance) return false;
+    try { return json(path.join(data, '.cache/manager.json')).instance === result.instance; }
+    catch { return false; }
+  }, 'restart health and manager state');
   assert.deepEqual(json(marker), { retained: true });
   await command('stop'); await waitFor(async () => !(await health(url)), 'stop');
   assert(!fs.existsSync(path.join(data, '.cache/manager.lock')), 'Lock released');

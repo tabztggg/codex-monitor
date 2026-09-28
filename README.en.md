@@ -8,29 +8,29 @@ This version builds on [manuelsh/codex-monitor](https://github.com/manuelsh/code
 
 This is an unofficial project. Account quota comes from Codex; task quota equivalents and costs are estimates for comparing usage, not actual charges.
 
-**[v0.5.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.0)** · Bundled-runtime installers, five usage-analysis features and per-second token averages. [Changelog](CHANGELOG.md)
+**[v0.5.1](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.1)** · Bundled-runtime installers, five usage-analysis features and per-second token averages. [Changelog](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-overview-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-overview-en.jpg">
-  <img alt="Usage overview: account quota and live tokens" src="assets/screenshots/v0.5.0-overview-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-overview-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-overview-en.jpg">
+  <img alt="Usage overview: account quota and live tokens" src="assets/screenshots/v0.5.1-overview-en.jpg">
 </picture>
 
-These 1280 × 720 views show parts of the v0.5.0 interface in light and dark themes, using fictional accounts, tasks and usage.
+These 1280 × 720 views show parts of the v0.5.1 interface in light and dark themes, using fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-tasks-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-tasks-en.jpg">
-  <img alt="Usage table on the task details page" src="assets/screenshots/v0.5.0-tasks-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-tasks-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-tasks-en.jpg">
+  <img alt="Usage table on the task details page" src="assets/screenshots/v0.5.1-tasks-en.jpg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-trends-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-trends-en.jpg">
-  <img alt="Model usage comparison and cache efficiency on the trends page" src="assets/screenshots/v0.5.0-trends-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-trends-en-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-trends-en.jpg">
+  <img alt="Model usage comparison and cache efficiency on the trends page" src="assets/screenshots/v0.5.1-trends-en.jpg">
 </picture>
 
 </details>
@@ -43,7 +43,7 @@ The overview shows account quota, recent tokens, range totals, then rankings and
 - **Task details `/tasks`:** search, filters, sorting, column settings and project totals. Browse historical account records **without changing the Codex login**. Expand a task for official lifetime quota and model, effort and speed breakdowns.
 - **Trends & methodology `/trends`:** cross-account model comparison, daily cost/tokens/cache hit, day-level task drilldown, range rankings and pricing details.
 
-Five analysis features in v0.5.0:
+Five analysis features in v0.5.1:
 
 | Feature | Where and how |
 | --- | --- |

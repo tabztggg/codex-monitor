@@ -10,19 +10,20 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
-## v0.5.0 — 2026-09-28
+## v0.5.1 — 2026-09-28
 
 - 新增 5 项分析功能：所选范围的跨账号模型对比、按模型堆叠的日趋势与当天任务下钻、历史缓存效率、价格依据与定价覆盖率、默认脱敏的 HTML／CSV／JSON 报告导出。
 - 实时 Token 增加“1 秒”均值：最近 1 分钟输入／输出总量除以 60；缓存命中率和任务数仍按该分钟统计，不增加采集频率。
 - 提供 Windows EXE、macOS Intel／Apple Silicon PKG、Linux x64／ARM64 DEB 及便携包，内置 Node.js 和 Codex CLI，支持快捷启动、登录自启动和独立数据目录。
 - 安装包从稳定 Release 更新，校验后切换，启动失败回退；源码安装入口继续保留。安装包未签名、未做 Apple 公证。
 - 修复隐藏路径的页面路由，完善退出时的子进程清理。
+- 修复原生安装包验证的启动／重启时序校验，等待服务和管理状态均就绪后再继续。
 
-缓存输入不重复计入总 Token；未知模型、未定价和缺失数据保留明确标记。费用是 API 等价估算，不是订阅账单或官方额度扣减。详见 [v0.5.0 发布说明](docs/releases/v0.5.0.md)。
+缓存输入不重复计入总 Token；未知模型、未定价和缺失数据保留明确标记。费用是 API 等价估算，不是订阅账单或官方额度扣减。详见 [v0.5.1 发布说明](docs/releases/v0.5.1.md)。
 
-本轮本地验证：682 项测试通过，2 项跳过。
+已有本地测试记录：682 项通过，2 项跳过。
 
-English: Add cross-account model comparison, stacked daily trends with task drilldown, weighted cache efficiency, pricing coverage and on-demand HTML/CSV/JSON exports. The new 1-second view is the last minute's input/output divided by 60. Bundled-runtime installers add shortcuts, login startup, persistent data and stable-release updates with rollback; source installs remain supported. Packages are unsigned and not notarized. Costs are estimates, not subscription charges.
+English: Add cross-account model comparison, stacked daily trends with task drilldown, weighted cache efficiency, pricing coverage and on-demand HTML/CSV/JSON exports. The new 1-second view is the last minute's input/output divided by 60. Bundled-runtime installers add shortcuts, login startup, persistent data and stable-release updates with rollback; source installs remain supported. Package smoke checks wait for service and manager readiness during startup/restart. Packages are unsigned and not notarized. Costs are estimates, not subscription charges.
 
 ## v0.4.12 — 2026-09-28
 

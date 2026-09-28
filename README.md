@@ -8,29 +8,29 @@ Codex Monitor 是一个在本机运行的网页工具，用来查看 Codex 还�
 
 这是个非官方工具。账号额度来自 Codex，任务的等效消耗和费用是估算值，用来比较用量，不代表实际账单。
 
-**[v0.5.0](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.0)** · 带运行环境的安装包、5 项用量分析、实时 Token 每秒均值。[更新日志](CHANGELOG.md)
+**[v0.5.1](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.1)** · 带运行环境的安装包、5 项用量分析、实时 Token 每秒均值。[更新日志](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-overview-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-overview-zh.jpg">
-  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.0-overview-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-overview-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-overview-zh.jpg">
+  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.1-overview-zh.jpg">
 </picture>
 
-v0.5.0 界面局部截图（1280 × 720），随深浅色主题切换；账号、任务和用量均为虚构演示数据。
+v0.5.1 界面局部截图（1280 × 720），随深浅色主题切换；账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-tasks-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-tasks-zh.jpg">
-  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.0-tasks-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-tasks-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-tasks-zh.jpg">
+  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.1-tasks-zh.jpg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.0-trends-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.0-trends-zh.jpg">
-  <img alt="趋势与依据页的模型用量对比与缓存效率" src="assets/screenshots/v0.5.0-trends-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-trends-zh-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-trends-zh.jpg">
+  <img alt="趋势与依据页的模型用量对比与缓存效率" src="assets/screenshots/v0.5.1-trends-zh.jpg">
 </picture>
 
 </details>
@@ -43,7 +43,7 @@ v0.5.0 界面局部截图（1280 × 720），随深浅色主题切换；账号�
 - **任务明细 `/tasks`**：搜索、筛选、排序、列设置和项目合计。可查看历史账号记录，**不会切换 Codex 登录**。展开任务可查询官方累计额度及模型、推理强度、速度分布。
 - **趋势与依据 `/trends`**：跨账号模型对比、每日费用／Token／缓存命中率、当天任务下钻、范围排行与价格依据。
 
-v0.5.0 的 5 项分析功能：
+v0.5.1 的 5 项分析功能：
 
 | 功能 | 入口与用途 |
 | --- | --- |

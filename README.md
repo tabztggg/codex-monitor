@@ -1,10 +1,12 @@
 # Codex Monitor
 
-**看清 Codex 用量花在哪里：按任务、项目和时间范围分析。**
-
 简体中文 | [English](README.en.md)
 
-本地 Codex 用量仪表盘，基于 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor) 改进易用性与统计展示。非 OpenAI 官方产品，也不是计费系统。
+Codex Monitor 是一个在本机运行的网页工具，用来查看 Codex 还剩多少额度、什么时候重置，以及用量主要花在哪些任务上。你可以看单个聊天用了多少 Token，也可以按项目汇总，选一段时间看看哪些任务消耗最多。
+
+这个项目的原版来自 [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor)。我最初只是想弄清楚自己的额度花在哪儿，后来就在原版上按自己的使用习惯继续改，补了中英文切换、项目分组和跨账号用量估算。Windows 的安装、后台启动和更新也做成了一键入口，平时打开网页就能用。
+
+这是个非官方工具。账号额度来自 Codex，任务的等效消耗和费用是估算值，用来比较用量，不代表实际账单。
 
 **[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · 修复账号切换后的额度同步，完善版本检查提示与重试。[更新日志](CHANGELOG.md)
 

@@ -1,10 +1,12 @@
 # Codex Monitor
 
-**See where your Codex usage goes — by task, project, and time range.**
-
 [简体中文](README.md) | English
 
-A local Codex usage dashboard with usability and reporting improvements built on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). An unofficial community project, not an OpenAI product or billing system.
+Codex Monitor runs locally and gives you a browser view of your remaining Codex quota, reset times, and task usage. You can check the tokens used by a conversation, group tasks by project, or pick a date range to see which tasks used the most.
+
+This version builds on [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor). I started working on it because I wanted to understand where my Codex quota was going. As I used the original, I added things I wanted day to day, including Chinese and English interfaces, project grouping, and usage estimates across accounts. Windows installation, background startup, and updates also have one-click launchers, so I can open the dashboard in a browser when I need it.
+
+This is an unofficial project. Account quota comes from Codex; task quota equivalents and costs are estimates for comparing usage, not actual charges.
 
 **[v0.4.12](https://github.com/tabztggg/codex-monitor/releases/tag/v0.4.12)** · Fix quota updates after account switches and clarify version checks and retries. [Changelog](CHANGELOG.md)
 

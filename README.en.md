@@ -1,6 +1,6 @@
 # Codex Monitor
 
-[简体中文](README.md) | English
+English | [简体中文](README.zh-CN.md)
 
 Codex Monitor runs locally and gives you a browser view of your remaining Codex quota, reset times, and task usage. You can check the tokens used by a conversation, group tasks by project, or pick a date range to see which tasks used the most.
 

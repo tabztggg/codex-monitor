@@ -1,6 +1,6 @@
 # Setup and reference
 
-[English overview](../README.en.md) · [中文介绍](../README.md)
+[English overview](../README.en.md) · [中文介绍](../README.zh-CN.md)
 
 Commands run from the repository root. This document describes the current
 customized source tree and its optional local launcher configuration.

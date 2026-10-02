@@ -5,6 +5,58 @@ import path from 'node:path';
 import { QuotaCalibration, type QuotaCalibrationEvent } from '../quota-equivalent';
 
 describe('quota sample migration', () => {
+  it('scopes manual overrides to their account and quota window and preserves a historical reference without hiding reconciliation', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'quota-manual-scope-'));
+    const file = path.join(dir, 'reference.json');
+    const start = Date.parse('2026-09-30T00:00:00Z');
+    const resetsAt = new Date(start + 604800000).toISOString();
+    const scope = { accountId: 'account-a', startedAtMs: start, resetsAt, usedPercent: 10 };
+    const events: QuotaCalibrationEvent[] = [
+      { id: 'baseline', taskId: 'task', at: start, cost: 0, limit: { used: 0, resetsAt: start + 604800000 } },
+      { id: 'response', taskId: 'task', at: start + 60000, cost: 20, limit: { used: 10, resetsAt: start + 604800000 } }
+    ];
+    try {
+      writeFileSync(file + '.manual.json', JSON.stringify({ version: 1, costPerPercent: 7, updatedAt: start, accountId: 'account-a', resetsAt }));
+      const calibration = new QuotaCalibration(file);
+      const matching = calibration.resolve(events, start, start + 120000, scope);
+      expect(matching).toMatchObject({ costPerPercent: 7, source: 'manual' });
+      expect(matching.reconciliation?.attributed.get('task')).toBe(10);
+      expect(calibration.resolve(events, start, start + 120000, { ...scope, accountId: 'account-b' }))
+        .toMatchObject({ costPerPercent: 2, source: 'current' });
+      const changed = events.map(e => ({ ...e, cost: e.cost! * 5 }));
+      expect(calibration.resolve(changed, start, start + 180000, { ...scope, accountId: 'history-account', allowUpdate: false }))
+        .toMatchObject({ costPerPercent: 2, source: 'previous' });
+      const nextPeriod = { ...scope, startedAtMs: start + 604800000, resetsAt: new Date(start + 2 * 604800000).toISOString() };
+      expect(calibration.resolve([], nextPeriod.startedAtMs, nextPeriod.startedAtMs + 120000, nextPeriod))
+        .toMatchObject({ costPerPercent: 2, source: 'previous' });
+      expect(new QuotaCalibration(file).resolve([], null, nextPeriod.startedAtMs + 180000))
+        .toMatchObject({ costPerPercent: 2, source: 'previous' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('retains a reference when readable intervals cover too little cost and persists attribution metadata before calibration qualifies', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'quota-partial-coverage-'));
+    const file = path.join(dir, 'reference.json');
+    const start = Date.parse('2026-09-30T00:00:00Z');
+    const end = start + 604800000;
+    const scope = { accountId: 'account-a', startedAtMs: start, resetsAt: new Date(end).toISOString(), usedPercent: 10 };
+    const event = (minute: number, used: number, cost: number | null, reset: number | null = end): QuotaCalibrationEvent =>
+      ({ id: `sample-${minute}`, taskId: 'task', at: start + minute * 60000, cost, limit: reset === null ? null : { used, resetsAt: reset } });
+    try {
+      const first = new QuotaCalibration(file);
+      expect(first.resolve([event(0, 0, 0), event(1, 2, 20)], start, start + 120000, { ...scope, usedPercent: 2 }))
+        .toMatchObject({ costPerPercent: null });
+      expect(new QuotaCalibration(file).recordedEvents()).toHaveLength(2);
+      writeFileSync(file + '.manual.json', JSON.stringify({ version: 1, accountId: 'old-account',
+        resetsAt: new Date(start).toISOString(), costPerPercent: 12, updatedAt: start - 60000 }));
+      const restarted = new QuotaCalibration(file);
+      const result = restarted.resolve([event(2, 2, 1, null), event(3, 3, 100), event(4, 8, 1), event(5, 10, 1)], start, start + 360000, scope);
+      expect(result).toMatchObject({ costPerPercent: 12, source: 'previous' });
+      expect(result.reconciliation?.attributedPercent).toBe(9);
+      expect(result.coverage?.cost).toBeLessThan(0.9);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('keeps v3 calibration visible as previous across restarts, but replaces it using only fresh corrected samples', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'quota-parser-migration-'));
     const file = path.join(dir, 'reference.json');
@@ -34,7 +86,7 @@ describe('quota sample migration', () => {
       expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ calibrationPolicy: 3, sampleVersion: 4 });
       writeFileSync(file + '.manual.json', JSON.stringify({ version: 1, costPerPercent: 7, updatedAt: start }));
       expect(new QuotaCalibration(file).resolve([], start, start + 300000))
-        .toMatchObject({ costPerPercent: 7, source: 'manual' });
+        .toMatchObject({ costPerPercent: 2, source: 'previous' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 

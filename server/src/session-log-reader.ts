@@ -171,7 +171,7 @@ export class IncrementalSessionLog {
 
 type JsonFrame = {
   kind: 'object' | 'array';
-  scope: 'root' | 'payload' | 'other';
+  scope: 'root' | 'payload' | 'item' | 'other';
   expected: 'keyOrEnd' | 'key' | 'colon' | 'valueOrEnd' | 'value' | 'commaOrEnd';
   key: string | null;
 };
@@ -195,6 +195,7 @@ class ToolOutputProjection {
   private primitive: string | null = null;
   private type: unknown;
   private payloadType: unknown;
+  private itemType: unknown;
   private timestamp: unknown;
   private readonly seen = new Set<string>();
 
@@ -202,13 +203,14 @@ class ToolOutputProjection {
 
   canProject(): boolean {
     return this.type === 'response_item' &&
-      (this.payloadType === 'function_call_output' || this.payloadType === 'custom_tool_call_output');
+      (this.payloadType === 'function_call_output' || this.payloadType === 'custom_tool_call_output') ||
+      this.type === 'event_msg' && this.payloadType === 'item_completed' && this.itemType === 'DynamicToolCall';
   }
 
   finish(): string {
     if (!this.complete || this.string || this.primitive !== null || !this.canProject()) this.fail();
-    return JSON.stringify({ type: 'response_item', timestamp: this.timestamp,
-      payload: { type: this.payloadType } });
+    return JSON.stringify({ type: this.type, timestamp: this.timestamp,
+      payload: { type: this.payloadType, ...(this.type === 'event_msg' ? { item: { type: this.itemType } } : {}) } });
   }
 
   feed(bytes: Buffer): void {
@@ -248,7 +250,8 @@ class ToolOutputProjection {
           frame.key = value ?? null;
           frame.expected = 'colon';
           if ((frame.scope === 'root' && ['type', 'payload', 'timestamp'].includes(value ?? '')) ||
-            (frame.scope === 'payload' && value === 'type')) {
+            (frame.scope === 'payload' && ['type', 'item'].includes(value ?? '')) ||
+            (frame.scope === 'item' && value === 'type')) {
             const identity = `${frame.scope}:${value}`;
             if (this.seen.has(identity)) this.fail();
             this.seen.add(identity);
@@ -288,6 +291,7 @@ class ToolOutputProjection {
         scope = 'root';
       } else {
         if (frame?.scope === 'root' && frame.key === 'payload' && byte === 123) scope = 'payload';
+        if (frame?.scope === 'payload' && frame.key === 'item' && byte === 123) scope = 'item';
         this.value(undefined);
       }
       if (this.stack.length >= 64) this.fail();
@@ -331,6 +335,7 @@ class ToolOutputProjection {
       this.timestamp = value;
     }
     if (frame.scope === 'payload' && frame.key === 'type') this.payloadType = value;
+    if (frame.scope === 'item' && frame.key === 'type') this.itemType = value;
     frame.expected = 'commaOrEnd';
   }
 

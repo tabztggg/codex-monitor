@@ -12,6 +12,7 @@ import { ModelAnalytics } from './ModelAnalytics';
 import { OverviewHighlights } from './OverviewHighlights';
 import { LiveTokensPanel } from './LiveTokensPanel';
 import { OverviewDataQuality } from './OverviewDataQuality';
+import { QuotaReconciliation } from './QuotaReconciliation';
 import { OfficialTaskUsagePanel } from './OfficialTaskUsagePanel';
 import { formatEstimatedCost, formatTokenCount, formatUsagePercent, comparePlanUsage, comparisonPlans, isComparisonPlan, type ComparisonPlan } from '../usage-display';
 import { parseTableView, tableColumns, taskColumns as columns, type TableView } from '../table-view';
@@ -156,7 +157,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   const sections = groupByProject ? projectGroups.map(group => ({ id: group.id, group, jobs: collapsed.has(group.id) ? [] : group.jobs })) : [{ id: 'ungrouped', group: null, jobs: displayed }];
   const headerSortKey = (key: TaskSortColumn): TaskSortColumn => key === 'usage' && sort === 'equivalent20x' ? 'equivalent20x' : key;
   const nextDirection = (key: TaskSortColumn): SortDirection => sort === key ? direction === 'asc' ? 'desc' : 'asc' : key === 'task' || key === 'status' ? 'asc' : 'desc';
-  const quotaTitle = t('Selected account usage uses the same calibration as cross-account equivalents, counting only this quota period’s records with a matching weekly reset (within 60 seconds). Missing matches and prices are excluded. Matching reset times estimate account identity; they do not prove it. One {plan} week = 100%.', { plan: planLabel });
+  const quotaTitle = t('Selected-account quota is allocated from recorded quota increases using response cost weights. Unsupported amounts remain unattributed. Cross-account usage uses a separate calibration reference. One {plan} week = 100%.', { plan: planLabel });
   const equivalentPair = (current: number | null | undefined, currentComplete: boolean | undefined, across: number | null | undefined, acrossComplete: boolean | undefined) => <span className="equivalent-pair" title={pairScope}>
     <span className={current != null ? 'value-quota' : 'value-muted'} title={quotaTitle} aria-label={t('Selected account · This period')}>{formatUsagePercent(comparePlanUsage(current ?? null, comparisonPlan), locale)}{current != null && !currentComplete ? '+' : ''}</span>
     <span className="equivalent-divider"> / </span>
@@ -213,6 +214,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       {period !== activePeriod && <p className="muted-note" role="status">{t('Loading the selected period. Previous results remain labeled with their original period.')}</p>}
       {analysis ? page !== 'overview' && page !== 'all' && <HistoryPeriodScope analysis={analysis} allocation={allocation} nowMs={nowMs} /> : <p className="muted-note" role="status">{t(loading ? 'Loading tasks…' : 'Task data unavailable. Retry refresh.')}</p>}
       {analysis && page !== 'overview' && page !== 'all' && <div className="scope-coverage" role="status"><span>{t('{count} included tasks', { count: mergedJobs.length })}</span><span>{t(archives.mode === 'all' ? 'Archives: all {count}' : 'Archives: latest {count} of {total}', { count: archives.included, total: archives.total })}</span><span>{t('Local records · estimates may be incomplete')}</span></div>}
+      <QuotaReconciliation allocation={allocation} />
       {(page === 'all' || page === 'overview') && <>
         <TaskInsights jobs={mergedJobs} analysis={analysis ?? null} allocation={allocation} periodLabel={t(periods[activePeriod])} comparisonPlan={comparisonPlan} section="summary" onShowBasis={showBasis} hideCalibration />
         {analysis && <div className="overview-summary-footer">
@@ -233,7 +235,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       {loading && requestedMode === 'all' && <button type="button" className="small-control" onClick={() => loadArchives('recent')}>{t('Return to the latest 30 archives')}</button>}
     </div>
       </div>
-      <p className="muted-note">{t('Selected account %: {account} · This quota period · One {plan} week = 100% · Estimated by matching weekly reset times.', { account: allocation?.currentAccount?.email ?? t('Unknown'), plan: planLabel })}</p>
+      <p className="muted-note">{t('Selected account %: {account} · This quota period · One {plan} week = 100% · Allocated from recorded quota increases.', { account: allocation?.currentAccount?.email ?? t('Unknown'), plan: planLabel })}</p>
       <div className="task-data-panel">
     <div className="task-toolbar">
       {page !== 'tasks' && <input aria-label={t('Search tasks')} placeholder={t('Search tasks or projects…')} value={search} onChange={e => setSearch(e.target.value)} />}
@@ -295,12 +297,15 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
           ? <><dt>{t('Manual normalization target')}</dt><dd>100%</dd></>
           : <><dt>{t('Calibration observations')}</dt><dd>{t('{count} percentage points', { count: allocation?.equivalent20x?.calibrationQuotaPercent ?? 0 })}</dd></>}
         {allocation?.equivalent20x?.calibratedAt && <><dt>{t('Calibration reference updated')}</dt><dd>{new Date(allocation.equivalent20x.calibratedAt).toLocaleString(locale)}</dd></>}
+        {allocation?.equivalent20x?.referenceResetsAt && <><dt>{t('Reference quota reset')}</dt><dd>{dateTime(allocation.equivalent20x.referenceResetsAt)}</dd></>}
+        {allocation?.equivalent20x?.coverage && <><dt>{t('Calibration quota / cost coverage')}</dt><dd>{formatUsagePercent(allocation.equivalent20x.coverage.quota * 100, locale)} / {formatUsagePercent(allocation.equivalent20x.coverage.cost * 100, locale)}</dd></>}
         <dt>{t('Estimated cost per 1% of 20x')}</dt><dd>{formatEstimatedCost(allocation?.equivalent20x?.costPerPercentUsd ?? null, true, locale)}</dd>
         <dt>{t('Unpriced tokens')}</dt><dd>{analysis ? new Intl.NumberFormat(locale).format(analysis.unpricedTokens) : '--'}</dd>
         <dt>{t('Tokens without timestamps')}</dt><dd>{analysis ? new Intl.NumberFormat(locale).format(analysis.untimedTokens) : '--'}</dd>
         <dt>{t('Daily boundary time zone')}</dt><dd>{analysis?.timeZone ?? '--'}</dd>
         <dt>{t('Last successful refresh')}</dt><dd>{updatedAt ? dateTime(new Date(updatedAt).toISOString()) : '--'}</dd>
       </dl>
+      <p>{t('Automatic cross-account calibration requires at least 5 quota percentage points and 90% coverage of both quota increases and matching priced costs. Otherwise the previous reference is retained.')}</p>
       <p>{t('Today and Last 7 days use calendar days on the monitor computer. Current quota period follows the account reset window. Selected account % stays on that quota period when another time range is selected.')}</p>
       <p>{t('Project and scope totals include hidden rows. Click column headings to sort. + means incomplete data; -- means unavailable.')}</p>
     </details></>}

@@ -21,7 +21,7 @@ import {
 import { asRecord, asString, cloneValue, toIsoDate } from "./utils";
 import { userPreview } from "../../shared/session-preview";
 import { QuotaAttribution } from "./quota-attribution";
-import { QuotaCalibration, equivalent20x, currentAccountEquivalent, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
+import { QuotaCalibration, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
 import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
 import { readProjectResolver } from './project-metadata';
 import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
@@ -67,7 +67,7 @@ type ParsedHistoryJob = HistoryJob & {
   untimedTokens?: number;
   totalUnpricedTokens?: number;
   quotaCalibrationEvents?: QuotaCalibrationEvent[];
-  quotaCalibrationVersion?: 7;
+  quotaCalibrationVersion?: typeof HISTORY_SUMMARY_VERSION;
   hasIncompleteUsage?: boolean;
   parentThreadId: string | null;
   isSubagent: boolean;
@@ -107,12 +107,16 @@ type UsageWindow = {
   resetsAt: string;
   limitName: string;
   windowLabel: string;
+  observedAtMs?: number;
 };
 
 const ROLLING_USAGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
 const ARCHIVE_CACHE_VERSION = 4;
+// Bump when parsing or pricing changes. Rebuild from the compact token timeline,
+// preserving archive caches without rereading the original transcripts.
+const HISTORY_SUMMARY_VERSION = 8;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
@@ -146,6 +150,7 @@ export class HistoryJobReader {
     usageWindow?: UsageWindow | null;
     account?: HistoryUsageAllocation['currentAccount'];
     observeUsage?: boolean;
+    calibrateAccount?: boolean;
     archiveMode?: HistoryArchiveMode;
     period?: HistoryPeriod;
     dateFrom?: string;
@@ -234,17 +239,22 @@ export class HistoryJobReader {
     const consolidated = consolidateSubagentUsage(mergeJobsByTask(parsedJobs, nowMs, args.usageWindow?.startedAtMs ?? null));
     const window = args.usageWindow;
     const weekEnd = Date.parse(window?.resetsAt ?? '');
-    const weekly = window && weekEnd > nowMs && weekEnd - window.startedAtMs === 604800000;
-    const calibration = this.calibration.resolve(parsedJobs.flatMap(job => job.quotaCalibrationEvents ?? []), nowMs - 30 * 86400000, nowMs);
+    const weekly = window && weekEnd > Math.min(nowMs, window.observedAtMs ?? nowMs) && weekEnd - window.startedAtMs === 604800000;
+    const accountId = args.account?.type === 'chatgpt' && args.account.email
+      ? createHash('sha256').update('chatgpt:' + args.account.email.trim().toLowerCase()).digest('hex') : null;
+    const calibration = this.calibration.resolve(consolidated.flatMap(job =>
+      (job.quotaCalibrationEvents ?? []).map(event => ({ ...event, taskId: job.id }))), nowMs - 30 * 86400000, nowMs,
+      accountId && window && weekly ? { accountId, ...window, allowUpdate: args.calibrateAccount !== false } : undefined);
+    const reconciliation = 'reconciliation' in calibration ? calibration.reconciliation : null;
     const key = window ? JSON.stringify([window.limitName, window.windowLabel, window.startedAtMs, window.resetsAt]) : '';
-    if (window && args.observeUsage) {
+    if (window && args.observeUsage && !accountId) {
       this.attribution.observe(key, window.usedPercent, consolidated.map(job => ({
         id: job.id, cost: job.sinceResetEstimatedCostUsd ?? 0,
         tokens: job.sinceResetUsage?.totalTokens ?? 0, unpriced: job.sinceResetUnpricedTokens ?? 0,
         historical: job.archived
       })), nowMs);
     }
-    const ledger = this.attribution.read(key);
+    const ledger = accountId ? null : this.attribution.read(key);
     const selectedDays = new Map<string, HistoryUsageDay[]>();
     const selectedStart = customStart ?? periodStart(period, nowMs, window?.startedAtMs ?? null);
     const allJobs = consolidated.map(({ parsedTurns: _turns, usageEvents: _usageEvents, modelUsageVersion: _modelVersion, quotaCalibrationEvents: _events, quotaCalibrationVersion: _calibrationVersion, hasIncompleteUsage = false, dailyUsage, quotaDailyUsage, untimedTokens = 0, totalUnpricedTokens = 0, ...job }) => {
@@ -283,17 +293,19 @@ export class HistoryJobReader {
         unpricedTokens: unpriced, untimedTokens
       };
       const attributed = ledger?.attributed[job.id] ?? 0;
-      const accountEquivalent = currentAccountEquivalent(_events ?? [], window, nowMs,
-        calibration.costPerPercent, Boolean(job.totalUsage), untimedTokens);
+      const allocated = reconciliation?.attributed.get(job.id) ?? 0;
+      const accountComplete = Boolean(reconciliation && !reconciliation.partialTasks.has(job.id) &&
+        !hasIncompleteUsage && untimedTokens === 0 && job.totalUsage);
+      const accountPercent = !reconciliation ? null : allocated > 0 ? allocated : accountComplete ? 0 : null;
       return { ...job,
         periodMetrics,
         lifetime20xPercent: equivalent20x({ ...job, sinceResetUsage: job.totalUsage, sinceResetEstimatedCostUsd: job.totalEstimatedCostUsd }, calibration.costPerPercent),
         lifetime20xIsComplete: job.totalEstimatedCostIsComplete,
-        currentAccountEquivalentPercent: hasIncompleteUsage && accountEquivalent.percent === 0 ? null : accountEquivalent.percent,
-        currentAccountEquivalentIsComplete: accountEquivalent.complete && !hasIncompleteUsage,
+        currentAccountEquivalentPercent: accountPercent,
+        currentAccountEquivalentIsComplete: accountComplete,
         estimated20xPercent: available && periodMetrics.usage ? equivalent20x({ ...job, sinceResetUsage: periodMetrics.usage, sinceResetEstimatedCostUsd: periodMetrics.costUsd }, calibration.costPerPercent) : null,
         estimated20xIsComplete: periodMetrics.costComplete,
-        estimatedUsagePercentSinceReset: !ledger ? null : attributed > 0 ? attributed :
+        estimatedUsagePercentSinceReset: reconciliation ? accountPercent : !ledger ? null : attributed > 0 ? attributed :
           job.sinceResetUsage || !job.totalUsage ? null : 0
       };
     });
@@ -324,11 +336,19 @@ export class HistoryJobReader {
       usageAllocation: {
         currentAccount: args.account ?? null,
         equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent,
-          source: calibration.source, calibratedAt: calibration.calibratedAt, referenceQuotaPercent: calibration.referenceQuotaPercent },
+          source: calibration.source, calibratedAt: calibration.calibratedAt, referenceQuotaPercent: calibration.referenceQuotaPercent,
+          ...('referenceAccountId' in calibration ? { referenceAccountId: calibration.referenceAccountId, referenceResetsAt: calibration.referenceResetsAt } : {}),
+          ...('coverage' in calibration ? { coverage: calibration.coverage } : {}) },
         ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
-        status: ledger && !ledger.stale ? 'available' : 'unavailable',
-        observedSince: ledger?.observedAt ?? null,
-        unattributedPercent: ledger?.unattributed ?? window?.usedPercent ?? null
+        status: reconciliation ? 'available' : ledger && !ledger.stale ? 'available' : 'unavailable',
+        observedSince: reconciliation?.observedSince ?? ledger?.observedAt ?? null,
+        unattributedPercent: reconciliation?.unattributedPercent ?? ledger?.unattributed ?? window?.usedPercent ?? null,
+        ...(reconciliation ? {
+          attributionBasis: 'observedQuotaIncrements' as const,
+          attributedPercent: reconciliation.attributedPercent,
+          includedAttributedPercent: allJobs.reduce((sum, job) => sum + (job.currentAccountEquivalentPercent ?? 0), 0),
+          outsideScopePercent: Math.max(0, reconciliation.attributedPercent - allJobs.reduce((sum, job) => sum + (job.currentAccountEquivalentPercent ?? 0), 0))
+        } : {})
       }
     };
   }
@@ -343,7 +363,7 @@ export class HistoryJobReader {
     const cached = this.cache.get(file.path);
     const unchanged = Boolean(!forceRefresh && cached?.compact && cached.mtimeMs === file.mtimeMs &&
       cached.size === file.size && cached.ctimeMs === file.ctimeMs && cached.identity === file.identity);
-    if (unchanged && cached?.timeZone === timeZone && cached?.job?.quotaCalibrationVersion === 7 && cached.job.modelUsageVersion === 1 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
+    if (unchanged && cached?.timeZone === timeZone && cached?.job?.quotaCalibrationVersion === HISTORY_SUMMARY_VERSION && cached.job.modelUsageVersion === 1 && Array.isArray(cached.job.usageEvents) && Array.isArray(cached.job.parsedTurns) && cached.usageWindowStartedAtMs === usageWindowStartedAtMs &&
         (cached.parsedAtMs === nowMs || (isRollingUsageStable(cached.job, cached.parsedAtMs) &&
           nowMs >= cached.parsedAtMs && !hasRecentOpenTurn(cached.job, cached.parsedAtMs)))) {
       return cloneValue(cached.job);
@@ -451,7 +471,8 @@ export class HistoryJobReader {
     if (!this.archiveCacheFile || !existsSync(this.archiveCacheFile)) return;
     try {
       const stored = JSON.parse(readFileSync(this.archiveCacheFile, 'utf8'));
-      // Bump the version whenever the parser or model pricing changes.
+      // Archive version tracks storage format; HISTORY_SUMMARY_VERSION handles
+      // parser and pricing changes while retaining reusable compact records.
       if (![3, ARCHIVE_CACHE_VERSION].includes(stored.version) || stored.root !== path.resolve(this.archivedRoot) || !Array.isArray(stored.entries)) return;
       const entries = stored.entries as [string, CachedHistoryJob][];
       for (const [file, cached] of entries) {
@@ -1277,7 +1298,7 @@ export function parseHistorySessionFile(args: {
     modelUsageVersion: 1,
     parsedTurns: sortedTurns,
     quotaCalibrationEvents,
-    quotaCalibrationVersion: 7,
+    quotaCalibrationVersion: HISTORY_SUMMARY_VERSION,
     hasIncompleteUsage,
     dailyUsage: [...dailyUsage.values()], quotaDailyUsage: [...quotaDailyUsage.values()], untimedTokens, totalUnpricedTokens,
     archived: false,

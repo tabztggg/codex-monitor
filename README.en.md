@@ -8,29 +8,29 @@ This version builds on [manuelsh/codex-monitor](https://github.com/manuelsh/code
 
 This is an unofficial project. Account quota comes from Codex; task quota equivalents and costs are estimates for comparing usage, not actual charges.
 
-**[v0.5.1](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.1)** · Bundled-runtime installers, five usage-analysis features and per-second token averages. [Changelog](CHANGELOG.md)
+**[v0.5.2](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.2)** · Account quota reconciliation, calibration and archive fixes. [Changelog](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-overview-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-overview-en.jpg">
-  <img alt="Usage overview: account quota and live tokens" src="assets/screenshots/v0.5.1-overview-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-overview-en-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-overview-en.png">
+  <img alt="Usage overview: account quota and live tokens" src="assets/screenshots/v0.5.2-overview-en.png">
 </picture>
 
-These 1280 × 720 views show parts of the v0.5.1 interface in light and dark themes, using fictional accounts, tasks and usage.
+These screenshots show the v0.5.2 interface in light and dark themes, using fictional accounts, tasks and usage.
 
 <details>
 <summary>Task details and trends</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-tasks-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-tasks-en.jpg">
-  <img alt="Usage table on the task details page" src="assets/screenshots/v0.5.1-tasks-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-tasks-en-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-tasks-en.png">
+  <img alt="Usage table on the task details page" src="assets/screenshots/v0.5.2-tasks-en.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-trends-en-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-trends-en.jpg">
-  <img alt="Model usage comparison and cache efficiency on the trends page" src="assets/screenshots/v0.5.1-trends-en.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-trends-en-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-trends-en.png">
+  <img alt="Model usage comparison and cache efficiency on the trends page" src="assets/screenshots/v0.5.2-trends-en.png">
 </picture>
 
 </details>
@@ -126,9 +126,11 @@ The time range does not change either task quota scope. Display filters such as 
 
 **One selected plan's weekly allowance equals 100%; equivalents are not a share of total consumption and may exceed 100%.** Estimation assumes all recorded Pro accounts are 20x; logs cannot reliably identify 5x/20x. Pro 20x, Pro 5x and Plus apply comparison factors of 1, 4 and 20 without changing account tiers. The account badge shows only the plan returned by the API.
 
-Account attribution matches weekly reset times within 60 seconds, not reliable account IDs; identical reset times cannot be distinguished. Cost is API-equivalent USD based on token prices, including priced GPT-6 Astra/Sol/Luna usage, not a subscription bill. Missing logs, other-device activity and unpriced models affect results. `--` means unavailable; `+` means partial data.
+Account attribution matches weekly reset times within 60 seconds, not reliable account IDs; identical reset times cannot be distinguished. Cost is API-equivalent USD based on token prices, including priced GPT-6 Astra/Sol/Luna and GPT-6.1 Sol usage, not a subscription bill. Pricing updates recalculate existing cached statistics. Missing logs, other-device activity and unpriced models affect results. `--` means unavailable; `+` means partial data.
 
-Calibration uses recent valid quota changes and retains the previous value while updating in the background. The page identifies automatic, retained or manual calibration. Official task details are queried separately, cached per account for five minutes and retain same-account data on failure. The private endpoint may change or lag and does not overwrite local calibration. [Full metric details](docs/setup-and-reference.md#metric-details)
+Selected-account quota is allocated from recorded increases using response cost weights, independently of cross-account equivalents. **Account quota reconciliation** shows included tasks, tasks outside the current scope and unattributed quota; together they match the account total. Missing account windows, prices or continuous observations remain unassigned.
+
+Automatic cross-account calibration requires at least five quota percentage points and 90% coverage of both quota increases and matching priced costs in that account window. Otherwise the prior reference remains. Manual overrides apply only to their matching account and period. Official task details are queried separately, cached per account for five minutes and retain same-account data on failure. The private endpoint may change or lag and does not overwrite local calibration. [Full metric details](docs/setup-and-reference.md#metric-details)
 
 ## Local data and remote access
 

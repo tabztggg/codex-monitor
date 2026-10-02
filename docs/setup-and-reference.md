@@ -143,13 +143,14 @@ account selector can use a saved account snapshot without changing either login.
 
 The paired task quota column has fixed scopes:
 
-- **Selected account · This period:** matched usage within that account's quota
+- **Selected account · This period:** recorded quota increases allocated within that account's quota
   window; a historical account uses its last recorded window.
 - **Across accounts · Task lifetime:** all retained local periods/accounts for
   that task and its attributed children.
 
-Both divide priced usage by the same saved Pro 20x calibration. Plan comparison
-scales both values; each side has an independent sort control. Project totals
+The selected account replays quota snapshots and allocates each observed increase
+using same-interval response cost weights. Cross-account usage divides priced
+cost by a retained Pro 20x reference. Plan comparison scales both values; each side has an independent sort control. Project totals
 include hidden rows. Changing the time range does not change these two scopes.
 
 Rollouts lack reliable account IDs. Records are matched by weekly reset time,
@@ -160,8 +161,13 @@ result incomplete (`+`), or unavailable (`--`) when no priced subtotal exists.
 No current-week usage is zero only when the records establish that absence.
 The selected account label comes from the same quota snapshot as the calculation.
 
-The old `.cache/quota-attribution.json` ledger is preserved for compatibility;
-its observed increment allocation no longer drives the table column.
+Account reconciliation shows included tasks + tasks outside the current archive
+scope + unattributed quota = official account used. Initial consumption, missing
+prices, unknown account windows, gaps over 30 minutes and corrections remain
+unassigned. Cached sample metadata enables replay after pricing updates without
+rereading transcripts. Filters do not change the reconciliation totals.
+The old `.cache/quota-attribution.json` ledger remains only for compatibility
+with quota snapshots that lack an account identity.
 
 ### Pro 20x equivalents
 
@@ -170,10 +176,14 @@ assumption or reliably distinguish Pro 5x/20x. Account badges show only the API'
 plan label. The comparison selector offers Pro 20x, Pro 5x and Plus at factors
 of 1, 4 and 20; it does not change or verify the account's actual tier.
 
-Calibration uses the latest complete observations covering at least 20 percentage
-points when available, from retained samples in the last 30 days. Parallel
-sessions are merged into one timeline. All accounts share this reference;
-selecting another account does not recalibrate it.
+Calibration uses the selected account's replayable observations in its quota
+window, from metadata retained for 30 days. Parallel sessions are merged into
+one timeline. At least five percentage points and 90% coverage of both quota
+increases and matching priced costs are required; a narrow surviving subset
+does not replace the reference. Older account windows cannot replace a newer
+scoped reference. Historical manual references may remain the common comparison
+unit while evidence is insufficient, labeled as retained rather than current.
+Manual overrides apply only to their recorded account and matching reset period.
 
 At least five usable percentage points are required. Initial balances do not
 count as consumption. Reset changes and gaps over 30 minutes restart observation
@@ -183,10 +193,12 @@ See `server/src/quota-equivalent.ts` for the implementation.
 
 When observations are insufficient, the previous reference remains visible
 while calibration updates. An optional adjacent `.manual.json` calibration
-override accepts `version: 1`, positive `costPerPercent` and an `updatedAt`
-timestamp in milliseconds. It takes precedence and is identified in the UI;
-remove it and restart to resume automatic calibration. It changes equivalent
-quota only, not costs or tokens. Official account totals are not forced onto tasks.
+override requires `version: 1`, positive `costPerPercent`, `accountId` (the
+saved account's opaque display ID), `resetsAt` (ISO timestamp), and `updatedAt`
+in milliseconds within that week. It takes precedence only for that account
+and active period; otherwise it can be retained as a historical comparison
+reference. It changes cross-account equivalents only, not task allocations,
+costs or tokens. Official account totals are not forced onto tasks.
 
 Selected-range summary and ranking costs are divided by this reference. One
 20x week always equals 100%; this is not a share of total consumption, and several

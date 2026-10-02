@@ -2,8 +2,9 @@ import * as fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HistoryJobReader } from '../history-jobs';
+import { HistoryJobReader, parseHistorySessionFile } from '../history-jobs';
 import { estimateApiEquivalentCost, HISTORY_PRICING } from '../history-pricing';
+import { currentAccountEquivalent } from '../quota-equivalent';
 import { localDay } from '../../../shared/usage-period';
 
 vi.mock('node:fs', async importOriginal => {
@@ -91,6 +92,52 @@ describe('model analytics from incremental token events', () => {
       usage: { totalTokens: 20 }, unpricedTokens: 20, costUsd: null, costComplete: false
     });
     expect(result.analysis?.unpricedTokens).toBe(70);
+  });
+
+  it('prices GPT-6.1 Sol and restores selected-account quota estimates from its token events', () => {
+    const record = token(at(28), 110000, 110000, {
+      input_tokens: 100000, cached_input_tokens: 80000, output_tokens: 10000, reasoning_output_tokens: 4000
+    });
+    const rated = { ...record, payload: { ...record.payload, rate_limits: {
+      plan_type: 'pro', primary: { used_percent: 10, window_minutes: 10080, resets_at: Date.parse(window.resetsAt) / 1000 }
+    } } };
+    const parsed = parseHistorySessionFile({ sessionId: 'new-sol', updatedAt: iso(at(28)), nowMs: now,
+      usageWindowStartedAtMs: window.startedAtMs, fileContent: lines([meta('new-sol'), context('gpt-6.1-sol'), rated]) })!;
+    // Cached input is $0.10/M (old Sol is $0.20/M); reasoning is already in output.
+    const expectedCost = (20000 * 2 + 80000 * 0.1 + 10000 * 10) / 1e6;
+    expect(parsed.totalEstimatedCostUsd).toBeCloseTo(expectedCost);
+    expect(parsed.totalEstimatedCostIsComplete).toBe(true);
+    expect(currentAccountEquivalent(parsed.quotaCalibrationEvents ?? [], window, now, 2, true, 0))
+      .toMatchObject({ percent: expectedCost / 2, complete: true });
+    write('new-sol', [meta('new-sol'), context('gpt-6.1-sol'), rated]);
+    const result = new HistoryJobReader(sessions).listJobs({ nowMs: now, period: 'today', usageWindow: window });
+    expect(result.data[0].periodMetrics).toMatchObject({ costUsd: expectedCost, costComplete: true, unpricedTokens: 0 });
+    expect(result.analysis?.models?.[0]).toMatchObject({ model: 'gpt-6.1-sol', costUsd: expectedCost, costComplete: true });
+    expect(HISTORY_PRICING.models.find(row => row.model === 'gpt-6.1-sol')).toMatchObject({
+      input: 2, cachedInput: 0.1, cacheWriteInput: 2.5, output: 10, verifiedAt: '2026-09-30'
+    });
+    expect(estimateApiEquivalentCost({ inputTokens: 300000, cachedInputTokens: 200000, cacheWriteInputTokens: 1000,
+      outputTokens: 10000, reasoningOutputTokens: 4000, totalTokens: 310000 }, 'gpt-6.1-sol'))
+      .toBeCloseTo(((100000 * 2 + 200000 * 0.1 + 1000 * 2.5) * 2 + 10000 * 10 * 1.5) / 1e6);
+  });
+
+  it('reprices an old archived summary without reopening the transcript or dropping token counts', () => {
+    write('sol-archive', [meta('sol-archive'), context('gpt-6.1-sol'), token(at(28), 100000)], true);
+    const stableNow = now + 3 * 86400000;
+    new HistoryJobReader(sessions, ledger).listJobs({ nowMs: stableNow, period: 'lifetime' });
+    const cacheFile = path.join(root, 'cache', 'archived-history.json');
+    const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    cached.entries[0][1].job.quotaCalibrationVersion = 7;
+    cached.entries[0][1].job.totalEstimatedCostUsd = null;
+    cached.entries[0][1].job.totalEstimatedCostIsComplete = false;
+    fs.writeFileSync(cacheFile, JSON.stringify(cached));
+    const reader = new HistoryJobReader(sessions, ledger);
+    vi.mocked(fs.openSync).mockClear(); vi.mocked(fs.readSync).mockClear();
+    const result = reader.listJobs({ nowMs: stableNow, period: 'lifetime' });
+    expect(result.data[0]).toMatchObject({ totalUsage: { totalTokens: 100000 },
+      totalEstimatedCostUsd: 0.2, totalEstimatedCostIsComplete: true });
+    expect(fs.openSync).not.toHaveBeenCalled(); expect(fs.readSync).not.toHaveBeenCalled();
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1].job.quotaCalibrationVersion).toBe(8);
   });
 
   it('excludes future timestamps from quota/recent usage while preserving recorded lifetime totals', () => {

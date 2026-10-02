@@ -244,6 +244,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       forceRefresh: args.forceRefresh === true && !args.cursor,
       metadataById,
       account: usage.account,
+      calibrateAccount: !selected || selected.current,
       observeUsage: false,
       usageWindow: this.getPrimaryUsageWindow(usage)
     });
@@ -255,6 +256,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     resetsAt: string;
     limitName: string;
     windowLabel: string;
+    observedAtMs?: number;
   } | null {
     const limit = usage.limits.find(entry => entry.id === 'codex') ??
       (usage.primaryLimit?.id === 'codex' ? usage.primaryLimit : null);
@@ -279,7 +281,8 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
       startedAtMs: resetsAtMs - window.windowDurationMins * 60_000,
       resetsAt: window.resetsAt,
       limitName: limit?.name ?? "Overall Codex",
-      windowLabel: window.label
+      windowLabel: window.label,
+      observedAtMs: usage.updatedAt && Number.isFinite(Date.parse(usage.updatedAt)) ? Date.parse(usage.updatedAt) : undefined
     };
   }
 
@@ -602,7 +605,7 @@ export class MonitorService extends EventEmitter<{ change: [MonitorSnapshot] }> 
     const usageWindow = this.getPrimaryUsageWindow();
     if (!usageWindow || Date.parse(usageWindow.resetsAt) <= Date.now()) return;
     try {
-      this.historyJobReader.listJobs({ usageWindow, observeUsage: true });
+      this.historyJobReader.listJobs({ usageWindow, observeUsage: true, account: this.codexUsage.account });
     } catch (error) {
       console.error('Could not record quota attribution:', error);
     }

@@ -48,7 +48,7 @@ Linux 便携版需要 glibc 2.28+；不支持 Alpine/musl。Windows ARM 可使�
 
 先用旧版的“关闭服务”和 `Uninstall Codex Monitor.vbs` 移除旧启动项，避免两份程序争用 4201。旧卸载器保留配置和缓存。然后安装新包；不要同时保留旧计划任务和新登录启动项。
 
-需要保留旧统计时，首次启动新包前，将旧安装目录 `.cache/` 中的 `account-usage.json`、`quota-attribution.json`、`official-usage/` 复制到新数据目录的 `.cache/`。不要复制旧的进程锁或更新状态文件。自定义监听地址、端口、Codex 路径需要对应写入新 `config.json`。
+需要保留旧统计时，首次启动新包前，将旧安装目录 `.cache/` 中的 `account-usage.json`、`quota-attribution.json`、`quota-calibration.json`、存在时的 `quota-calibration.json.manual.json`、`archived-history.json` 和 `official-usage/` 复制到新数据目录的 `.cache/`。这些文件保留账号快照、归属观测、校准基准及归档缓存。不要复制旧的进程锁或更新状态文件。自定义监听地址、端口、Codex 路径需要对应写入新 `config.json`。
 
 ## 卸载
 
@@ -73,4 +73,4 @@ These packages run the existing dashboard in your browser, with a background ser
 
 Windows creates Desktop/Start menu shortcuts and offers login startup. macOS installs an app; first launch registers a per-user LaunchAgent. Linux provides DEB packages and portable archives, with menu/autostart integration. Web updates use stable Releases, verify SHA256 and platform identity, and restore the previous runtime if startup fails. Configuration and usage caches live outside the application directory and are retained on uninstall.
 
-The first packages are unsigned and not notarized. macOS and Linux builds must pass their native CI checks before being advertised as verified. For source-install migration, stop and uninstall the old launcher first, retain only usage caches, and recreate listener settings in the new data directory's `config.json`.
+The first packages are unsigned and not notarized. macOS and Linux builds must pass their native CI checks before being advertised as verified. For source-install migration, stop and uninstall the old launcher first, copy account usage, quota attribution/calibration, optional manual calibration, archived history and official-usage caches, and recreate listener settings in the new data directory's `config.json`. Do not copy process locks or update state.

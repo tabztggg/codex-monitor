@@ -138,8 +138,25 @@ describe('incremental session log cursor', () => {
     expect(resets).toBe(2);
   });
 
+  it('projects oversized DynamicToolCall completion envelopes while preserving neighboring statistics', () => {
+    reader = new IncrementalSessionLog(1024);
+    const completion = { type: 'event_msg', timestamp: '2026-10-02T00:00:00Z', payload: {
+      type: 'item_completed', item: { type: 'DynamicToolCall', content: [{ type: 'inputText', text: 'x'.repeat(300 * 1024) }] }
+    } };
+    fs.writeFileSync(file, JSON.stringify(completion) + '\n{"type":"event_msg","payload":{"type":"token_count","info":{"n":42}}}\n');
+    reader.read(file, consume, reset);
+    expect(lines.map(line => JSON.parse(line))).toEqual([
+      { type: 'event_msg', timestamp: completion.timestamp, payload: { type: 'item_completed', item: { type: 'DynamicToolCall' } } },
+      { type: 'event_msg', payload: { type: 'token_count', info: { n: 42 } } }
+    ]);
+    expect(reader.read(file, consume, reset)).toBe(false);
+  });
+
   it.each([
     '{"type":"event_msg","payload":{"type":"token_count","text":"BODY"}}',
+    '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"TokenCount","text":"BODY"}}}',
+    '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"DynamicToolCall","text":"BODY","type":"TokenCount"}}}',
+    '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"DynamicToolCall","text":"BODY"},"item":{"type":"TokenCount"}}}',
     '{"type":"session_meta","payload":{"type":"custom_tool_call_output","text":"BODY"}}',
     '{"type":"turn_context","payload":{"type":"custom_tool_call_output","text":"BODY"}}',
     '{"type":"event_msg","payload":{"type":"task_started","text":"BODY"}}',

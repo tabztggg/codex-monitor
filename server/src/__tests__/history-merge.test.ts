@@ -23,7 +23,8 @@ describe('rollout overlap and unavailable parents', () => {
     root = mkdtempSync(path.join(os.tmpdir(), 'monitor-merge-'));
     sessions = path.join(root, 'sessions'); archives = path.join(root, 'archived_sessions');
     mkdirSync(sessions); mkdirSync(archives);
-    writeFileSync(path.join(root, 'quota-calibration.json.manual.json'), JSON.stringify({ version: 1, costPerPercent: .01, updatedAt: now }));
+    writeFileSync(path.join(root, 'quota-calibration.json'), JSON.stringify({ version: 1, costPerPercent: .01,
+      quotaPercent: 5, windowStart: hour(1), updatedAt: now }));
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
   const reader = () => new HistoryJobReader(sessions, path.join(root, 'attribution.json'));

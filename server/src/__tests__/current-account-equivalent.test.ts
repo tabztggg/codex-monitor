@@ -62,37 +62,48 @@ describe('current account equivalents', () => {
     const cache = path.join(root, 'cache');
     mkdirSync(sessions); mkdirSync(archives); mkdirSync(cache);
     const iso = (time: number) => new Date(time).toISOString();
-    const write = (directory: string, file: string, id: string, costTokens: number, reset: number | null, parent?: string, at = start + 1000, model = 'gpt-5.5') => {
+    const write = (directory: string, file: string, id: string, costTokens: number, reset: number | null, parent?: string, at = start + 1000, model = 'gpt-5.5', used = 20) => {
       const usage = { input_tokens: costTokens, output_tokens: 0, total_tokens: costTokens };
       writeFileSync(path.join(directory, file), [
         { type: 'session_meta', timestamp: iso(at), payload: { id, cwd: 'C:/project', source: parent ? { subagent: { thread_spawn: { parent_thread_id: parent } } } : 'cli' } },
         { type: 'turn_context', timestamp: iso(at), payload: { model } },
         { type: 'event_msg', timestamp: iso(at), payload: { type: 'token_count',
           info: { last_token_usage: usage, total_token_usage: usage },
-          rate_limits: reset === null ? null : { plan_type: 'pro', secondary: { window_minutes: 10080, used_percent: 20, resets_at: reset / 1000 } } } }
+          rate_limits: reset === null ? null : { plan_type: 'pro', secondary: { window_minutes: 10080, used_percent: used, resets_at: reset / 1000 } } } }
       ].map(record => JSON.stringify(record)).join('\n'));
     };
     try {
       writeFileSync(path.join(cache, 'quota-calibration.json'), JSON.stringify({ version: 1, costPerPercent: 1, quotaPercent: 5, windowStart: start - 10000, updatedAt: start }));
-      write(sessions, 'a.jsonl', 'parent', 100000, end);
-      write(sessions, 'b.jsonl', 'parent', 100000, end, undefined, start + 2000);
-      write(archives, 'child.jsonl', 'child', 100000, end, 'parent');
-      write(sessions, 'other.jsonl', 'other', 200000, end - 86400000);
-      write(sessions, 'unknown.jsonl', 'unknown', 100000, null);
-      write(sessions, 'unpriced.jsonl', 'unpriced', 100000, end, undefined, start + 1000, 'unknown-model');
+      write(sessions, 'baseline.jsonl', 'parent', 0, end, undefined, start, 'gpt-5.5', 0);
+      write(sessions, 'a.jsonl', 'parent', 100000, end, undefined, start + 1000, 'gpt-5.5', 1);
+      write(sessions, 'b.jsonl', 'parent', 100000, end, undefined, start + 2000, 'gpt-5.5', 2);
+      write(archives, 'child.jsonl', 'child', 100000, end, 'parent', start + 1000, 'gpt-5.5', 1);
+      write(sessions, 'other.jsonl', 'other', 200000, end - 86400000, undefined, start + 3000);
+      write(sessions, 'unknown.jsonl', 'unknown', 100000, null, undefined, start + 4000);
+      write(sessions, 'unpriced.jsonl', 'unpriced', 100000, end, undefined, start + 5000, 'unknown-model');
       const reader = new HistoryJobReader(sessions, path.join(cache, 'quota.json'));
       const args = { nowMs: now, usageWindow: window, account: { type: 'chatgpt', email: 'current@example.com', planType: 'pro' } };
       const response = reader.listJobs(args);
       const parent = response.data.find(job => job.id === 'parent')!;
-      expect(parent).toMatchObject({ currentAccountEquivalentPercent: 1.5, currentAccountEquivalentIsComplete: true, estimated20xPercent: 1.5, estimatedUsagePercentSinceReset: null });
+      expect(parent).toMatchObject({ currentAccountEquivalentPercent: 2, currentAccountEquivalentIsComplete: true, estimated20xPercent: 1.5, estimatedUsagePercentSinceReset: 2 });
       expect(response.data.find(job => job.id === 'other')).toMatchObject({ currentAccountEquivalentPercent: 0, estimated20xPercent: 1 });
       expect(response.data.find(job => job.id === 'unknown')).toMatchObject({ currentAccountEquivalentPercent: null, currentAccountEquivalentIsComplete: false, estimated20xPercent: 0.5 });
       expect(response.data.find(job => job.id === 'unpriced')).toMatchObject({ currentAccountEquivalentPercent: null, currentAccountEquivalentIsComplete: false });
       expect(response.usageAllocation.currentAccount?.email).toBe('current@example.com');
-      expect(reader.listJobs({ ...args, period: 'lifetime' }).data.find(job => job.id === 'parent')?.currentAccountEquivalentPercent).toBe(1.5);
+      expect(response.usageAllocation).toMatchObject({ usedPercent: 20, attributedPercent: 2, includedAttributedPercent: 2, unattributedPercent: 18 });
+      expect(reader.listJobs({ ...args, searchTerm: 'parent', limit: 1 }).usageAllocation).toEqual(response.usageAllocation);
+      const switched = reader.listJobs({ ...args, account: { ...args.account, email: 'other@example.com' },
+        usageWindow: { ...window, usedPercent: 10, startedAtMs: start - 86400000, resetsAt: iso(end - 86400000) } });
+      expect(switched.usageAllocation).toMatchObject({ currentAccount: { email: 'other@example.com' }, usedPercent: 10, unattributedPercent: 10 });
+      expect(switched.data.find(job => job.id === 'parent')?.currentAccountEquivalentPercent).toBe(0);
+      expect(reader.listJobs({ ...args, period: 'lifetime' }).data.find(job => job.id === 'parent')?.currentAccountEquivalentPercent).toBe(2);
+      const historical = reader.listJobs({ ...args, nowMs: end + 86400000, calibrateAccount: false,
+        usageWindow: { ...window, observedAtMs: now }, period: 'today' });
+      expect(historical.data.find(job => job.id === 'parent')?.currentAccountEquivalentPercent).toBe(2);
+      expect(historical.usageAllocation).toMatchObject({ usedPercent: 20, includedAttributedPercent: 2, unattributedPercent: 18 });
       expect(new HistoryJobReader(sessions, path.join(cache, 'quota.json')).listJobs(args).data).toEqual(response.data);
       const group = groupTasksByProject(response.data, [parent], 'usage')[0];
-      expect(group).toMatchObject({ quotaPercent: 1.5, quotaIsComplete: false, jobs: [parent] });
+      expect(group).toMatchObject({ quotaPercent: 2, quotaIsComplete: false, jobs: [parent] });
       expect(visibleTasks(response.data, new Set(), 'all', '', 'usage', now)[0].id).toBe('parent');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });

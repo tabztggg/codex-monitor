@@ -1,8 +1,10 @@
 import type { HistoryJob } from '../../shared/monitor';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { reconcileQuotaUsage } from './quota-reconciliation';
 
-type SavedCalibration = { version: 1; costPerPercent: number; quotaPercent: number; windowStart: number; updatedAt: number };
+type SavedCalibration = { version: 1; costPerPercent: number; quotaPercent: number; windowStart: number; updatedAt: number; accountId?: string; resetsAt?: string };
+type CalibrationScope = { accountId: string; startedAtMs: number; resetsAt: string; usedPercent: number; observedAtMs?: number; allowUpdate?: boolean };
 const SAMPLE_RETENTION_MS = 30 * 86400000;
 const SAVE_INTERVAL_MS = 30000;
 // v4 excludes inherited fork usage and rejects incomplete token costs. Retain
@@ -14,7 +16,7 @@ const CALIBRATION_POLICY = 3;
 export class QuotaCalibration {
   private saved: SavedCalibration | null = null;
   private currentPolicy = false;
-  private manual: {costPerPercent: number; updatedAt: number} | null = null;
+  private manual: {costPerPercent: number; updatedAt: number; accountId: string; resetsAt: string} | null = null;
   private readonly samples = new Map<string, QuotaCalibrationEvent>();
   private referenceSamplesKnown = false;
   private dirty = false;
@@ -25,18 +27,28 @@ export class QuotaCalibration {
     if (file) {
       try {
         const value = JSON.parse(readFileSync(file + '.manual.json', 'utf8'));
-        if (value.version === 1 && Number.isFinite(value.costPerPercent) && value.costPerPercent > 0 && validTimestamp(value.updatedAt)) this.manual = value;
+        const end = Date.parse(value.resetsAt);
+        if (value.version === 1 && Number.isFinite(value.costPerPercent) && value.costPerPercent > 0 && validTimestamp(value.updatedAt) &&
+            typeof value.accountId === 'string' && value.accountId.length > 0 && Number.isFinite(end) &&
+            value.updatedAt >= end - 604800000 && value.updatedAt < end) this.manual = value;
       } catch { /* Missing manual reference leaves automatic calibration active. */ }
     }
     if (file && existsSync(file)) {
       try {
         const value = JSON.parse(readFileSync(file, 'utf8'));
+        // Quota attribution can already be useful before a five-point common
+        // calibration exists. Retain its metadata across restarts as well.
+        if (value?.version === 1 && value.costPerPercent === null && value.quotaPercent === 0 &&
+            value.sampleVersion === SAMPLE_VERSION && Array.isArray(value.samples) && value.samples.every(validSample)) {
+          for (const event of value.samples) this.samples.set(sampleKey(event), event);
+          return;
+        }
         if (value?.version !== 1 || !Number.isFinite(value.costPerPercent) || value.costPerPercent <= 0 ||
             !Number.isFinite(value.quotaPercent) || value.quotaPercent < 5 ||
             !validTimestamp(value.windowStart) || !validTimestamp(value.updatedAt) || value.updatedAt < value.windowStart) throw new Error('Invalid calibration');
         this.currentPolicy = value.calibrationPolicy === CALIBRATION_POLICY;
         this.saved = { version: 1, costPerPercent: value.costPerPercent, quotaPercent: value.quotaPercent,
-          windowStart: value.windowStart, updatedAt: value.updatedAt };
+          windowStart: value.windowStart, updatedAt: value.updatedAt, accountId: value.accountId, resetsAt: value.resetsAt };
         // Version 1 files without samples remain valid references. Do not replace
         // them from a potentially narrower selection until fresh samples qualify.
         if (value.sampleVersion === SAMPLE_VERSION && Array.isArray(value.samples) && value.samples.every(validSample)) {
@@ -47,7 +59,7 @@ export class QuotaCalibration {
     }
   }
 
-  resolve(events: QuotaCalibrationEvent[], windowStart: number | null, now: number) {
+  resolve(events: QuotaCalibrationEvent[], windowStart: number | null, now: number, scope?: CalibrationScope) {
     let samplesChanged = false;
     for (const event of events) {
       if (!validSample(event) || event.at < now - SAMPLE_RETENTION_MS || event.at > now) continue;
@@ -69,6 +81,43 @@ export class QuotaCalibration {
       }
     }
     const known = [...this.samples.values()];
+    if (scope) {
+      // Train from the selected account's replayable quota increments, never
+      // from a mixture of different account windows or a stale manual total.
+      const reconciled = reconcileQuotaUsage(known, scope, now);
+      let source: 'current' | 'previous' | 'unavailable' | 'manual' = this.saved ? 'previous' : 'unavailable';
+      if (scope.allowUpdate !== false && reconciled?.costPerPercent && reconciled.calibratedAt &&
+          (!this.saved?.accountId || Date.parse(reconciled.calibratedAt) >= this.saved.updatedAt)) {
+        this.remember(reconciled.costPerPercent, reconciled.calibrationPercent, scope.startedAtMs, Date.parse(reconciled.calibratedAt), scope);
+        source = 'current';
+      }
+      this.persist(now);
+      const manual = this.manual;
+      const manualMatches = manual && manual.accountId === scope.accountId &&
+        Math.abs(Date.parse(manual.resetsAt) - Date.parse(scope.resetsAt)) <= 60000 && now < Date.parse(manual.resetsAt);
+      if (manualMatches) return { costPerPercent: manual.costPerPercent, quotaPercent: 100,
+        referenceQuotaPercent: 100, source: 'manual' as const, calibratedAt: new Date(manual.updatedAt).toISOString(),
+        referenceAccountId: manual.accountId, referenceResetsAt: manual.resetsAt, reconciliation: reconciled };
+      // A confirmed older reference can still serve the cross-account unit
+      // while this window gathers evidence. It never sets task attribution.
+      const historicalManual = source !== 'current' && manual && (!this.saved || this.saved.updatedAt <= manual.updatedAt || !this.saved.accountId);
+      return { costPerPercent: historicalManual ? manual.costPerPercent : this.saved?.costPerPercent ?? null,
+        quotaPercent: reconciled?.calibrationPercent ?? 0,
+        referenceQuotaPercent: historicalManual ? 100 : this.saved?.quotaPercent ?? 0,
+        source: historicalManual ? 'previous' as const : source,
+        calibratedAt: historicalManual ? new Date(manual.updatedAt).toISOString() : this.saved ? new Date(this.saved.updatedAt).toISOString() : null,
+        referenceAccountId: historicalManual ? manual.accountId : this.saved?.accountId,
+        referenceResetsAt: historicalManual ? manual.resetsAt : this.saved?.resetsAt,
+        coverage: reconciled ? { quota: Math.min(1, reconciled.quotaCoverage), cost: Math.min(1, reconciled.costCoverage) } : undefined,
+        reconciliation: reconciled };
+    }
+    if (this.saved?.accountId) {
+      this.persist(now);
+      return { costPerPercent: this.saved.costPerPercent, quotaPercent: 0,
+        referenceQuotaPercent: this.saved.quotaPercent, source: 'previous' as const,
+        calibratedAt: new Date(this.saved.updatedAt).toISOString(),
+        referenceAccountId: this.saved.accountId, referenceResetsAt: this.saved.resetsAt };
+    }
     const current = windowStart === null ? null : calibrationDetails(known, windowStart, now + 1);
     const candidateStart = Math.max(windowStart ?? now - SAMPLE_RETENTION_MS,
       this.saved && !this.referenceSamplesKnown ? this.saved.updatedAt : -Infinity);
@@ -95,15 +144,21 @@ export class QuotaCalibration {
       }
     }
     this.persist(now);
-    if (this.manual) return { costPerPercent: this.manual.costPerPercent, quotaPercent: 100,
-      referenceQuotaPercent: 100, source: 'manual' as const, calibratedAt: new Date(this.manual.updatedAt).toISOString() };
+    if (this.manual && (!this.saved?.accountId || this.saved.updatedAt <= this.manual.updatedAt)) {
+      return { costPerPercent: this.manual.costPerPercent, quotaPercent: 0, referenceQuotaPercent: 100,
+        source: 'previous' as const, calibratedAt: new Date(this.manual.updatedAt).toISOString(),
+        referenceAccountId: this.manual.accountId, referenceResetsAt: this.manual.resetsAt };
+    }
     return { costPerPercent: this.saved?.costPerPercent ?? null, quotaPercent: windowStart === null ? 0 : candidate.quotaPercent,
       referenceQuotaPercent: this.saved?.quotaPercent ?? 0, source,
       calibratedAt: this.saved ? new Date(this.saved.updatedAt).toISOString() : null };
   }
 
-  private remember(costPerPercent: number, quotaPercent: number, windowStart: number, updatedAt: number) {
-    const next: SavedCalibration = { version: 1, costPerPercent, quotaPercent, windowStart, updatedAt };
+  recordedEvents(): QuotaCalibrationEvent[] { return [...this.samples.values()]; }
+
+  private remember(costPerPercent: number, quotaPercent: number, windowStart: number, updatedAt: number, scope?: CalibrationScope) {
+    const next: SavedCalibration = { version: 1, costPerPercent, quotaPercent, windowStart, updatedAt,
+      ...(scope ? { accountId: scope.accountId, resetsAt: scope.resetsAt } : {}) };
     if (JSON.stringify(next) !== JSON.stringify(this.saved)) this.referenceDirty = this.dirty = true;
     this.saved = next;
     this.referenceSamplesKnown = true;
@@ -111,11 +166,11 @@ export class QuotaCalibration {
   }
 
   private persist(now: number) {
-    if (!this.file || !this.saved || !this.dirty || now < this.nextSaveAt && (this.saveFailed || !this.referenceDirty)) return;
+    if (!this.file || !this.dirty || now < this.nextSaveAt && (this.saveFailed || !this.referenceDirty)) return;
     this.nextSaveAt = now + SAVE_INTERVAL_MS;
     try {
       mkdirSync(path.dirname(this.file), { recursive: true });
-      writeFileSync(this.file + '.tmp', JSON.stringify({ ...this.saved,
+      writeFileSync(this.file + '.tmp', JSON.stringify({ ...(this.saved ?? { version: 1, costPerPercent: null, quotaPercent: 0, windowStart: now, updatedAt: now }),
         calibrationPolicy: this.currentPolicy ? CALIBRATION_POLICY : 0, sampleVersion: SAMPLE_VERSION,
         samples: [...this.samples.values()], referenceSamplesKnown: this.referenceSamplesKnown }));
       renameSync(this.file + '.tmp', this.file);
@@ -135,6 +190,7 @@ function validTimestamp(value: unknown): value is number {
 function validSample(event: QuotaCalibrationEvent): boolean {
   return Boolean(event && validTimestamp(event.at) && (event.id === undefined || typeof event.id === 'string') &&
     (event.streamId === undefined || typeof event.streamId === 'string' && event.streamId.length > 0) &&
+    (event.taskId === undefined || typeof event.taskId === 'string' && event.taskId.length > 0) &&
     (event.duplicateUsage === undefined || typeof event.duplicateUsage === 'boolean') &&
     (!event.duplicateUsage || event.cost === 0) &&
     (event.cost === null || Number.isFinite(event.cost) && event.cost >= 0) &&
@@ -147,7 +203,7 @@ function sampleKey(event: QuotaCalibrationEvent): string {
 }
 
 function sameSample(left: QuotaCalibrationEvent | undefined, right: QuotaCalibrationEvent): boolean {
-  return Boolean(left && left.at === right.at && left.cost === right.cost && left.streamId === right.streamId &&
+  return Boolean(left && left.at === right.at && left.cost === right.cost && left.streamId === right.streamId && left.taskId === right.taskId &&
     Boolean(left.duplicateUsage) === Boolean(right.duplicateUsage) &&
     left.limit?.used === right.limit?.used && left.limit?.resetsAt === right.limit?.resetsAt);
 }
@@ -156,6 +212,8 @@ function sameSample(left: QuotaCalibrationEvent | undefined, right: QuotaCalibra
 export interface QuotaCalibrationEvent {
   id?: string;
   streamId?: string;
+  /** Consolidated principal task; no transcript or credentials. */
+  taskId?: string;
   duplicateUsage?: boolean;
   at: number;
   cost: number | null;

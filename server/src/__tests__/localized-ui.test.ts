@@ -10,6 +10,7 @@ import { TranscriptPanel } from '../../../web/src/components/TranscriptPanel';
 import { TurnInspector } from '../../../web/src/components/TurnInspector';
 import { HistoryPeriodScope } from '../../../web/src/components/HistoryPanel';
 import { TaskInsights } from '../../../web/src/components/TaskInsights';
+import { QuotaReconciliation } from '../../../web/src/components/QuotaReconciliation';
 
 const testState = vi.hoisted(() => ({ language: 'zh' as Language, loading: false, archiveMode: 'recent' as 'recent' | 'all', error: null as string | null, period: 'quota' as 'quota' | 'today', allocation: null as HistoryUsageAllocation | null }));
 vi.mock('../../../web/src/LanguageContext', () => ({
@@ -34,6 +35,18 @@ const turn = { id: 'turn', status: 'completed', startedAt: '2026-09-22T02:00:00Z
 const item = { id: 'item', type: 'agentMessage', title: 'Agent message', text: 'User input 原始对话文字', toolName: 'custom_tool' } as MonitorItem;
 
 describe('full interface language rendering', () => {
+  it('renders account reconciliation in both languages with the official total and unassigned amount', () => {
+    const allocation = { attributionBasis: 'observedQuotaIncrements', usedPercent: 79,
+      includedAttributedPercent: 60, outsideScopePercent: 6, unattributedPercent: 13 } as HistoryUsageAllocation;
+    for (const language of ['zh', 'en'] as const) {
+      testState.language = language;
+      const html = renderToStaticMarkup(createElement(QuotaReconciliation, { allocation }));
+      expect(html).toContain(language === 'zh' ? '账号额度对账' : 'Account quota reconciliation');
+      expect(html).toContain(language === 'zh' ? '未归属额度' : 'Unattributed quota');
+      for (const percent of ['79.0%', '60.0%', '6.0%', '13.0%']) expect(html).toContain(percent);
+      expect(html).not.toContain('NaN');
+    }
+  });
   it('distinguishes a manual normalization target from observed calibration samples', () => {
     const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page: 'trends' })));
     try {
@@ -172,7 +185,7 @@ describe('full interface language rendering', () => {
   });
   beforeEach(() => { testState.language = 'zh'; testState.loading = false; testState.archiveMode = 'recent'; testState.error = null; testState.period = 'quota'; });
 
-  it('replaces observed allocation with current-account equivalents and retains them outside the quota range', () => {
+  it('shows selected-account allocations independently of the cross-account reference and date selector', () => {
     for (const period of ['quota', 'today'] as const) {
       testState.period = period;
       const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live' })));
@@ -181,7 +194,7 @@ describe('full interface language rendering', () => {
       expect(table).toContain('6.7%+');
       expect(table).not.toContain('>2.0%');
       expect(table).toContain('所选账号 · 本周期');
-      expect(html).toContain('按周额度重置时间匹配估算');
+      expect(html).toContain('按记录到的额度增量分配');
     }
   });
 

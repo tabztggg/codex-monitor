@@ -1238,6 +1238,15 @@ a {
  .page-overview .account-usage-row .quota-unavailable { grid-column: 1; }
 }
 .scope-coverage { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 12px; color: var(--muted); }
+.quota-reconciliation { margin: 14px 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font-size: 12px; }
+.quota-reconciliation summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 22px; cursor: pointer; color: var(--muted); }
+.quota-reconciliation strong { margin-left: 6px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.quota-reconciliation .reconciliation-label { color: var(--ink); font-weight: 600; }
+.reconciliation-label small { margin-left: 6px; color: var(--muted); font-weight: 400; }
+.quota-reconciliation .quality-toggle { margin-left: auto; }
+.reconciliation-unassigned strong { color: var(--warn); }
+.reconciliation-details { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); line-height: 1.7; }
+.reconciliation-details p { margin: 6px 0; }
 .equivalent-sort-controls .table-sort-button { white-space: normal; line-height: 1.5; }
 .orphan-note { color: var(--warn); font-size: 11px; margin-left: 8px; }
 

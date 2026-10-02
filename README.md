@@ -8,29 +8,29 @@ Codex Monitor 是一个在本机运行的网页工具，用来查看 Codex 还�
 
 这是个非官方工具。账号额度来自 Codex，任务的等效消耗和费用是估算值，用来比较用量，不代表实际账单。
 
-**[v0.5.1](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.1)** · 带运行环境的安装包、5 项用量分析、实时 Token 每秒均值。[更新日志](CHANGELOG.md)
+**[v0.5.2](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.2)** · 账号额度对账、校准与归档统计修复。[更新日志](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-overview-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-overview-zh.jpg">
-  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.1-overview-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-overview-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-overview-zh.png">
+  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.2-overview-zh.png">
 </picture>
 
-v0.5.1 界面局部截图（1280 × 720），随深浅色主题切换；账号、任务和用量均为虚构演示数据。
+v0.5.2 网页截图，随深浅色主题切换；账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-tasks-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-tasks-zh.jpg">
-  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.1-tasks-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-tasks-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-tasks-zh.png">
+  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.2-tasks-zh.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.1-trends-zh-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.1-trends-zh.jpg">
-  <img alt="趋势与依据页的模型用量对比与缓存效率" src="assets/screenshots/v0.5.1-trends-zh.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-trends-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-trends-zh.png">
+  <img alt="趋势与依据页的模型用量对比与缓存效率" src="assets/screenshots/v0.5.2-trends-zh.png">
 </picture>
 
 </details>
@@ -126,9 +126,11 @@ PowerShell 7 手动运行时，先设置 `$env:CODEX_MONITOR_HOST = '127.0.0.1'`
 
 **等效消耗以一份所选套餐周额度为 100%，不是总消耗中的占比，可超过 100%。** 估算假定记录中的 Pro 均为 20x，日志不能可靠区分 5x／20x；Pro 20x、Pro 5x、Plus 仅按 1、4、20 倍对比，不修改账号档位。账号徽标只显示接口返回的套餐。
 
-账号归属按周重置时间匹配（允许 60 秒误差），不是可靠账号 ID；相同重置时间无法区分。费用是按 Token 价格折算的 API 等价美元，包含已定价的 GPT-6 Astra／Sol／Luna，并非订阅账单。缺失日志、其他设备使用和未定价模型会影响结果；`--` 表示不可用，`+` 表示部分数据。
+账号归属按周重置时间匹配（允许 60 秒误差），不是可靠账号 ID；相同重置时间无法区分。费用是按 Token 价格折算的 API 等价美元，包含已定价的 GPT-6 Astra／Sol／Luna 和 GPT-6.1 Sol，并非订阅账单。更新价格表后会从已有缓存重算。缺失日志、其他设备使用和未定价模型会影响结果；`--` 表示不可用，`+` 表示部分数据。
 
-校准使用近期有效额度变化；样本不足沿用已有值，后台更新。页面会标明自动、历史或手动基准。官方任务明细独立查询、按账号缓存 5 分钟，失败保留同账号旧值；接口可能变更或延迟，不覆盖本地校准。[完整统计说明](docs/setup-and-reference.md#metric-details)
+所选账号按已记录的额度增量、依回复费用权重分配，独立于跨账号等效消耗。**账号额度对账**显示当前任务、范围外任务和未归属额度，三项合计对应账号已用；缺少账号周期、价格或连续观测的部分不会硬分给任务。
+
+跨账号自动校准要求本周期至少 5 个百分点，且额度增量与匹配费用的覆盖率均达到 90%；不足时保留历史基准。手动基准仅在对应账号、对应周期内生效。官方任务明细独立查询、按账号缓存 5 分钟，失败保留同账号旧值；接口可能变更或延迟，不覆盖本地校准。[完整统计说明](docs/setup-and-reference.md#metric-details)
 
 ## 本地数据与远程访问
 

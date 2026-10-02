@@ -23,7 +23,7 @@ export function OverviewDataQuality({ jobs, analysis, archives, allocation, upda
         <div><dt>{t('Last successful refresh')}</dt><dd>{updatedAt ? dateTime(new Date(updatedAt).toISOString()) : '--'}</dd></div>
       </dl>
       <div className="overview-calibration-note">
-        <p>{allocation?.equivalent20x?.source === 'manual' ? t('Manual calibration: normalized to a confirmed account total. Other accounts remain estimates.') : allocation?.equivalent20x?.source === 'previous' ? t('Using previous calibration; updating in the background ({count}/5 percentage points).', { count: allocation.equivalent20x.calibrationQuotaPercent }) : t(allocation?.equivalent20x?.costPerPercentUsd ? 'Based on local records and observed quota changes.' : 'Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>
+        <p>{allocation?.equivalent20x?.source === 'manual' ? t('Manual calibration: normalized to a confirmed account total. Other accounts remain estimates.') : allocation?.equivalent20x?.source === 'previous' ? t('Retaining the previous cross-account reference until current-window records support a new calibration.') : t(allocation?.equivalent20x?.costPerPercentUsd ? 'Based on local records and observed quota changes.' : 'Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>
         <button type="button" className="basis-link" onClick={onShowBasis}>{t('Estimation basis')} <span aria-hidden="true">→</span></button>
       </div>
     </div>

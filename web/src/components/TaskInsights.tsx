@@ -60,7 +60,7 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
         </div>
       </div>
       {!hideCalibration && <div className="calibration-strip">
-        {allocation?.equivalent20x?.source === 'manual' ? <p>{t('Manual calibration: normalized to a confirmed account total. Other accounts remain estimates.')}</p> : allocation?.equivalent20x?.source === 'previous' ? <><p role="status">{t('Using previous calibration; updating in the background ({count}/5 percentage points).', { count: allocation.equivalent20x.calibrationQuotaPercent })}</p><span className="calibration-segments" aria-hidden="true">{Array.from({ length: 5 }, (_, index) => <i key={index} className={index < Math.floor(allocation.equivalent20x!.calibrationQuotaPercent ?? 0) ? 'filled' : ''} />)}</span></> : <p>{t(reference ? 'Based on local records and observed quota changes.' : 'Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>}
+        {allocation?.equivalent20x?.source === 'manual' ? <p>{t('Manual calibration: normalized to a confirmed account total. Other accounts remain estimates.')}</p> : allocation?.equivalent20x?.source === 'previous' ? <p role="status">{t('Retaining the previous cross-account reference until current-window records support a new calibration.')}</p> : <p>{t(reference ? 'Based on local records and observed quota changes.' : 'Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>}
         {onShowBasis && <button type="button" className="basis-link" onClick={onShowBasis}>{t('Estimation basis')} <span aria-hidden="true">→</span></button>}
       </div>}
     </section>}

@@ -10,6 +10,17 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.5.2 — 2026-10-02
+
+- 所选账号按本周期记录到的额度增量分配任务用量，新增“账号额度对账”，明确显示未归属额度。
+- 隔离账号和周期的校准；覆盖不足时保留历史跨账号基准，查看历史账号不重新训练基准。
+- 修复超大旧工具完成记录导致归档统计失败，保留读取上限和 JSON 校验。
+- 补充 GPT-6.1 Sol 定价，从已有缓存重算历史费用；新增网页图标，更新中英文深浅色首页截图。
+
+任务归属仍是估算，缺失用量不会强行分配。详见 [v0.5.2 发布说明](docs/releases/v0.5.2.md)。
+
+English: Reconcile task attribution with recorded account quota increases and show unattributed usage. Isolate account/window calibration, preserve prior references when coverage is insufficient, fix oversized legacy tool records, add GPT-6.1 Sol pricing with cache repricing, and refresh the favicon and screenshots.
+
 ## v0.5.1 — 2026-09-28
 
 - 新增 5 项分析功能：所选范围的跨账号模型对比、按模型堆叠的日趋势与当天任务下钻、历史缓存效率、价格依据与定价覆盖率、默认脱敏的 HTML／CSV／JSON 报告导出。

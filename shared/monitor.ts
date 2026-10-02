@@ -309,7 +309,7 @@ export interface HistoryJob {
   sinceResetEstimatedCostUsd: number | null;
   sinceResetUnpricedTokens?: number;
   estimatedUsagePercentSinceReset: number | null;
-  /** Current weekly-window records, using the same reference as cross-account equivalents. */
+  /** Selected account quota increments allocated by recorded cost weights. */
   currentAccountEquivalentPercent?: number | null;
   currentAccountEquivalentIsComplete?: boolean;
   lifetime20xPercent?: number | null;
@@ -326,9 +326,16 @@ export interface HistoryUsageAllocation {
     source?: 'current' | 'previous' | 'unavailable' | 'manual';
     calibratedAt?: string | null;
     referenceQuotaPercent?: number;
+    referenceAccountId?: string;
+    referenceResetsAt?: string;
+    coverage?: { quota: number; cost: number };
   };
   observedSince?: string | null;
   unattributedPercent?: number | null;
+  attributionBasis?: 'observedQuotaIncrements';
+  attributedPercent?: number;
+  includedAttributedPercent?: number;
+  outsideScopePercent?: number;
   status: "available" | "unavailable";
   usedPercent: number | null;
   windowStartedAt: string | null;

@@ -52,7 +52,7 @@ describe('quota sample migration', () => {
       const restarted = new QuotaCalibration(file);
       const result = restarted.resolve([event(2, 2, 1, null), event(3, 3, 100), event(4, 8, 1), event(5, 10, 1)], start, start + 360000, scope);
       expect(result).toMatchObject({ costPerPercent: 12, source: 'previous' });
-      expect(result.reconciliation?.attributedPercent).toBe(9);
+      expect(result.reconciliation?.attributedPercent).toBeCloseTo(9 + 100 / 101);
       expect(result.coverage?.cost).toBeLessThan(0.9);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
@@ -73,7 +73,7 @@ describe('quota sample migration', () => {
       expect(new QuotaCalibration(file).resolve([], start, start + 120000)).toMatchObject({
         costPerPercent: 10, source: 'previous', quotaPercent: 0
       });
-      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ sampleVersion: 4, samples: [], referenceSamplesKnown: false });
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ sampleVersion: 5, samples: [], referenceSamplesKnown: false });
       const restarted = new QuotaCalibration(file);
       // Re-parsed older events must not overwrite the preserved reference with
       // a narrower selection of the old archive scope.
@@ -83,7 +83,7 @@ describe('quota sample migration', () => {
       expect(restarted.resolve(fresh, start, start + 240000)).toMatchObject({ costPerPercent: 10, source: 'previous' });
       expect(restarted.resolve([event(4, 15, 2)], start, start + 300000))
         .toMatchObject({ costPerPercent: 2, source: 'current', quotaPercent: 5 });
-      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ calibrationPolicy: 3, sampleVersion: 4 });
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ calibrationPolicy: 4, sampleVersion: 5 });
       writeFileSync(file + '.manual.json', JSON.stringify({ version: 1, costPerPercent: 7, updatedAt: start }));
       expect(new QuotaCalibration(file).resolve([], start, start + 300000))
         .toMatchObject({ costPerPercent: 2, source: 'previous' });
@@ -123,7 +123,7 @@ describe('quota sample migration', () => {
       expect(calibration.resolve(fresh, start, start + 120000)).toMatchObject({
         costPerPercent: 4, source: 'previous', quotaPercent: 3
       });
-      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ sampleVersion: 4, samples: fresh });
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ sampleVersion: 5, samples: fresh });
       const restarted = new QuotaCalibration(file);
       expect(restarted.resolve([...fresh, event(3, 5, 24)], start, start + 240000)).toMatchObject({
         costPerPercent: 12, source: 'current', quotaPercent: 5

@@ -152,6 +152,42 @@ describe('incremental session log cursor', () => {
     expect(reader.read(file, consume, reset)).toBe(false);
   });
 
+  const compacted = (text: string) => JSON.stringify({
+    timestamp: '2026-10-04T00:00:00.000Z', ordinal: 8093, type: 'compacted',
+    payload: { message: text, replacement_history: [{ type: 'event_msg', payload: { type: 'token_count', n: 999 } }],
+      latest_token_usage_record: { type: 'token_count', n: 999 } }
+  });
+
+  it('projects large compaction context without replaying its historical token reports or rereading unchanged data', () => {
+    reader = new IncrementalSessionLog(1024);
+    const before = '{"type":"event_msg","payload":{"type":"token_count","n":1}}';
+    const after = '{"type":"event_msg","payload":{"type":"token_count","n":2}}';
+    fs.writeFileSync(file, `${before}\n${compacted('x'.repeat(600 * 1024) + '🙂')}\r\n${after}\n`);
+    reader.read(file, consume, reset);
+    expect(lines).toEqual([before, JSON.stringify({ type: 'compacted', timestamp: '2026-10-04T00:00:00.000Z' }), after]);
+    vi.mocked(fs.readSync).mockClear();
+    expect(reader.read(file, consume, reset)).toBe(false);
+    expect(fs.readSync).not.toHaveBeenCalled();
+    fs.appendFileSync(file, '{"n":3}\n');
+    reader.read(file, consume, reset);
+    expect(lines.at(-1)).toBe('{"n":3}');
+    expect(resets).toBe(1);
+  });
+
+  it('continues a partial compaction record using only newly appended bytes', () => {
+    reader = new IncrementalSessionLog(1024);
+    const record = compacted('x'.repeat(600 * 1024));
+    fs.writeFileSync(file, record.slice(0, -5));
+    reader.read(file, consume, reset);
+    expect(lines).toEqual([]);
+    vi.mocked(fs.readSync).mockClear();
+    fs.appendFileSync(file, record.slice(-5) + '\n{"n":2}\n');
+    reader.read(file, consume, reset);
+    expect(lines).toEqual([JSON.stringify({ type: 'compacted', timestamp: '2026-10-04T00:00:00.000Z' }), '{"n":2}']);
+    const bytes = vi.mocked(fs.readSync).mock.results.reduce((sum, result) => sum + (result.type === 'return' ? Number(result.value) : 0), 0);
+    expect(bytes).toBeLessThan(1024);
+  });
+
   it.each([
     '{"type":"event_msg","payload":{"type":"token_count","text":"BODY"}}',
     '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"TokenCount","text":"BODY"}}}',
@@ -170,7 +206,11 @@ describe('incremental session log cursor', () => {
     '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},"payload":{"type":"token_count"}}',
     '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},}',
     '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY\\q"}}',
-    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},"deep":' + '['.repeat(65) + '0' + ']'.repeat(65) + '}'
+    '{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"BODY"},"deep":' + '['.repeat(65) + '0' + ']'.repeat(65) + '}',
+    '{"type":"compacted","payload":{"message":"BODY"},"type":"event_msg"}',
+    '{"type":"compacted","payload":{"message":"BODY"},"payload":{"type":"token_count"}}',
+    '{"type":"compacted","payload":{"message":"BODY\\q"}}',
+    '{"type":"compacted","payload":{"message":"BODY"},}'
   ])('never projects a statistical, ambiguous or malformed oversized envelope: %s', template => {
     reader = new IncrementalSessionLog(1024);
     fs.writeFileSync(file, template.replace('BODY', 'x'.repeat(300 * 1024)) + '\n');

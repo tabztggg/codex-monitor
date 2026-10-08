@@ -8,29 +8,29 @@ Codex Monitor 是一个在本机运行的网页工具，用来查看 Codex 还�
 
 这是个非官方工具。账号额度来自 Codex，任务的等效消耗和费用是估算值，用来比较用量，不代表实际账单。
 
-**[v0.5.2](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.2)** · 账号额度对账、校准与归档统计修复。[更新日志](CHANGELOG.md)
+**[v0.5.3](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.3)** · 压缩记录读取、未定价模型额度归属与时间范围估算修复。[更新日志](CHANGELOG.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-overview-zh-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-overview-zh.png">
-  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.2-overview-zh.png">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.3-overview-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.3-overview-zh.png">
+  <img alt="用量总览：账号额度与实时 Token" src="assets/screenshots/v0.5.3-overview-zh.png">
 </picture>
 
-v0.5.2 网页截图，随深浅色主题切换；账号、任务和用量均为虚构演示数据。
+v0.5.3 网页截图，随深浅色主题切换；账号、任务和用量均为虚构演示数据。
 
 <details>
 <summary>任务明细与趋势页面</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-tasks-zh-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-tasks-zh.png">
-  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.2-tasks-zh.png">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.3-tasks-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.3-tasks-zh.png">
+  <img alt="任务明细页的用量表格" src="assets/screenshots/v0.5.3-tasks-zh.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.2-trends-zh-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.2-trends-zh.png">
-  <img alt="趋势与依据页的模型用量对比与缓存效率" src="assets/screenshots/v0.5.2-trends-zh.png">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.3-trends-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/v0.5.3-trends-zh.png">
+  <img alt="趋势与依据页的每日额度消耗与项目、任务排行" src="assets/screenshots/v0.5.3-trends-zh.png">
 </picture>
 
 </details>
@@ -122,19 +122,21 @@ PowerShell 7 手动运行时，先设置 `$env:CODEX_MONITOR_HOST = '127.0.0.1'`
 | 任务额度右侧 | **跨账号 · 任务累计**，含本地保留的所有周期与已归属子任务。 |
 | 汇总、费用、Token、趋势与排行 | **所选时间范围内的跨账号记录**：今天、近 7 天、任务累计或自定义日期；按 Monitor 时区，含结束日。 |
 
-时间范围不会改变任务额度列的两种固定口径；搜索、隐藏归档等显示筛选不会改变范围合计。任务列的左右箭头分别按两侧数值排序，项目行按任务合计。
+时间范围不会改变任务额度列的两种固定口径。账号额度按重置周期累计，“今天”从 Monitor 所在电脑时区的零点开始，首页会明确提示两者的区别。搜索、隐藏归档等显示筛选不会改变范围合计。任务列的左右箭头分别按两侧数值排序，项目行按任务合计。
 
 **等效消耗以一份所选套餐周额度为 100%，不是总消耗中的占比，可超过 100%。** 估算假定记录中的 Pro 均为 20x，日志不能可靠区分 5x／20x；Pro 20x、Pro 5x、Plus 仅按 1、4、20 倍对比，不修改账号档位。账号徽标只显示接口返回的套餐。
 
 账号归属按周重置时间匹配（允许 60 秒误差），不是可靠账号 ID；相同重置时间无法区分。费用是按 Token 价格折算的 API 等价美元，包含已定价的 GPT-6 Astra／Sol／Luna 和 GPT-6.1 Sol，并非订阅账单。更新价格表后会从已有缓存重算。缺失日志、其他设备使用和未定价模型会影响结果；`--` 表示不可用，`+` 表示部分数据。
 
-所选账号按已记录的额度增量、依回复费用权重分配，独立于跨账号等效消耗。**账号额度对账**显示当前任务、范围外任务和未归属额度，三项合计对应账号已用；缺少账号周期、价格或连续观测的部分不会硬分给任务。
+所选账号按已记录的额度增量、依回复费用权重分配；未定价记录使用 Token 权重，不填造美元单价。**账号额度对账**显示当前任务、范围外任务和未归属额度，三项合计对应账号已用，并标注已分配任务中的 Token 权重估算份额。缺少账号周期、用量或连续观测，以及首次观测前的消耗，仍保留为未归属。
 
-跨账号自动校准要求本周期至少 5 个百分点，且额度增量与匹配费用的覆盖率均达到 90%；不足时保留历史基准。手动基准仅在对应账号、对应周期内生效。官方任务明细独立查询、按账号缓存 5 分钟，失败保留同账号旧值；接口可能变更或延迟，不覆盖本地校准。[完整统计说明](docs/setup-and-reference.md#metric-details)
+跨账号等效消耗优先采用所选时间范围内已记录的额度分配，再用费用校准估算未覆盖的已定价用量；每日趋势与排行使用同一口径。自动校准要求至少 5 个百分点，且额度增量与匹配用量权重的覆盖率均达到 90%；混合区间保留已知价格，按 Token 权重估算未定价部分。不完整的校准标为近似值，观测不足时保留历史基准。手动基准仅在对应账号、对应周期内生效。官方任务明细独立查询、按账号缓存 5 分钟，失败保留同账号旧值；接口可能变更或延迟，不覆盖本地校准。[完整统计说明](docs/setup-and-reference.md#metric-details)
 
 ## 本地数据与远程访问
 
 默认只监听本机，读取 Codex 日志和元数据，缓存写入 `.cache/`，不改写原始会话。官方额度查询使用本机 Codex 登录并可能联网；任务详情可能包含提示词、命令和路径。
+
+超大的工具输出和压缩上下文按小块验证，不在内存保留正文；压缩记录中复制的历史用量不会重复计入。实际统计记录及未知记录仍保留 8 MiB 读取上限。
 
 **没有内置登录认证或 TLS。任何能访问网页的人都能读取数据，并在托管启动器启用时更新／重启／关闭 Monitor。** 公网访问需自行配置访问控制；Origin 检查不是身份认证。cpolar／反向代理还需设置 `CODEX_MONITOR_ALLOWED_ORIGINS`，Windows 独立安装使用 `standalone.json` 的 `allowedOrigins`。[隧道配置](docs/standalone-windows.md#reverse-proxy-or-tunnel)
 

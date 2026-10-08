@@ -85,12 +85,12 @@ describe('current account equivalents', () => {
       const args = { nowMs: now, usageWindow: window, account: { type: 'chatgpt', email: 'current@example.com', planType: 'pro' } };
       const response = reader.listJobs(args);
       const parent = response.data.find(job => job.id === 'parent')!;
-      expect(parent).toMatchObject({ currentAccountEquivalentPercent: 2, currentAccountEquivalentIsComplete: true, estimated20xPercent: 1.5, estimatedUsagePercentSinceReset: 2 });
+      expect(parent).toMatchObject({ currentAccountEquivalentPercent: 2, currentAccountEquivalentIsComplete: true, estimated20xPercent: 2, estimatedUsagePercentSinceReset: 2 });
       expect(response.data.find(job => job.id === 'other')).toMatchObject({ currentAccountEquivalentPercent: 0, estimated20xPercent: 1 });
       expect(response.data.find(job => job.id === 'unknown')).toMatchObject({ currentAccountEquivalentPercent: null, currentAccountEquivalentIsComplete: false, estimated20xPercent: 0.5 });
-      expect(response.data.find(job => job.id === 'unpriced')).toMatchObject({ currentAccountEquivalentPercent: null, currentAccountEquivalentIsComplete: false });
+      expect(response.data.find(job => job.id === 'unpriced')).toMatchObject({ currentAccountEquivalentPercent: 9, currentAccountEquivalentIsComplete: false, totalEstimatedCostUsd: null });
       expect(response.usageAllocation.currentAccount?.email).toBe('current@example.com');
-      expect(response.usageAllocation).toMatchObject({ usedPercent: 20, attributedPercent: 2, includedAttributedPercent: 2, unattributedPercent: 18 });
+      expect(response.usageAllocation).toMatchObject({ usedPercent: 20, attributedPercent: 11, includedAttributedPercent: 11, unattributedPercent: 9 });
       expect(reader.listJobs({ ...args, searchTerm: 'parent', limit: 1 }).usageAllocation).toEqual(response.usageAllocation);
       const switched = reader.listJobs({ ...args, account: { ...args.account, email: 'other@example.com' },
         usageWindow: { ...window, usedPercent: 10, startedAtMs: start - 86400000, resetsAt: iso(end - 86400000) } });
@@ -100,11 +100,11 @@ describe('current account equivalents', () => {
       const historical = reader.listJobs({ ...args, nowMs: end + 86400000, calibrateAccount: false,
         usageWindow: { ...window, observedAtMs: now }, period: 'today' });
       expect(historical.data.find(job => job.id === 'parent')?.currentAccountEquivalentPercent).toBe(2);
-      expect(historical.usageAllocation).toMatchObject({ usedPercent: 20, includedAttributedPercent: 2, unattributedPercent: 18 });
+      expect(historical.usageAllocation).toMatchObject({ usedPercent: 20, includedAttributedPercent: 11, unattributedPercent: 9 });
       expect(new HistoryJobReader(sessions, path.join(cache, 'quota.json')).listJobs(args).data).toEqual(response.data);
       const group = groupTasksByProject(response.data, [parent], 'usage')[0];
-      expect(group).toMatchObject({ quotaPercent: 2, quotaIsComplete: false, jobs: [parent] });
-      expect(visibleTasks(response.data, new Set(), 'all', '', 'usage', now)[0].id).toBe('parent');
+      expect(group).toMatchObject({ quotaPercent: 11, quotaIsComplete: false, jobs: [parent] });
+      expect(visibleTasks(response.data, new Set(), 'all', '', 'usage', now)[0].id).toBe('unpriced');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

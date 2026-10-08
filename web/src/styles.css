@@ -1247,6 +1247,10 @@ a {
 .reconciliation-unassigned strong { color: var(--warn); }
 .reconciliation-details { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); line-height: 1.7; }
 .reconciliation-details p { margin: 6px 0; }
+.quota-reconciliation .reconciliation-estimate { color: var(--warn); }
+.scope-period-note { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.scope-period-note > span { white-space: nowrap; }
+.scope-estimate-note { margin: 10px 0 0; color: var(--warn); font-size: 12px; line-height: 1.6; }
 .equivalent-sort-controls .table-sort-button { white-space: normal; line-height: 1.5; }
 .orphan-note { color: var(--warn); font-size: 11px; margin-left: 8px; }
 

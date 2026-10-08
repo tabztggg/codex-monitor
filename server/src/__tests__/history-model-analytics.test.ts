@@ -137,7 +137,7 @@ describe('model analytics from incremental token events', () => {
     expect(result.data[0]).toMatchObject({ totalUsage: { totalTokens: 100000 },
       totalEstimatedCostUsd: 0.2, totalEstimatedCostIsComplete: true });
     expect(fs.openSync).not.toHaveBeenCalled(); expect(fs.readSync).not.toHaveBeenCalled();
-    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1].job.quotaCalibrationVersion).toBe(8);
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1].job.quotaCalibrationVersion).toBe(9);
   });
 
   it('excludes future timestamps from quota/recent usage while preserving recorded lifetime totals', () => {

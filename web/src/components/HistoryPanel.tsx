@@ -157,7 +157,7 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
   const sections = groupByProject ? projectGroups.map(group => ({ id: group.id, group, jobs: collapsed.has(group.id) ? [] : group.jobs })) : [{ id: 'ungrouped', group: null, jobs: displayed }];
   const headerSortKey = (key: TaskSortColumn): TaskSortColumn => key === 'usage' && sort === 'equivalent20x' ? 'equivalent20x' : key;
   const nextDirection = (key: TaskSortColumn): SortDirection => sort === key ? direction === 'asc' ? 'desc' : 'asc' : key === 'task' || key === 'status' ? 'asc' : 'desc';
-  const quotaTitle = t('Selected-account quota is allocated from recorded quota increases using response cost weights. Unsupported amounts remain unattributed. Cross-account usage uses a separate calibration reference. One {plan} week = 100%.', { plan: planLabel });
+  const quotaTitle = t('Selected-account quota is allocated from recorded increases using response cost weights, with token weights for unpriced records. Cross-account equivalents use recorded quota allocations first and the calibration reference for uncovered usage. Unsupported amounts remain unattributed. One {plan} week = 100%.', { plan: planLabel });
   const equivalentPair = (current: number | null | undefined, currentComplete: boolean | undefined, across: number | null | undefined, acrossComplete: boolean | undefined) => <span className="equivalent-pair" title={pairScope}>
     <span className={current != null ? 'value-quota' : 'value-muted'} title={quotaTitle} aria-label={t('Selected account · This period')}>{formatUsagePercent(comparePlanUsage(current ?? null, comparisonPlan), locale)}{current != null && !currentComplete ? '+' : ''}</span>
     <span className="equivalent-divider"> / </span>
@@ -288,24 +288,27 @@ export function HistoryPanel({ snapshot, nowMs, connectionLabel = 'connecting', 
       <p>{statisticsRangeHelp}</p>
       <p>{comparisonPlanHelp}</p>
       <p>{t('Equivalent usage compares all locally recorded accounts with one {plan} weekly allowance in the selected period. Values may exceed 100%.', { plan: planLabel })}</p>
-      <p>{t('All recorded Pro accounts are treated as 20x, as confirmed by the owner. The conversion uses observed weekly quota changes and API-equivalent token costs; it is not an official allowance or bill. Missing logs, other devices, tools and unpriced models can affect the estimate.')}</p>
+      <p>{t('Recorded Pro accounts are assumed to be 20x for comparison; the API does not distinguish 5x and 20x. Equivalent usage prioritizes recorded quota increases allocated to tasks in the selected time range. Uncovered priced usage uses the cost calibration; unknown prices remain unknown. Missing logs, other devices and tools can affect the estimate.')}</p>
       <p>{quotaTitle}</p>
       {!allocation?.equivalent20x?.costPerPercentUsd && <p>{t('Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>}
-      <p>{t('Nominal comparison: Pro 20x : Pro 5x : Plus = 20 : 5 : 1. The same usage is multiplied by 1, 4 or 20 from the calibrated 20x estimate. This does not change the recorded account tier or represent an official bill.')}</p>
+      <p>{t('Nominal comparison: Pro 20x : Pro 5x : Plus = 20 : 5 : 1. The same usage is multiplied by 1, 4 or 20 from the 20x equivalent estimate. This does not change the recorded account tier or represent an official bill.')}</p>
       <dl className="estimation-facts">
         {allocation?.equivalent20x?.source === 'manual'
           ? <><dt>{t('Manual normalization target')}</dt><dd>100%</dd></>
           : <><dt>{t('Calibration observations')}</dt><dd>{t('{count} percentage points', { count: allocation?.equivalent20x?.calibrationQuotaPercent ?? 0 })}</dd></>}
         {allocation?.equivalent20x?.calibratedAt && <><dt>{t('Calibration reference updated')}</dt><dd>{new Date(allocation.equivalent20x.calibratedAt).toLocaleString(locale)}</dd></>}
         {allocation?.equivalent20x?.referenceResetsAt && <><dt>{t('Reference quota reset')}</dt><dd>{dateTime(allocation.equivalent20x.referenceResetsAt)}</dd></>}
-        {allocation?.equivalent20x?.coverage && <><dt>{t('Calibration quota / cost coverage')}</dt><dd>{formatUsagePercent(allocation.equivalent20x.coverage.quota * 100, locale)} / {formatUsagePercent(allocation.equivalent20x.coverage.cost * 100, locale)}</dd></>}
-        <dt>{t('Estimated cost per 1% of 20x')}</dt><dd>{formatEstimatedCost(allocation?.equivalent20x?.costPerPercentUsd ?? null, true, locale)}</dd>
-        <dt>{t('Unpriced tokens')}</dt><dd>{analysis ? new Intl.NumberFormat(locale).format(analysis.unpricedTokens) : '--'}</dd>
-        <dt>{t('Tokens without timestamps')}</dt><dd>{analysis ? new Intl.NumberFormat(locale).format(analysis.untimedTokens) : '--'}</dd>
+        {allocation?.equivalent20x?.coverage && <><dt>{t('Calibration quota / usage coverage')}</dt><dd>{formatUsagePercent(allocation.equivalent20x.coverage.quota * 100, locale)} / {formatUsagePercent(allocation.equivalent20x.coverage.cost * 100, locale)}</dd></>}
+        {allocation?.equivalent20x?.coverage?.priced != null && <><dt>{t('Priced calibration weight')}</dt><dd>{formatUsagePercent(allocation.equivalent20x.coverage.priced * 100, locale)}</dd></>}
+        {allocation?.equivalent20x?.method && <><dt>{t('Calibration method')}</dt><dd>{t(allocation.equivalent20x.method === 'mixedTokenWeights' ? 'Mixed cost and token weights' : 'Priced intervals')}</dd></>}
+        <dt>{t('Estimated cost per 1% of 20x')}</dt><dd>{formatEstimatedCost(allocation?.equivalent20x?.costPerPercentUsd ?? null, allocation?.equivalent20x?.referenceIsComplete !== false, locale)}</dd>
+        <dt>{t('Unpriced tokens')}</dt><dd>{Number.isFinite(analysis?.unpricedTokens) ? new Intl.NumberFormat(locale).format(analysis!.unpricedTokens) : '--'}</dd>
+        <dt>{t('Tokens without timestamps')}</dt><dd>{Number.isFinite(analysis?.untimedTokens) ? new Intl.NumberFormat(locale).format(analysis!.untimedTokens) : '--'}</dd>
         <dt>{t('Daily boundary time zone')}</dt><dd>{analysis?.timeZone ?? '--'}</dd>
         <dt>{t('Last successful refresh')}</dt><dd>{updatedAt ? dateTime(new Date(updatedAt).toISOString()) : '--'}</dd>
       </dl>
-      <p>{t('Automatic cross-account calibration requires at least 5 quota percentage points and 90% coverage of both quota increases and matching priced costs. Otherwise the previous reference is retained.')}</p>
+      <p>{t('Automatic calibration requires at least 5 quota percentage points and 90% coverage of quota increases and matching usage weights. Mixed intervals retain known prices and estimate the unpriced share by token weights. Partial calibration is marked as approximate; insufficient observations retain the previous reference.')}</p>
+      {allocation?.equivalent20x?.referenceIsComplete === false && <p className="scope-estimate-note">{t('Calibration includes token-weight estimates for unpriced records. Equivalent usage remains approximate; USD totals include only priced records.')}</p>}
       <p>{t('Today and Last 7 days use calendar days on the monitor computer. Current quota period follows the account reset window. Selected account % stays on that quota period when another time range is selected.')}</p>
       <p>{t('Project and scope totals include hidden rows. Click column headings to sort. + means incomplete data; -- means unavailable.')}</p>
     </details></>}

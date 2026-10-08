@@ -10,6 +10,15 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.5.3 — 2026-10-07
+
+- 修复超大压缩上下文导致任务统计和实时 Token 无法读取；不重复计入压缩记录中的历史用量。
+- 未定价模型按 Token 权重参与已观测额度的任务分配，保留未知费用和未归属额度。
+- 跨账号汇总、每日趋势和排行优先使用所选范围内的额度归属，仅对未覆盖的有价格记录补估；修复重复、零用量和周期边界。
+- 明确区分账号本周期累计与所选日期范围，显示统计时区和估算依据；更新中英文深浅色截图。
+
+English: Recover statistics and live tokens from oversized compaction records without recounting historical usage. Allocate observed quota for unpriced models using token weights while keeping unknown costs explicit. Align cross-account totals, daily trends and rankings with the selected range; estimate only uncovered priced records. Clarify period/time-zone labels and refresh screenshots.
+
 ## v0.5.2 — 2026-10-02
 
 - 所选账号按本周期记录到的额度增量分配任务用量，新增“账号额度对账”，明确显示未归属额度。

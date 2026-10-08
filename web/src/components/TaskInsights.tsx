@@ -28,7 +28,8 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
   const reference = allocation?.equivalent20x?.costPerPercentUsd;
   const days = analysis?.days ?? [];
   const value = (day: typeof days[number]) => metric === 'cacheHit' ? historicalCacheHit(day.usage) : metric === 'tokens' ? day.usage.totalTokens
-    : metric === 'cost' ? day.costUsd : day.costUsd !== null && reference ? comparePlanUsage(day.costUsd / reference, comparisonPlan) : null;
+    : metric === 'cost' ? day.costUsd : day.estimated20xPercent !== undefined ? comparePlanUsage(day.estimated20xPercent, comparisonPlan)
+      : day.costUsd !== null && reference ? comparePlanUsage(day.costUsd / reference, comparisonPlan) : null;
   const format = (n: number | null, complete = true) => metric === 'tokens' ? formatTokenCount(n, locale, complete)
     : metric === 'cost' ? formatEstimatedCost(n, complete, locale) : formatUsagePercent(n, locale) + (metric !== 'cacheHit' && n !== null && !complete ? '+' : '');
   const peak = metric === 'cacheHit' ? 100 : Math.max(0, ...days.map(day => value(day) ?? 0));
@@ -39,9 +40,13 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
     .sort((a, b) => comparePlanUsage(b.estimated20xPercent, comparisonPlan)! - comparePlanUsage(a.estimated20xPercent, comparisonPlan)!).slice(0, 5), [jobs, comparisonPlan]);
   const rankScale = Math.max(100, ...groups.map(g => rankValue(g) ?? 0), ...rankedTasks.map(job => taskRankValue(job) ?? 0));
   const barWidth = (n: number | null) => Math.max(0, n ?? 0) / rankScale * 100;
-  const dayComplete = (day: typeof days[number]) => (analysis?.untimedTokens ?? 0) === 0
+  const dayComplete = (day: typeof days[number]) => metric === 'equivalent20x' && day.estimated20xPercent !== undefined
+    ? day.estimated20xIsComplete === true && (analysis?.untimedTokens ?? 0) === 0
+    : (analysis?.untimedTokens ?? 0) === 0
     && (day.models?.every(row => row.tokensComplete) ?? true)
-    && (metric === 'tokens' || metric === 'cacheHit' || day.unpricedTokens === 0 && (day.models?.every(row => row.costComplete) ?? true));
+    && (metric === 'tokens' || metric === 'cacheHit' || day.unpricedTokens === 0 && (day.models?.every(row => row.costComplete) ?? true))
+    && (metric !== 'equivalent20x' || allocation?.equivalent20x?.referenceIsComplete !== false);
+  const modelStacks = metric === 'tokens' || metric === 'cost';
 
   const selected = days.find(day => day.date === selectedDay) ?? days.at(-1);
   const selectedTasks = selected ? tasksForUsageDay(jobs, selected.date) : [];
@@ -51,6 +56,7 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
   return <>
     {section !== 'trend' && <section className="scope-summary" aria-label={t('Scope totals')}>
       <div className="scope-summary-heading"><strong>{t('Scope totals')}</strong><span>{periodLabel} · {t('{count} tasks with recorded usage', { count: overview.consumedTaskCount === 0 && overview.unknownTaskCount === jobs.length ? '--' : overview.consumedTaskCount })}</span></div>
+      {analysis && analysis.period !== 'quota' && <p className="scope-period-note">{t('The account quota total and selected time range differ. Account quota is cumulative for its reset period; these totals cover {period}.', { period: periodLabel })}{analysis.timeZone && <span>{t('Time zone: {zone}', { zone: analysis.timeZone })}</span>}</p>}
       <div className="summary-metrics">
         <div className="summary-equivalent" aria-label={`${equivalentTitle} · ${t('Across accounts')}`}><span className="metric-label">{equivalentTitle} <span className="scope-badge">{t('Across accounts')}</span></span><strong>{formatUsagePercent(comparePlanUsage(totals.equivalent, comparisonPlan), locale)}{totals.equivalent !== null && !totals.equivalentComplete ? '+' : ''}</strong><small>{totals.equivalent === null ? t(reference ? 'No priced usage in this range' : 'Waiting for calibration') : `${t('One {plan} week = 100%', { plan: planLabel })} · ${t('May exceed 100%')}`}</small></div>
         <div><span className="metric-label">{t('Estimated cost')}</span><strong>{formatEstimatedCost(totals.cost, totals.costComplete, locale)}</strong><small>{t('Selected period · USD')} · {t('API-equivalent estimate')}</small></div>
@@ -59,6 +65,7 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
           <small>{t('Selected period')} · {t('Local records')}</small>
         </div>
       </div>
+      {allocation?.equivalent20x?.referenceIsComplete === false && <p className="scope-estimate-note">{t('Calibration includes token-weight estimates for unpriced records. Equivalent usage remains approximate; USD totals include only priced records.')}</p>}
       {!hideCalibration && <div className="calibration-strip">
         {allocation?.equivalent20x?.source === 'manual' ? <p>{t('Manual calibration: normalized to a confirmed account total. Other accounts remain estimates.')}</p> : allocation?.equivalent20x?.source === 'previous' ? <p role="status">{t('Retaining the previous cross-account reference until current-window records support a new calibration.')}</p> : <p>{t(reference ? 'Based on local records and observed quota changes.' : 'Waiting for enough recorded 20x weekly quota changes; -- means unavailable.')}</p>}
         {onShowBasis && <button type="button" className="basis-link" onClick={onShowBasis}>{t('Estimation basis')} <span aria-hidden="true">→</span></button>}
@@ -71,8 +78,8 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
           <option value="cost">{t('Estimated cost')}</option><option value="tokens">{t('Total tokens')}</option><option value="equivalent20x">{equivalentTitle}</option><option value="cacheHit">{t('Cache hit')}</option>
         </select></label>
         <p className="muted-note">{t('The trend shows dates with recorded usage in the selected period. Rankings use the full selected scope, including hidden rows.')}</p>
-        <p className="muted-note">{t(metric === 'cacheHit' ? 'Daily cache hit uses cached input / total input. Missing records may change the rate; no input is shown as --.' : 'Bars are stacked by the recorded model. Select a day to see its model usage and tasks below.')}</p>
-        {hasMissingModels && metric !== 'cacheHit' && <p className="muted-note" role="status">{t('Model breakdown is unavailable for some days; their recorded totals are still shown.')}</p>}
+        <p className="muted-note">{t(metric === 'cacheHit' ? 'Daily cache hit uses cached input / total input. Missing records may change the rate; no input is shown as --.' : metric === 'equivalent20x' ? 'Equivalent bars show estimated quota for each day. Model breakdowns are available in token and cost views; they are not official model quota shares.' : 'Bars are stacked by the recorded model. Select a day to see its model usage and tasks below.')}</p>
+        {hasMissingModels && modelStacks && <p className="muted-note" role="status">{t('Model breakdown is unavailable for some days; their recorded totals are still shown.')}</p>}
         {(analysis?.untimedTokens ?? 0) > 0 && <p className="history-error" role="status">{t('Some records have no date and cannot be assigned to a day. Daily values are partial (+).')}</p>}
         {days.length ? <figure className="usage-trend"><figcaption>{t('Daily usage')} · {periodLabel}</figcaption>
           <div className="trend-scroll" tabIndex={0} aria-label={t('Daily usage')}>
@@ -81,13 +88,13 @@ export function TaskInsights({ jobs, analysis, allocation, periodLabel, comparis
               aria-label={`${day.date}: ${format(value(day), dayComplete(day))}`}
               onClick={() => selectDay(day.date)} onFocus={() => selectDay(day.date)}>
               <span className="trend-day-value">{format(value(day), dayComplete(day))}</span><span className="trend-bar-space" aria-hidden="true">{value(day) === null ? <span className="trend-missing">--</span>
-                : <span className={`trend-bar${metric !== 'cacheHit' && day.models?.length ? ' model-trend-stack' : ''}`} style={{ height: `${peak > 0 ? (value(day) ?? 0) / peak * 100 : 0}%` }}>
-                  {metric !== 'cacheHit' && modelTrendSegments(day, metric === 'tokens' ? 'tokens' : 'cost').map(row => <span key={row.model ?? '\u0000'} className="model-trend-segment"
+                : <span className={`trend-bar${modelStacks && day.models?.length ? ' model-trend-stack' : ''}`} style={{ height: `${peak > 0 ? (value(day) ?? 0) / peak * 100 : 0}%` }}>
+                  {modelStacks && modelTrendSegments(day, metric === 'tokens' ? 'tokens' : 'cost').map(row => <span key={row.model ?? '\u0000'} className="model-trend-segment"
                     style={{ background: modelColor(row.model), height: `${row.value / (metric === 'tokens' ? day.usage.totalTokens : day.costUsd || 1) * 100}%` }} />)}
                 </span>}</span><span>{day.date.slice(5)}</span>
             </button>)}</div>
           </div>
-          {metric !== 'cacheHit' && legendModels.length > 0 && <ul className="model-legend" aria-label={t('Model legend')}>{legendModels.map(model => <li key={model ?? '\u0000'}><span className="model-swatch" style={{ background: modelColor(model) }} aria-hidden="true" />{model ?? t('Unknown model')}</li>)}</ul>}
+          {modelStacks && legendModels.length > 0 && <ul className="model-legend" aria-label={t('Model legend')}>{legendModels.map(model => <li key={model ?? '\u0000'}><span className="model-swatch" style={{ background: modelColor(model) }} aria-hidden="true" />{model ?? t('Unknown model')}</li>)}</ul>}
           <output className="trend-reading">{selected ? `${selected.date} · ${format(value(selected), dayComplete(selected))}` : '--'}</output>
         </figure> : <p role="status">{t(analysis ? 'No daily usage records in this period.' : 'Daily usage is unavailable. -- does not mean zero usage.')}</p>}
         {selected && <details className="day-usage-details" id={dayDetailsId} open={dayDetailsOpen || undefined} onToggle={event => setDayDetailsOpen(event.currentTarget.open)}>

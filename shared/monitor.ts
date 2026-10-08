@@ -328,12 +328,15 @@ export interface HistoryUsageAllocation {
     referenceQuotaPercent?: number;
     referenceAccountId?: string;
     referenceResetsAt?: string;
-    coverage?: { quota: number; cost: number };
+    coverage?: { quota: number; cost: number; priced?: number };
+    referenceIsComplete?: boolean;
+    method?: 'pricedIntervals' | 'mixedTokenWeights';
   };
   observedSince?: string | null;
   unattributedPercent?: number | null;
   attributionBasis?: 'observedQuotaIncrements';
   attributedPercent?: number;
+  tokenFallbackPercent?: number;
   includedAttributedPercent?: number;
   outsideScopePercent?: number;
   status: "available" | "unavailable";
@@ -383,6 +386,8 @@ export interface HistoryUsageDay {
   costUsd: number | null;
   unpricedTokens: number;
   models?: HistoryModelUsage[];
+  estimated20xPercent?: number | null;
+  estimated20xIsComplete?: boolean;
 }
 export interface HistoryPeriodMetrics {
   days?: HistoryUsageDay[];

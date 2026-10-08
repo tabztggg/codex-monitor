@@ -180,6 +180,31 @@ describe('history source and usage integrity', () => {
     expect(reader.listJobs(options).data[0].totalUsage?.totalTokens).toBe(125);
   });
 
+  it.each(['cold start', 'append'])('preserves complete history around an oversized compacted record on %s', mode => {
+    const copiedUsage = token(at + 1000, usage(100));
+    const compacted = { timestamp: iso(at + 1500), ordinal: 1, type: 'compacted', payload: {
+      message: 'x'.repeat(MAX_SESSION_LOG_LINE_BYTES + 1),
+      replacement_history: [copiedUsage], latest_token_usage_record: copiedUsage
+    } };
+    expect(Buffer.byteLength(JSON.stringify(compacted))).toBeGreaterThan(MAX_SESSION_LOG_LINE_BYTES);
+    const appended = [compacted, token(at + 2000, usage(25), usage(125))];
+    const file = write('task', [meta('task', at), model, copiedUsage,
+      ...(mode === 'cold start' ? appended : [])]);
+    const reader = new HistoryJobReader(sessions);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = reader.listJobs(options);
+    expect(first.data[0].totalUsage?.totalTokens).toBe(mode === 'cold start' ? 125 : 100);
+    if (mode === 'append') fs.appendFileSync(file, lines(appended));
+    const result = reader.listJobs(options);
+    expect(result.data[0]).toMatchObject({ totalUsage: { totalTokens: 125 },
+      totalEstimatedCostIsComplete: true, periodMetrics: { tokensComplete: true, costComplete: true } });
+    expect(result.analysis?.days.reduce((sum, day) => sum + day.usage.totalTokens, 0)).toBe(125);
+    fs.appendFileSync(file, lines([token(at + 3000, usage(25), usage(150))]));
+    expect(reader.listJobs(options).data[0].totalUsage?.totalTokens).toBe(150);
+    expect(reader.listJobs(options).data[0].totalUsage?.totalTokens).toBe(150);
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it.each([
     { total_tokens: 100 },
     { input_tokens: -1, output_tokens: 0, total_tokens: 100 },

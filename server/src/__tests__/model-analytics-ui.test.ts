@@ -101,6 +101,22 @@ describe('historical analytics presentation', () => {
     expect(cache).toContain('2026-09-28: 100.0%');
   });
 
+  it('keeps equivalent quota bars separate from model cost and token distributions', () => {
+    vi.stubGlobal('window', { localStorage: { getItem: () => 'equivalent20x' } });
+    const html = renderTrend({ ...analysis, days: analysis.days.map((day, index) => ({ ...day,
+      estimated20xPercent: index === 0 ? 3 : 2, estimated20xIsComplete: index !== 0 })) });
+    expect(html).toContain('2026-09-27: 3.0%+');
+    expect(html).toContain('2026-09-28: 2.0%');
+    expect(html).not.toContain('model-trend-stack');
+    expect(html).not.toContain('aria-label="Model legend"');
+    expect(html).toContain('Model breakdowns are available in token and cost views');
+    expect(html).toContain('Models on 2026-09-28');
+    vi.stubGlobal('window', { localStorage: { getItem: () => 'cost' } });
+    const cost = renderTrend();
+    expect(cost).toContain('model-trend-stack');
+    expect(cost).toContain('aria-label="Model legend"');
+  });
+
   it('labels unavailable day-level task/model details and renders all new controls in Chinese', () => {
     expect(renderTrend({ ...analysis, days: [{ ...analysis.days[1], models: undefined }] }, [{ ...job, periodMetrics: undefined }])).toContain('Daily task details are unavailable for some records.');
     state.language = 'zh';

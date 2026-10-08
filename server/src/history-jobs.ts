@@ -21,13 +21,14 @@ import {
 import { asRecord, asString, cloneValue, toIsoDate } from "./utils";
 import { userPreview } from "../../shared/session-preview";
 import { QuotaAttribution } from "./quota-attribution";
-import { QuotaCalibration, equivalent20x, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
+import { QuotaCalibration, pro20xWeeklyLimit, type QuotaCalibrationEvent } from './quota-equivalent';
 import { readArchiveMetadata, type ArchiveMetadata } from './archive-metadata';
 import { readProjectResolver } from './project-metadata';
 import { addUsage, localDay, mergeDays, periodStart } from '../../shared/usage-period';
 import { IncrementalSessionLog } from './session-log-reader';
 import { modelUsageForTask, mergeModelUsage, type ModelUsageEvent } from './history-analytics';
 import { estimateApiEquivalentCost, HISTORY_PRICING } from './history-pricing';
+import { quotaEquivalentRange } from './quota-equivalent-range';
 
 type SessionFile = {
   path: string;
@@ -116,7 +117,7 @@ const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
 const ARCHIVE_CACHE_VERSION = 4;
 // Bump when parsing or pricing changes. Rebuild from the compact token timeline,
 // preserving archive caches without rereading the original transcripts.
-const HISTORY_SUMMARY_VERSION = 8;
+const HISTORY_SUMMARY_VERSION = 9;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();
@@ -246,6 +247,13 @@ export class HistoryJobReader {
       (job.quotaCalibrationEvents ?? []).map(event => ({ ...event, taskId: job.id }))), nowMs - 30 * 86400000, nowMs,
       accountId && window && weekly ? { accountId, ...window, allowUpdate: args.calibrateAccount !== false } : undefined);
     const reconciliation = 'reconciliation' in calibration ? calibration.reconciliation : null;
+    const across = this.calibration.replayAcrossAccounts(nowMs, window);
+    const slicesByTask = new Map<string, typeof across.slices>();
+    for (const slice of across.slices) {
+      const slices = slicesByTask.get(slice.taskId) ?? [];
+      slices.push(slice);
+      slicesByTask.set(slice.taskId, slices);
+    }
     const key = window ? JSON.stringify([window.limitName, window.windowLabel, window.startedAtMs, window.resetsAt]) : '';
     if (window && args.observeUsage && !accountId) {
       this.attribution.observe(key, window.usedPercent, consolidated.map(job => ({
@@ -270,6 +278,26 @@ export class HistoryJobReader {
       const selectedEvents = available ? (_usageEvents ?? []).filter(event => !event.duplicate &&
         (period === 'lifetime' || event.at !== null && event.at >= (selectedStart ?? 0) && event.at <= selectedEnd)) : [];
       const scopeComplete = !hasIncompleteUsage && (period === 'lifetime' || untimedTokens === 0);
+      const quotaEvents = _events ?? [];
+      const slices = slicesByTask.get(job.id) ?? [];
+      const equivalent = quotaEquivalentRange(quotaEvents, slices, across.coveredEventIds, calibration.costPerPercent,
+        selectedStart, selectedEnd, scopeComplete);
+      const lifetimeEquivalent = quotaEquivalentRange(quotaEvents, slices, across.coveredEventIds, calibration.costPerPercent,
+        null, nowMs, !hasIncompleteUsage);
+      const untimedUsage = (_usageEvents ?? []).filter(e => e.at === null && !e.duplicate);
+      if (untimedUsage.length) {
+        const allKnownZero = untimedUsage.every(e => e.tokensComplete && e.usage.totalTokens === 0 && (e.cost === null || e.cost === 0));
+        if (!allKnownZero) lifetimeEquivalent.complete = false;
+        else if (lifetimeEquivalent.percent === null && job.totalUsage?.totalTokens === 0 && !hasIncompleteUsage) {
+          lifetimeEquivalent.percent = 0;
+          lifetimeEquivalent.complete = true;
+        }
+        const untimedCost = untimedUsage.reduce((sum, e) => sum + (e.cost ?? 0), 0);
+        if (untimedCost > 0 && calibration.costPerPercent !== null) {
+          lifetimeEquivalent.percent = (lifetimeEquivalent.percent ?? 0) + untimedCost / calibration.costPerPercent;
+        }
+      }
+      if (period === 'lifetime') Object.assign(equivalent, lifetimeEquivalent);
       const models = modelUsageForTask(selectedEvents, scopeComplete);
       const eventsByDay = new Map<string, ParsedUsageEvent[]>();
       for (const event of selectedEvents) if (event.at !== null && event.at <= selectedEnd) {
@@ -278,9 +306,17 @@ export class HistoryJobReader {
         daily.push(event);
         eventsByDay.set(date, daily);
       }
-      const modelDays = available ? days.map(day => ({ ...day,
-        models: modelUsageForTask(eventsByDay.get(day.date) ?? [], !hasIncompleteUsage && untimedTokens === 0)
-      })) : [];
+      const modelDays = available ? days.map(day => {
+        const start = new Date(day.date + 'T00:00:00');
+        const end = new Date(start); end.setDate(end.getDate() + 1);
+        const dayEquivalent = quotaEquivalentRange(quotaEvents, slices, across.coveredEventIds, calibration.costPerPercent,
+          Math.max(start.getTime(), selectedStart ?? 0), Math.min(end.getTime() - 1, selectedEnd), scopeComplete);
+        return { ...day,
+          estimated20xPercent: dayEquivalent.percent,
+          estimated20xIsComplete: dayEquivalent.complete,
+          models: modelUsageForTask(eventsByDay.get(day.date) ?? [], !hasIncompleteUsage && untimedTokens === 0)
+        };
+      }) : [];
       selectedDays.set(job.id, modelDays);
       const emptyKnown = available && Boolean(job.totalUsage) && !usage && untimedTokens === 0 && !hasIncompleteUsage;
       const periodMetrics: HistoryPeriodMetrics = {
@@ -299,12 +335,12 @@ export class HistoryJobReader {
       const accountPercent = !reconciliation ? null : allocated > 0 ? allocated : accountComplete ? 0 : null;
       return { ...job,
         periodMetrics,
-        lifetime20xPercent: equivalent20x({ ...job, sinceResetUsage: job.totalUsage, sinceResetEstimatedCostUsd: job.totalEstimatedCostUsd }, calibration.costPerPercent),
-        lifetime20xIsComplete: job.totalEstimatedCostIsComplete,
+        lifetime20xPercent: lifetimeEquivalent.percent,
+        lifetime20xIsComplete: lifetimeEquivalent.complete,
         currentAccountEquivalentPercent: accountPercent,
         currentAccountEquivalentIsComplete: accountComplete,
-        estimated20xPercent: available && periodMetrics.usage ? equivalent20x({ ...job, sinceResetUsage: periodMetrics.usage, sinceResetEstimatedCostUsd: periodMetrics.costUsd }, calibration.costPerPercent) : null,
-        estimated20xIsComplete: periodMetrics.costComplete,
+        estimated20xPercent: available && periodMetrics.usage ? equivalent.percent ?? (emptyKnown ? 0 : null) : null,
+        estimated20xIsComplete: equivalent.complete || emptyKnown,
         estimatedUsagePercentSinceReset: reconciliation ? accountPercent : !ledger ? null : attributed > 0 ? attributed :
           job.sinceResetUsage || !job.totalUsage ? null : 0
       };
@@ -337,6 +373,8 @@ export class HistoryJobReader {
         currentAccount: args.account ?? null,
         equivalent20x: { costPerPercentUsd: calibration.costPerPercent, calibrationQuotaPercent: calibration.quotaPercent,
           source: calibration.source, calibratedAt: calibration.calibratedAt, referenceQuotaPercent: calibration.referenceQuotaPercent,
+          ...('referenceIsComplete' in calibration ? { referenceIsComplete: calibration.referenceIsComplete,
+            method: calibration.referenceIsComplete === false ? 'mixedTokenWeights' as const : 'pricedIntervals' as const } : {}),
           ...('referenceAccountId' in calibration ? { referenceAccountId: calibration.referenceAccountId, referenceResetsAt: calibration.referenceResetsAt } : {}),
           ...('coverage' in calibration ? { coverage: calibration.coverage } : {}) },
         ...usageAllocationSummary(args.usageWindow ?? null, allJobs),
@@ -345,6 +383,7 @@ export class HistoryJobReader {
         unattributedPercent: reconciliation?.unattributedPercent ?? ledger?.unattributed ?? window?.usedPercent ?? null,
         ...(reconciliation ? {
           attributionBasis: 'observedQuotaIncrements' as const,
+          tokenFallbackPercent: reconciliation.tokenFallbackPercent,
           attributedPercent: reconciliation.attributedPercent,
           includedAttributedPercent: allJobs.reduce((sum, job) => sum + (job.currentAccountEquivalentPercent ?? 0), 0),
           outsideScopePercent: Math.max(0, reconciliation.attributedPercent - allJobs.reduce((sum, job) => sum + (job.currentAccountEquivalentPercent ?? 0), 0))
@@ -661,12 +700,20 @@ function readSessionNames(indexPath: string): Map<string, string> {
 
 function mergeAnalysisDays(sets: (HistoryUsageDay[] | undefined)[]): HistoryUsageDay[] {
   const modelsByDay = new Map<string, HistoryUsageDay['models'][]>();
+  const equivalentsByDay = new Map<string, { value: number | null; complete: boolean }>();
   for (const set of sets) for (const day of set ?? []) {
     const models = modelsByDay.get(day.date) ?? [];
     models.push(day.models);
     modelsByDay.set(day.date, models);
+    const previous = equivalentsByDay.get(day.date);
+    equivalentsByDay.set(day.date, {
+      value: day.estimated20xPercent == null && previous?.value == null ? null : (day.estimated20xPercent ?? 0) + (previous?.value ?? 0),
+      complete: day.estimated20xIsComplete === true && (previous?.complete ?? true)
+    });
   }
-  return mergeDays(...sets).map(day => ({ ...day, models: mergeModelUsage(...modelsByDay.get(day.date) ?? []) }));
+  return mergeDays(...sets).map(day => ({ ...day, models: mergeModelUsage(...modelsByDay.get(day.date) ?? []),
+    estimated20xPercent: equivalentsByDay.get(day.date)?.value ?? null,
+    estimated20xIsComplete: equivalentsByDay.get(day.date)?.complete ?? false }));
 }
 
 function mergeJobsByTask(jobs: ParsedHistoryJob[], nowMs: number, usageWindowStartedAtMs: number | null): ParsedHistoryJob[] {
@@ -1204,6 +1251,7 @@ export function parseHistorySessionFile(args: {
           calibrationStreamId ??= createHash('sha256').update(sessionId ?? args.sessionId ?? '').digest('hex');
           quotaCalibrationEvents.push({ id: sampleId, streamId: calibrationStreamId, at: recordTimestampMs,
             duplicateUsage: duplicate,
+            ...(duplicate ? { tokens: 0 } : incrementComplete ? { tokens: increment!.totalTokens } : {}),
             cost: duplicate ? 0 : increment ? incrementCost : (rawIncrement || cumulative?.totalTokens) ? null : 0,
             limit: pro20xWeeklyLimit(payload?.rate_limits, recordTimestampMs) });
         }

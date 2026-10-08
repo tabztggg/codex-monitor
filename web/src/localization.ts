@@ -4,6 +4,21 @@ export type Translate = (message: string, params?: Params) => string;
 
 // English messages are also the fallback for raw external diagnostics.
 export const chinese: Record<string, string> = {
+  'Token-weight allocation': 'Token 权重分配',
+  'Included in attributed tasks, not an additional amount. Model prices are unavailable for part of these intervals; allocation remains approximate.': '已包含在任务归属额度中，不额外相加。部分区间缺少模型价格，按 Token 权重估算分配。',
+  'Recorded account quota increases are allocated within the same observation interval using response cost weights. Unpriced records use token weights without inventing USD prices. Missing account windows, observation gaps and consumption before the first reading remain unattributed. Task allocations are estimates, not official per-task usage.': '记录到的账号额度增量，按同一观测区间的回复费用权重分配；未定价记录使用 Token 权重，不编造美元单价。缺少账号周期、连续观测记录，以及首次观测前的消耗，仍保留为未归属。任务分配是估算，不是官方单任务用量。',
+  'The account quota total and selected time range differ. Account quota is cumulative for its reset period; these totals cover {period}.': '账号累计额度与所选时间范围不同。账号额度按重置周期累计，下方合计统计{period}。',
+  'Calibration includes token-weight estimates for unpriced records. Equivalent usage remains approximate; USD totals include only priced records.': '校准包含未定价记录的 Token 权重估算，等效消耗仍为近似值；美元费用仅包含已定价记录。',
+  'Equivalent bars show estimated quota for each day. Model breakdowns are available in token and cost views; they are not official model quota shares.': '等效消耗柱显示每天的额度估算。Token 和费用视图可查看模型分布，不代表官方模型额度占比。',
+  'Selected-account quota is allocated from recorded increases using response cost weights, with token weights for unpriced records. Cross-account equivalents use recorded quota allocations first and the calibration reference for uncovered usage. Unsupported amounts remain unattributed. One {plan} week = 100%.': '所选账号占比按记录到的额度增量、依回复费用权重分配，未定价记录使用 Token 权重。跨账号等效消耗优先采用已记录的额度分配，未覆盖用量使用校准基准估算。依据不足的部分仍保留为未归属。一份 {plan} 周额度 = 100%。',
+  'Recorded Pro accounts are assumed to be 20x for comparison; the API does not distinguish 5x and 20x. Equivalent usage prioritizes recorded quota increases allocated to tasks in the selected time range. Uncovered priced usage uses the cost calibration; unknown prices remain unknown. Missing logs, other devices and tools can affect the estimate.': '对比时假定记录中的 Pro 为 20x，接口不区分 5x 和 20x。等效消耗优先统计所选时间范围内分配给任务的已记录额度增量；未覆盖的已定价用量使用费用校准估算，未知价格仍保持未知。缺失日志、其他设备和工具会影响结果。',
+  'Automatic calibration requires at least 5 quota percentage points and 90% coverage of quota increases and matching usage weights. Mixed intervals retain known prices and estimate the unpriced share by token weights. Partial calibration is marked as approximate; insufficient observations retain the previous reference.': '自动校准要求至少 5 个百分点，且额度增量与匹配用量权重的覆盖率均达到 90%。混合区间保留已知价格，按 Token 权重估算未定价部分；不完整的校准会标记为近似值，观测不足时保留历史基准。',
+  'Priced calibration weight': '校准已定价权重',
+  'Calibration method': '校准方式',
+  'Mixed cost and token weights': '费用与 Token 混合权重',
+  'Priced intervals': '已定价区间',
+  'Calibration quota / usage coverage': '校准额度 / 用量覆盖率',
+  'Nominal comparison: Pro 20x : Pro 5x : Plus = 20 : 5 : 1. The same usage is multiplied by 1, 4 or 20 from the 20x equivalent estimate. This does not change the recorded account tier or represent an official bill.': '按标称倍率估算：Pro 20x : Pro 5x : Plus = 20 : 5 : 1。同一用量在 20x 等效估算上分别乘以 1、4、20；不会修改记录中的账号套餐，也不代表官方账单。',
   'Model comparison': '模型用量对比',
   'Time zone': '时区',
   'Unknown model': '未知模型',

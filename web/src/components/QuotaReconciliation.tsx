@@ -17,7 +17,8 @@ export function QuotaReconciliation({ allocation }: { allocation: HistoryUsageAl
     </summary>
     <div className="reconciliation-details">
       <p>{t('Included tasks + outside task scope + unattributed quota = account used. Search, hidden rows and sorting do not change these totals.')}</p>
-      <p>{t('Recorded account quota increases are allocated by response cost weights in the same observation interval. Missing account windows, prices, observation gaps and consumption before the first reading remain unattributed. This is an estimate, not official per-task usage.')}</p>
+      {(allocation.tokenFallbackPercent ?? 0) > 0.00001 && <p className="reconciliation-estimate">{t('Token-weight allocation')} <strong>{amount(allocation.tokenFallbackPercent)}</strong> · {t('Included in attributed tasks, not an additional amount. Model prices are unavailable for part of these intervals; allocation remains approximate.')}</p>}
+      <p>{t('Recorded account quota increases are allocated within the same observation interval using response cost weights. Unpriced records use token weights without inventing USD prices. Missing account windows, observation gaps and consumption before the first reading remain unattributed. Task allocations are estimates, not official per-task usage.')}</p>
       <p>{t('Matching weekly resets (within 60 seconds) estimate account identity; they do not prove it. Account reconciliation uses the account’s own quota, independently of the cross-account calibration reference.')}</p>
     </div>
   </details>;

@@ -226,6 +226,48 @@ describe('live token activity tail integration', () => {
     expect(tracker.getLiveTokens(at + 6000).windows.oneMinute.sampleCount).toBe(1);
   });
 
+  it('baselines token reports across an oversized compacted record without counting replacement history', () => {
+    const copiedUsage = token(at, 100, 20);
+    const compacted = { timestamp: iso(at + 1), ordinal: 1, type: 'compacted', payload: {
+      message: 'x'.repeat(MAX_SESSION_LOG_LINE_BYTES + 1),
+      replacement_history: [copiedUsage], latest_token_usage_record: copiedUsage
+    } };
+    expect(Buffer.byteLength(JSON.stringify(compacted))).toBeGreaterThan(MAX_SESSION_LOG_LINE_BYTES);
+    fs.writeFileSync(file, lines(meta(at - 1000), event(at, 'task_started'), copiedUsage,
+      compacted, token(at + 2, 3, 2, 103, 22)));
+    const tracker = new ActiveSessionTracker(root);
+    expect(tracker.listActiveSessions(at + 2000)).toHaveLength(1);
+    expect(tracker.isActivitySourceAvailable()).toBe(true);
+    expect(tracker.getLiveTokens(at + 2000)).toMatchObject({ status: 'collecting',
+      windows: { oneMinute: { status: 'collecting', totalTokens: 0, sampleCount: 0 } } });
+    fs.appendFileSync(file, lines(token(at + 3000, 4, 1, 107, 23)));
+    expect(tracker.getLiveTokens(at + 7000)).toMatchObject({ status: 'ready',
+      windows: { oneMinute: { status: 'ready', inputTokens: 4, outputTokens: 1, totalTokens: 5, sampleCount: 1 } } });
+    tracker.listActiveSessions(at + 8000);
+    expect(tracker.getLiveTokens(at + 8000).windows.oneMinute).toMatchObject({ status: 'ready', totalTokens: 5, sampleCount: 1 });
+  });
+
+  it('tails new token reports after an oversized compacted record without replaying copied reports', () => {
+    const copiedUsage = token(at, 100, 20);
+    fs.writeFileSync(file, lines(meta(at - 1000), event(at, 'task_started'), copiedUsage));
+    const tracker = new ActiveSessionTracker(root);
+    tracker.listActiveSessions(at);
+    const compacted = { timestamp: iso(at + 1), ordinal: 1, type: 'compacted', payload: {
+      message: 'x'.repeat(MAX_SESSION_LOG_LINE_BYTES + 1),
+      replacement_history: [copiedUsage], latest_token_usage_record: copiedUsage
+    } };
+    expect(Buffer.byteLength(JSON.stringify(compacted))).toBeGreaterThan(MAX_SESSION_LOG_LINE_BYTES);
+    fs.appendFileSync(file, lines(compacted, token(at + 2, 3, 2, 103, 22)));
+    expect(tracker.getLiveTokens(at + 5000)).toMatchObject({ status: 'ready',
+      windows: { oneMinute: { status: 'ready', inputTokens: 3, outputTokens: 2, totalTokens: 5, sampleCount: 1 } } });
+    expect(tracker.isActivitySourceAvailable()).toBe(true);
+    fs.appendFileSync(file, lines(token(at + 6000, 4, 1, 107, 23)));
+    expect(tracker.getLiveTokens(at + 10_000)).toMatchObject({ status: 'ready',
+      windows: { oneMinute: { status: 'ready', inputTokens: 7, outputTokens: 3, totalTokens: 10, sampleCount: 2 } } });
+    tracker.listActiveSessions(at + 11_000);
+    expect(tracker.getLiveTokens(at + 11_000).windows.oneMinute).toMatchObject({ status: 'ready', totalTokens: 10, sampleCount: 2 });
+  });
+
   it('keeps completed chats long enough to receive final usage', () => {
     fs.writeFileSync(file, lines(meta(at), event(at, 'task_started')));
     const tracker = new ActiveSessionTracker(root);

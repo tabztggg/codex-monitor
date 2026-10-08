@@ -72,6 +72,7 @@ describe('archived task history', () => {
     // Startup can list history before account quota is available.
     expect(restarted.listJobs({ nowMs }).data).toEqual(first.data.map(job => ({ ...job,
       estimated20xIsComplete: false,
+      estimated20xPercent: null,
       periodMetrics: { ...job.periodMetrics, usage: null, costUsd: null, costComplete: false, tokensComplete: false }
     })));
     const cached = restarted.listJobs({ nowMs: nowMs + 7 * 86400000, usageWindow: { ...nextWindow, startedAtMs: Date.parse('2026-05-21T00:00:00Z'), resetsAt: '2026-05-28T00:00:00Z' } });

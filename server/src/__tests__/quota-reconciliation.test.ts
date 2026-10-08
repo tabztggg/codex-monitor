@@ -26,10 +26,10 @@ describe('account quota reconciliation', () => {
     const result = replay([event(0, 0, 0), event(1, 5, 10), event(2, 5, 10, 'unknown', null),
       event(3, 10, 10), event(4, 15, null), event(5, 20, 10), event(6, 20, 10, 'other', end + 86400000),
       event(7, 25, 10), event(39, 30, 10), event(40, 35, 10)]);
-    expect(result.attributed.get('a')).toBe(15);
+    expect(result.attributed.get('a')).toBe(22.5);
     expect(result.attributed.has('unknown')).toBe(false);
     expect(result.attributed.has('other')).toBe(false);
-    expect(result.unattributedPercent).toBe(64);
+    expect(result.unattributedPercent).toBe(56.5);
     expect(result.partialTasks.has('a')).toBe(true);
     expect(result.partialTasks.has('unknown')).toBe(true);
   });

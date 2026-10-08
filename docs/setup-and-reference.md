@@ -149,22 +149,25 @@ The paired task quota column has fixed scopes:
   that task and its attributed children.
 
 The selected account replays quota snapshots and allocates each observed increase
-using same-interval response cost weights. Cross-account usage divides priced
-cost by a retained Pro 20x reference. Plan comparison scales both values; each side has an independent sort control. Project totals
+using same-interval response cost weights, with token weights for unpriced records.
+Cross-account usage first uses recorded quota allocations, then estimates uncovered
+priced records with a retained Pro 20x reference. Plan comparison scales both values; each side has an independent sort control. Project totals
 include hidden rows. Changing the time range does not change these two scopes.
 
 Rollouts lack reliable account IDs. Records are matched by weekly reset time,
 allowing 60 seconds of timestamp drift; records from other windows are excluded.
 This is an account-identity estimate: accounts sharing the same reset time cannot
 be distinguished. Missing windows, unpriced models and untimed usage make the
-result incomplete (`+`), or unavailable (`--`) when no priced subtotal exists.
+result incomplete (`+`), or unavailable (`--`) when no quota or priced evidence exists.
 No current-week usage is zero only when the records establish that absence.
 The selected account label comes from the same quota snapshot as the calculation.
 
 Account reconciliation shows included tasks + tasks outside the current archive
-scope + unattributed quota = official account used. Initial consumption, missing
-prices, unknown account windows, gaps over 30 minutes and corrections remain
-unassigned. Cached sample metadata enables replay after pricing updates without
+scope + unattributed quota = official account used. Unpriced records can participate
+by token weight without inventing USD prices. Their allocation is labeled approximate
+and is already included in task totals. Initial consumption, missing usage records,
+unknown account windows, gaps over 30 minutes and corrections remain unassigned.
+Cached sample metadata enables replay after pricing updates without
 rereading transcripts. Filters do not change the reconciliation totals.
 The old `.cache/quota-attribution.json` ledger remains only for compatibility
 with quota snapshots that lack an account identity.
@@ -178,8 +181,9 @@ of 1, 4 and 20; it does not change or verify the account's actual tier.
 
 Calibration uses the selected account's replayable observations in its quota
 window, from metadata retained for 30 days. Parallel sessions are merged into
-one timeline. At least five percentage points and 90% coverage of both quota
-increases and matching priced costs are required; a narrow surviving subset
+one timeline. At least five percentage points and 90% coverage of quota increases
+and matching usage weights are required. Mixed intervals retain known prices and
+estimate the unpriced share by token weight; partial references are labeled approximate. A narrow surviving subset
 does not replace the reference. Older account windows cannot replace a newer
 scoped reference. Historical manual references may remain the common comparison
 unit while evidence is insufficient, labeled as retained rather than current.
@@ -187,7 +191,7 @@ Manual overrides apply only to their recorded account and matching reset period.
 
 At least five usable percentage points are required. Initial balances do not
 count as consumption. Reset changes and gaps over 30 minutes restart observation
-baselines; unusable corrections or missing prices invalidate affected intervals.
+baselines; unusable corrections or missing usage evidence invalidate affected intervals.
 Stale snapshots cannot recount a return to the preceding high-water mark.
 See `server/src/quota-equivalent.ts` for the implementation.
 
@@ -200,7 +204,8 @@ and active period; otherwise it can be retained as a historical comparison
 reference. It changes cross-account equivalents only, not task allocations,
 costs or tokens. Official account totals are not forced onto tasks.
 
-Selected-range summary and ranking costs are divided by this reference. One
+Selected-range summaries, daily trends and rankings use the same quota slices
+and estimate only uncovered priced usage with this reference. One
 20x week always equals 100%; this is not a share of total consumption, and several
 weeks of usage can exceed 100%. Records from formerly used
 accounts count only where available locally and within the archive scope.

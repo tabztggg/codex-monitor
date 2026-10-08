@@ -34,7 +34,7 @@ describe('quota calibration sample identity', () => {
   it('keeps independent fragments of the same task instead of colliding at event zero', () => {
     const first = parse(records([token(start)]));
     const second = parse(records([token(start + 60000, 2000, 15)]));
-    expect(first.quotaCalibrationVersion).toBe(8);
+    expect(first.quotaCalibrationVersion).toBe(9);
     expect(first.quotaCalibrationEvents?.[0].id).toMatch(/^v3:[a-f0-9]{64}$/);
     expect(second.quotaCalibrationEvents?.[0].id).not.toBe(first.quotaCalibrationEvents?.[0].id);
     expect(first.quotaCalibrationEvents?.[0].streamId).toMatch(/^[a-f0-9]{64}$/);
@@ -72,7 +72,7 @@ describe('quota calibration sample identity', () => {
     expect(later.id).toBe(initial.id);
     expect(later.streamId).toBe(initial.streamId);
     expect(later.cost).toBeNull();
-    expect(Object.keys(later).sort()).toEqual(['at', 'cost', 'duplicateUsage', 'id', 'limit', 'streamId']);
+    expect(Object.keys(later).sort()).toEqual(['at', 'cost', 'duplicateUsage', 'id', 'limit', 'streamId', 'tokens']);
     expect(JSON.stringify(later)).not.toContain(secret);
     expect(JSON.stringify(later)).not.toContain('C:/private/workspace');
     expect(JSON.stringify(later)).not.toContain('unknown-model');
@@ -148,7 +148,7 @@ describe('quota calibration sample identity', () => {
       reader.listJobs({ nowMs });
       expect(fs.openSync).not.toHaveBeenCalled();
       const upgraded = JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1];
-      expect(upgraded.job.quotaCalibrationVersion).toBe(8);
+      expect(upgraded.job.quotaCalibrationVersion).toBe(9);
       expect(upgraded.job.quotaCalibrationEvents.map((sample: { id: string }) => sample.id)).toEqual(expectedIds);
       expect(upgraded.job.quotaCalibrationEvents[0].duplicateUsage).toBe(false);
       expect(upgraded.compact).toEqual(compact);

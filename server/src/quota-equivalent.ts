@@ -1,16 +1,16 @@
 import type { HistoryJob } from '../../shared/monitor';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { reconcileQuotaUsage } from './quota-reconciliation';
+import { reconcileQuotaUsage, reconcileAcrossAccounts } from './quota-reconciliation';
 
-type SavedCalibration = { version: 1; costPerPercent: number; quotaPercent: number; windowStart: number; updatedAt: number; accountId?: string; resetsAt?: string };
+type SavedCalibration = { version: 1; costPerPercent: number; quotaPercent: number; windowStart: number; updatedAt: number; accountId?: string; resetsAt?: string; referenceIsComplete?: boolean };
 type CalibrationScope = { accountId: string; startedAtMs: number; resetsAt: string; usedPercent: number; observedAtMs?: number; allowUpdate?: boolean };
 const SAMPLE_RETENTION_MS = 30 * 86400000;
 const SAVE_INTERVAL_MS = 30000;
-// v4 excludes inherited fork usage and rejects incomplete token costs. Retain
-// the old displayed reference, but never train with samples from older parsers.
-const SAMPLE_VERSION = 4;
-const CALIBRATION_POLICY = 3;
+// v5 adds complete token weights. v4 identities/prices remain reusable and are
+// enriched from selected compact records, without scanning extra archives.
+const SAMPLE_VERSION = 5;
+const CALIBRATION_POLICY = 4;
 
 /** Keep the last usable reference across resets, reduced archive scopes and restarts. */
 export class QuotaCalibration {
@@ -23,6 +23,9 @@ export class QuotaCalibration {
   private referenceDirty = false;
   private saveFailed = false;
   private nextSaveAt = 0;
+  private sampleGeneration = 0;
+  private latestSampleAt = 0;
+  private acrossCache: { key: string; result: ReturnType<typeof reconcileAcrossAccounts> } | null = null;
   constructor(private readonly file?: string) {
     if (file) {
       try {
@@ -39,8 +42,9 @@ export class QuotaCalibration {
         // Quota attribution can already be useful before a five-point common
         // calibration exists. Retain its metadata across restarts as well.
         if (value?.version === 1 && value.costPerPercent === null && value.quotaPercent === 0 &&
-            value.sampleVersion === SAMPLE_VERSION && Array.isArray(value.samples) && value.samples.every(validSample)) {
+            [4, SAMPLE_VERSION].includes(value.sampleVersion) && Array.isArray(value.samples) && value.samples.every(validSample)) {
           for (const event of value.samples) this.samples.set(sampleKey(event), event);
+          this.dirty = value.sampleVersion !== SAMPLE_VERSION;
           return;
         }
         if (value?.version !== 1 || !Number.isFinite(value.costPerPercent) || value.costPerPercent <= 0 ||
@@ -48,12 +52,14 @@ export class QuotaCalibration {
             !validTimestamp(value.windowStart) || !validTimestamp(value.updatedAt) || value.updatedAt < value.windowStart) throw new Error('Invalid calibration');
         this.currentPolicy = value.calibrationPolicy === CALIBRATION_POLICY;
         this.saved = { version: 1, costPerPercent: value.costPerPercent, quotaPercent: value.quotaPercent,
-          windowStart: value.windowStart, updatedAt: value.updatedAt, accountId: value.accountId, resetsAt: value.resetsAt };
+          windowStart: value.windowStart, updatedAt: value.updatedAt, accountId: value.accountId, resetsAt: value.resetsAt,
+          referenceIsComplete: value.referenceIsComplete !== false };
         // Version 1 files without samples remain valid references. Do not replace
         // them from a potentially narrower selection until fresh samples qualify.
-        if (value.sampleVersion === SAMPLE_VERSION && Array.isArray(value.samples) && value.samples.every(validSample)) {
+        if ([4, SAMPLE_VERSION].includes(value.sampleVersion) && Array.isArray(value.samples) && value.samples.every(validSample)) {
           for (const event of value.samples) this.samples.set(sampleKey(event), event);
           this.referenceSamplesKnown = this.currentPolicy && value.referenceSamplesKnown === true;
+          this.dirty = value.sampleVersion !== SAMPLE_VERSION;
         } else this.dirty = true;
       } catch (error) { console.warn('Saved quota calibration unavailable:', String(error)); }
     }
@@ -68,7 +74,7 @@ export class QuotaCalibration {
       // A full log can prove unchanged cumulative usage while an overlapping
       // fragment lacks that preceding context. Retain the proven zero cost.
       const sample = previous?.duplicateUsage && !event.duplicateUsage
-        ? { ...event, cost: 0, duplicateUsage: true } : event;
+        ? { ...event, cost: 0, tokens: 0, duplicateUsage: true } : event;
       if (!sameSample(previous, sample)) {
         this.samples.set(key, { ...sample, limit: sample.limit ? { ...sample.limit } : null });
         samplesChanged = this.dirty = true;
@@ -77,10 +83,13 @@ export class QuotaCalibration {
     for (const [key, event] of this.samples) {
       if (event.at < now - SAMPLE_RETENTION_MS) {
         this.samples.delete(key);
+        samplesChanged = true;
         this.dirty = true;
       }
     }
     const known = [...this.samples.values()];
+    this.latestSampleAt = known.reduce((latest, e) => Math.max(latest, e.at), 0);
+    if (samplesChanged) this.sampleGeneration++;
     if (scope) {
       // Train from the selected account's replayable quota increments, never
       // from a mixture of different account windows or a stale manual total.
@@ -88,7 +97,7 @@ export class QuotaCalibration {
       let source: 'current' | 'previous' | 'unavailable' | 'manual' = this.saved ? 'previous' : 'unavailable';
       if (scope.allowUpdate !== false && reconciled?.costPerPercent && reconciled.calibratedAt &&
           (!this.saved?.accountId || Date.parse(reconciled.calibratedAt) >= this.saved.updatedAt)) {
-        this.remember(reconciled.costPerPercent, reconciled.calibrationPercent, scope.startedAtMs, Date.parse(reconciled.calibratedAt), scope);
+        this.remember(reconciled.costPerPercent, reconciled.calibrationPercent, scope.startedAtMs, Date.parse(reconciled.calibratedAt), scope, reconciled.referenceIsComplete);
         source = 'current';
       }
       this.persist(now);
@@ -97,7 +106,7 @@ export class QuotaCalibration {
         Math.abs(Date.parse(manual.resetsAt) - Date.parse(scope.resetsAt)) <= 60000 && now < Date.parse(manual.resetsAt);
       if (manualMatches) return { costPerPercent: manual.costPerPercent, quotaPercent: 100,
         referenceQuotaPercent: 100, source: 'manual' as const, calibratedAt: new Date(manual.updatedAt).toISOString(),
-        referenceAccountId: manual.accountId, referenceResetsAt: manual.resetsAt, reconciliation: reconciled };
+        referenceAccountId: manual.accountId, referenceResetsAt: manual.resetsAt, referenceIsComplete: true, reconciliation: reconciled };
       // A confirmed older reference can still serve the cross-account unit
       // while this window gathers evidence. It never sets task attribution.
       const historicalManual = source !== 'current' && manual && (!this.saved || this.saved.updatedAt <= manual.updatedAt || !this.saved.accountId);
@@ -108,7 +117,8 @@ export class QuotaCalibration {
         calibratedAt: historicalManual ? new Date(manual.updatedAt).toISOString() : this.saved ? new Date(this.saved.updatedAt).toISOString() : null,
         referenceAccountId: historicalManual ? manual.accountId : this.saved?.accountId,
         referenceResetsAt: historicalManual ? manual.resetsAt : this.saved?.resetsAt,
-        coverage: reconciled ? { quota: Math.min(1, reconciled.quotaCoverage), cost: Math.min(1, reconciled.costCoverage) } : undefined,
+        referenceIsComplete: historicalManual ? true : this.saved?.referenceIsComplete !== false,
+        coverage: reconciled ? { quota: Math.min(1, reconciled.quotaCoverage), cost: Math.min(1, reconciled.costCoverage), priced: Math.min(1, reconciled.pricedCoverage) } : undefined,
         reconciliation: reconciled };
     }
     if (this.saved?.accountId) {
@@ -156,8 +166,17 @@ export class QuotaCalibration {
 
   recordedEvents(): QuotaCalibrationEvent[] { return [...this.samples.values()]; }
 
-  private remember(costPerPercent: number, quotaPercent: number, windowStart: number, updatedAt: number, scope?: CalibrationScope) {
+  replayAcrossAccounts(now: number, scope?: Parameters<typeof reconcileAcrossAccounts>[2]) {
+    const key = JSON.stringify([this.sampleGeneration, Math.min(now, this.latestSampleAt), scope?.usedPercent, scope?.resetsAt, scope?.observedAtMs]);
+    if (this.acrossCache?.key === key) return this.acrossCache.result;
+    const result = reconcileAcrossAccounts(this.recordedEvents(), now, scope);
+    this.acrossCache = { key, result };
+    return result;
+  }
+
+  private remember(costPerPercent: number, quotaPercent: number, windowStart: number, updatedAt: number, scope?: CalibrationScope, referenceIsComplete = true) {
     const next: SavedCalibration = { version: 1, costPerPercent, quotaPercent, windowStart, updatedAt,
+      referenceIsComplete,
       ...(scope ? { accountId: scope.accountId, resetsAt: scope.resetsAt } : {}) };
     if (JSON.stringify(next) !== JSON.stringify(this.saved)) this.referenceDirty = this.dirty = true;
     this.saved = next;
@@ -193,6 +212,8 @@ function validSample(event: QuotaCalibrationEvent): boolean {
     (event.taskId === undefined || typeof event.taskId === 'string' && event.taskId.length > 0) &&
     (event.duplicateUsage === undefined || typeof event.duplicateUsage === 'boolean') &&
     (!event.duplicateUsage || event.cost === 0) &&
+    (event.tokens === undefined || Number.isSafeInteger(event.tokens) && event.tokens >= 0) &&
+    (!event.duplicateUsage || event.tokens === undefined || event.tokens === 0) &&
     (event.cost === null || Number.isFinite(event.cost) && event.cost >= 0) &&
     (event.limit === null || event.limit && Number.isFinite(event.limit.used) && event.limit.used >= 0 && event.limit.used <= 100 &&
       validTimestamp(event.limit.resetsAt) && event.at < event.limit.resetsAt && event.at >= event.limit.resetsAt - 604800000));
@@ -203,7 +224,7 @@ function sampleKey(event: QuotaCalibrationEvent): string {
 }
 
 function sameSample(left: QuotaCalibrationEvent | undefined, right: QuotaCalibrationEvent): boolean {
-  return Boolean(left && left.at === right.at && left.cost === right.cost && left.streamId === right.streamId && left.taskId === right.taskId &&
+  return Boolean(left && left.at === right.at && left.cost === right.cost && left.tokens === right.tokens && left.streamId === right.streamId && left.taskId === right.taskId &&
     Boolean(left.duplicateUsage) === Boolean(right.duplicateUsage) &&
     left.limit?.used === right.limit?.used && left.limit?.resetsAt === right.limit?.resetsAt);
 }
@@ -217,6 +238,8 @@ export interface QuotaCalibrationEvent {
   duplicateUsage?: boolean;
   at: number;
   cost: number | null;
+  /** Complete incremental total only; absence cannot be mistaken for zero. */
+  tokens?: number;
   limit: { used: number; resetsAt: number } | null;
 }
 

@@ -2,8 +2,9 @@ import { closeSync, fstatSync, openSync, readSync, statSync, type Stats } from '
 
 const CHUNK_BYTES = 256 * 1024;
 const ANCHOR_BYTES = 128;
-// Bounds materialized records. Oversized tool outputs are validated and projected
-// in bounded chunks; statistics, metadata and unknown record types stay strict.
+// Bounds materialized records. Oversized tool outputs and compaction envelopes
+// are validated and projected in bounded chunks; live statistics, session
+// metadata and unknown record types stay strict.
 export const MAX_SESSION_LOG_LINE_BYTES = 8 * 1024 * 1024;
 
 export class SessionLogReadLimitError extends Error {
@@ -21,7 +22,7 @@ export class IncrementalSessionLog {
   private head: Buffer = Buffer.alloc(0);
   private anchor: Buffer = Buffer.alloc(0);
   private blocked: { observed: Stats; recordStart: number; error: SessionLogReadLimitError } | null = null;
-  private pendingOutput: { scanner: ToolOutputProjection; position: number } | null = null;
+  private pendingOutput: { scanner: OversizedRecordProjection; position: number } | null = null;
 
   public constructor(private readonly maxLineBytes = MAX_SESSION_LOG_LINE_BYTES) {
     if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes < 1) throw new RangeError('Invalid session log line limit');
@@ -84,7 +85,7 @@ export class IncrementalSessionLog {
       const append = (segment: Buffer) => {
         if (!projection && pieceBytes + segment.length > this.maxLineBytes) {
           oversizedRecordStart = this.offset;
-          projection = new ToolOutputProjection(this.maxLineBytes);
+          projection = new OversizedRecordProjection(this.maxLineBytes);
           for (const piece of pieces) projection.feed(piece);
           projection.feed(segment);
           if (!projection.canProject()) throw new SessionLogReadLimitError(this.maxLineBytes);
@@ -176,11 +177,11 @@ type JsonFrame = {
   key: string | null;
 };
 
-/** Validates a whole oversized tool-output envelope without retaining its body.
+/** Validates a whole oversized tool-output or compaction envelope without retaining its body.
  * A prefix only permits streaming; projection is emitted after the whole JSON
  * object closes. Duplicate identity fields and ambiguous structures fail closed.
  */
-class ToolOutputProjection {
+class OversizedRecordProjection {
   public first = Buffer.alloc(0);
   public last = Buffer.alloc(0);
   public length = 0;
@@ -202,13 +203,17 @@ class ToolOutputProjection {
   constructor(private readonly limit: number) {}
 
   canProject(): boolean {
-    return this.type === 'response_item' &&
+    // Compaction holds replacement transcript/context and historical counters,
+    // not a new usage report. Consumers already ignore this top-level type;
+    // never replay its nested token_count records as newly reported usage.
+    return this.type === 'compacted' || this.type === 'response_item' &&
       (this.payloadType === 'function_call_output' || this.payloadType === 'custom_tool_call_output') ||
       this.type === 'event_msg' && this.payloadType === 'item_completed' && this.itemType === 'DynamicToolCall';
   }
 
   finish(): string {
     if (!this.complete || this.string || this.primitive !== null || !this.canProject()) this.fail();
+    if (this.type === 'compacted') return JSON.stringify({ type: this.type, timestamp: this.timestamp });
     return JSON.stringify({ type: this.type, timestamp: this.timestamp,
       payload: { type: this.payloadType, ...(this.type === 'event_msg' ? { item: { type: this.itemType } } : {}) } });
   }
@@ -354,7 +359,7 @@ function recordExceedsLimit(fd: number, start: number, limit: number): boolean {
   // If a rewrite moved record boundaries, fall back to a clean rebuild.
   if (start > 0 && readAt(fd, start - 1, 1)[0] !== 10) return false;
   const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
-  const projection = new ToolOutputProjection(limit);
+  const projection = new OversizedRecordProjection(limit);
   let projectable = true;
   let read = 0;
   while (read <= limit) {
@@ -367,7 +372,7 @@ function recordExceedsLimit(fd: number, start: number, limit: number): boolean {
     }
     read += count;
   }
-  // A repaired record may now be an allowed tool output: rebuild and validate
+  // A repaired record may now be an allowed projection: rebuild and validate
   // its full envelope rather than keeping a stale size-only rejection.
   return !projectable || !projection.canProject();
 }

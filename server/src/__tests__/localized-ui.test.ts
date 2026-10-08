@@ -47,6 +47,39 @@ describe('full interface language rendering', () => {
       expect(html).not.toContain('NaN');
     }
   });
+  it('labels token-weight allocation as part of task totals and supports older snapshots', () => {
+    const allocation = { attributionBasis: 'observedQuotaIncrements', usedPercent: 25,
+      includedAttributedPercent: 24, outsideScopePercent: 0, unattributedPercent: 1,
+      tokenFallbackPercent: 20 } as HistoryUsageAllocation;
+    for (const language of ['zh', 'en'] as const) {
+      testState.language = language;
+      const render = (value: HistoryUsageAllocation) => renderToStaticMarkup(createElement(QuotaReconciliation, { allocation: value }));
+      const html = render(allocation);
+      expect(html).toContain(language === 'zh' ? 'Token 权重分配' : 'Token-weight allocation');
+      expect(html).toContain(language === 'zh' ? '不额外相加' : 'not an additional amount');
+      for (const percent of ['25.0%', '24.0%', '1.0%', '20.0%']) expect(html).toContain(percent);
+      for (const tokenFallbackPercent of [undefined, 0]) {
+        const old = render({ ...allocation, tokenFallbackPercent });
+        expect(old).not.toContain(language === 'zh' ? 'Token 权重分配' : 'Token-weight allocation');
+        expect(old).not.toContain('NaN');
+      }
+    }
+  });
+  it('shows mixed calibration quality and priced coverage in both languages without inventing prices', () => {
+    try {
+      for (const language of ['zh', 'en'] as const) {
+        testState.language = language;
+        testState.allocation = { equivalent20x: { source: 'current', costPerPercentUsd: 2,
+          calibrationQuotaPercent: 12, referenceIsComplete: false, method: 'mixedTokenWeights',
+          coverage: { quota: 1, cost: 0.99, priced: 0.75 } } } as HistoryUsageAllocation;
+        const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page: 'trends' })));
+        expect(html).toContain(language === 'zh' ? '费用与 Token 混合权重' : 'Mixed cost and token weights');
+        expect(html).toContain(language === 'zh' ? '<dt>校准已定价权重</dt><dd>75.0%</dd>' : '<dt>Priced calibration weight</dt><dd>75.0%</dd>');
+        expect(html).toContain(language === 'zh' ? '美元费用仅包含已定价记录' : 'USD totals include only priced records');
+        expect(html).toContain(language === 'zh' ? 'US$2.00+' : '$2.00+');
+      }
+    } finally { testState.allocation = null; }
+  });
   it('distinguishes a manual normalization target from observed calibration samples', () => {
     const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DashboardPage, { snapshot, nowMs: Date.now(), connectionLabel: 'live', page: 'trends' })));
     try {
@@ -108,6 +141,23 @@ describe('full interface language rendering', () => {
     }, allocation: { equivalent20x: { costPerPercentUsd: 2 } } as HistoryUsageAllocation, periodLabel: 'Today', section: 'trend', expanded: true }));
     expect(html).toContain('5.0%+');
     expect(html).toContain('Some records have no date');
+  });
+  it('uses the daily quota estimate instead of repricing it and preserves unavailable values', () => {
+    testState.language = 'en';
+    const day = { date: '2026-10-07', costUsd: 80, usage: job.totalUsage!, unpricedTokens: 0,
+      estimated20xPercent: 2, estimated20xIsComplete: false,
+      models: [{ model: 'gpt-6-sol', usage: job.totalUsage!, costUsd: 80, unpricedTokens: 0, taskCount: 1, tokensComplete: true, costComplete: true }] };
+    const analysis = { period: 'today' as const, startedAt: null, endedAt: '2026-10-07T08:00:00Z', timeZone: 'America/Los_Angeles', unpricedTokens: 0, untimedTokens: 0, days: [day] };
+    const render = (value: HistoryAnalysis) => renderToStaticMarkup(createElement(TaskInsights, { jobs: [], analysis: value,
+      allocation: { equivalent20x: { costPerPercentUsd: 2 } } as HistoryUsageAllocation, periodLabel: 'Today', section: 'trend', expanded: true }));
+    const html = render(analysis);
+    expect(html).toContain('aria-label="2026-10-07: 2.0%+"');
+    expect(html).not.toContain('aria-label="2026-10-07: 40.0%');
+    expect(html).not.toContain('class="model-trend-segment"');
+    expect(html).not.toContain('class="model-legend"');
+    const missing = render({ ...analysis, days: [{ ...day, estimated20xPercent: null }] });
+    expect(missing).toContain('aria-label="2026-10-07: --"');
+    expect(missing).not.toContain('aria-label="2026-10-07: 40.0%');
   });
 
   it('renders separate overview, tasks and trends pages', () => {
@@ -355,6 +405,20 @@ describe('visible statistics account and period scope', () => {
       }));
       expect(html).toContain(language === 'en' ? 'Pro 5x equivalent usage · Across accounts' : 'Pro 5x 等效消耗 · 跨账号');
       expect(html).toContain(language === 'en' ? 'Local records' : '本地记录');
+    }
+  });
+  it('distinguishes calendar-day range totals from the account reset period in both languages', () => {
+    for (const language of ['en', 'zh'] as const) {
+      testState.language = language;
+      const render = (period: HistoryAnalysis['period']) => renderToStaticMarkup(createElement(TaskInsights, {
+        jobs: [job], analysis: { ...analysis, period, timeZone: 'America/Los_Angeles' }, allocation,
+        periodLabel: createI18n(language).t('Today'), section: 'summary'
+      }));
+      const html = render('today');
+      expect(html).toContain(language === 'en' ? 'Account quota is cumulative for its reset period' : '账号额度按重置周期累计');
+      expect(html).toContain(language === 'en' ? 'Time zone: America/Los_Angeles' : '时区：America/Los_Angeles');
+      expect(html).toContain(language === 'en' ? 'these totals cover Today' : '下方合计统计今天');
+      expect(render('quota')).not.toContain('class="scope-period-note"');
     }
   });
 

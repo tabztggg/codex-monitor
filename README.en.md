@@ -8,7 +8,7 @@ This version builds on [manuelsh/codex-monitor](https://github.com/manuelsh/code
 
 This is an unofficial project. Account quota comes from Codex; task quota equivalents and costs are estimates for comparing usage, not actual charges.
 
-**[v0.5.3](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.3)** · Compaction recovery, unpriced-model quota attribution and consistent range estimates. [Changelog](CHANGELOG.md)
+**[v0.5.4](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.4)** · GPT-6.1 Terra pricing and automatic recalculation of cached usage. [Changelog](CHANGELOG.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.3-overview-en-dark.png">
@@ -126,7 +126,7 @@ The time range does not change either task quota scope. Account quota is cumulat
 
 **One selected plan's weekly allowance equals 100%; equivalents are not a share of total consumption and may exceed 100%.** Estimation assumes all recorded Pro accounts are 20x; logs cannot reliably identify 5x/20x. Pro 20x, Pro 5x and Plus apply comparison factors of 1, 4 and 20 without changing account tiers. The account badge shows only the plan returned by the API.
 
-Account attribution matches weekly reset times within 60 seconds, not reliable account IDs; identical reset times cannot be distinguished. Cost is API-equivalent USD based on token prices, including priced GPT-6 Astra/Sol/Luna and GPT-6.1 Sol usage, not a subscription bill. Pricing updates recalculate existing cached statistics. Missing logs, other-device activity and unpriced models affect results. `--` means unavailable; `+` means partial data.
+Account attribution matches weekly reset times within 60 seconds, not reliable account IDs; identical reset times cannot be distinguished. Cost is API-equivalent USD based on token prices, including priced GPT-6 Astra/Sol/Luna and GPT-6.1 Sol/Terra usage, not a subscription bill. Pricing updates recalculate existing cached statistics. Missing logs, other-device activity and unpriced models affect results. `--` means unavailable; `+` means partial data.
 
 Selected-account quota allocates recorded increases using response cost weights; unpriced records use token weights without inventing USD prices. **Account quota reconciliation** shows included tasks, tasks outside the current scope and unattributed quota; together they match the account total. It identifies the token-weight share within allocated tasks. Missing account windows, usage records, continuous observations and pre-observation consumption remain unassigned.
 

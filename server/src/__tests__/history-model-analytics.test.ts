@@ -121,6 +121,33 @@ describe('model analytics from incremental token events', () => {
       .toBeCloseTo(((100000 * 2 + 200000 * 0.1 + 1000 * 2.5) * 2 + 10000 * 10 * 1.5) / 1e6);
   });
 
+  it('prices GPT-6.1 Terra token usage and updates an older archived summary', () => {
+    const record = token(at(28), 110000, 110000, {
+      input_tokens: 100000, cached_input_tokens: 80000, output_tokens: 10000
+    });
+    write('terra', [meta('terra'), context('gpt-6.1-terra'), record], true);
+    const stableNow = now + 3 * 86400000;
+    new HistoryJobReader(sessions, ledger).listJobs({ nowMs: stableNow, period: 'lifetime' });
+    const cacheFile = path.join(root, 'cache', 'archived-history.json');
+    const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    cached.entries[0][1].job.quotaCalibrationVersion = 9;
+    cached.entries[0][1].job.totalEstimatedCostUsd = null;
+    cached.entries[0][1].job.totalEstimatedCostIsComplete = false;
+    fs.writeFileSync(cacheFile, JSON.stringify(cached));
+    vi.mocked(fs.openSync).mockClear();
+    const result = new HistoryJobReader(sessions, ledger).listJobs({ nowMs: stableNow, period: 'lifetime' });
+    expect(result.data[0]).toMatchObject({ totalUsage: { totalTokens: 110000 }, totalEstimatedCostIsComplete: true });
+    expect(result.data[0].totalEstimatedCostUsd).toBeCloseTo(0.074);
+    expect(result.analysis?.models?.[0]).toMatchObject({ model: 'gpt-6.1-terra', unpricedTokens: 0, costComplete: true });
+    expect(HISTORY_PRICING.models.find(row => row.model === 'gpt-6.1-terra')).toMatchObject({
+      input: 1, cachedInput: 0.05, cacheWriteInput: 1.25, output: 5, verifiedAt: '2026-10-30'
+    });
+    expect(fs.openSync).not.toHaveBeenCalled();
+    expect(estimateApiEquivalentCost({ inputTokens: 300000, cachedInputTokens: 200000, cacheWriteInputTokens: 1000,
+      outputTokens: 10000, reasoningOutputTokens: 4000, totalTokens: 310000 }, 'gpt-6.1-terra'))
+      .toBeCloseTo(((100000 + 200000 * 0.05 + 1000 * 1.25) * 2 + 10000 * 5 * 1.5) / 1e6);
+  });
+
   it('reprices an old archived summary without reopening the transcript or dropping token counts', () => {
     write('sol-archive', [meta('sol-archive'), context('gpt-6.1-sol'), token(at(28), 100000)], true);
     const stableNow = now + 3 * 86400000;
@@ -137,7 +164,7 @@ describe('model analytics from incremental token events', () => {
     expect(result.data[0]).toMatchObject({ totalUsage: { totalTokens: 100000 },
       totalEstimatedCostUsd: 0.2, totalEstimatedCostIsComplete: true });
     expect(fs.openSync).not.toHaveBeenCalled(); expect(fs.readSync).not.toHaveBeenCalled();
-    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1].job.quotaCalibrationVersion).toBe(9);
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).entries[0][1].job.quotaCalibrationVersion).toBe(10);
   });
 
   it('excludes future timestamps from quota/recent usage while preserving recorded lifetime totals', () => {

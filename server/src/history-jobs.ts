@@ -117,7 +117,7 @@ const ACTIVE_OPEN_TURN_WINDOW_MS = 15 * 60 * 1000;
 const ARCHIVE_CACHE_VERSION = 4;
 // Bump when parsing or pricing changes. Rebuild from the compact token timeline,
 // preserving archive caches without rereading the original transcripts.
-const HISTORY_SUMMARY_VERSION = 9;
+const HISTORY_SUMMARY_VERSION = 10;
 
 export class HistoryJobReader {
   private readonly cache = new Map<string, CachedHistoryJob>();

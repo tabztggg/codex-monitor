@@ -10,6 +10,13 @@ Windows 独立安装运行 `wscript.exe "Codex Monitor.vbs" deploy` 更新已安
 Stop Monitor, preserve caches and configuration, update source, run `npm ci` and `npm run build`, then restart.
 For standalone Windows installations, run `wscript.exe "Codex Monitor.vbs" deploy` to update the installed copy.
 
+## v0.5.4 — 2026-10-30
+
+- 支持 GPT-6.1 Terra 的 API 等价费用估算，价格依据官方标准计价。
+- 从已有缓存重新计算历史用量，无需重读已归档的原始对话。
+
+English: Add GPT-6.1 Terra API-equivalent pricing and recalculate cached history.
+
 ## v0.5.3 — 2026-10-07
 
 - 修复超大压缩上下文导致任务统计和实时 Token 无法读取；不重复计入压缩记录中的历史用量。

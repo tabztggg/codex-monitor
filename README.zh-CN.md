@@ -8,7 +8,7 @@ Codex Monitor 是一个在本机运行的网页工具，用来查看 Codex 还�
 
 这是个非官方工具。账号额度来自 Codex，任务的等效消耗和费用是估算值，用来比较用量，不代表实际账单。
 
-**[v0.5.3](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.3)** · 压缩记录读取、未定价模型额度归属与时间范围估算修复。[更新日志](CHANGELOG.md)
+**[v0.5.4](https://github.com/tabztggg/codex-monitor/releases/tag/v0.5.4)** · 支持 GPT-6.1 Terra 费用估算，并自动重算已有缓存。[更新日志](CHANGELOG.md)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/v0.5.3-overview-zh-dark.png">
@@ -126,7 +126,7 @@ PowerShell 7 手动运行时，先设置 `$env:CODEX_MONITOR_HOST = '127.0.0.1'`
 
 **等效消耗以一份所选套餐周额度为 100%，不是总消耗中的占比，可超过 100%。** 估算假定记录中的 Pro 均为 20x，日志不能可靠区分 5x／20x；Pro 20x、Pro 5x、Plus 仅按 1、4、20 倍对比，不修改账号档位。账号徽标只显示接口返回的套餐。
 
-账号归属按周重置时间匹配（允许 60 秒误差），不是可靠账号 ID；相同重置时间无法区分。费用是按 Token 价格折算的 API 等价美元，包含已定价的 GPT-6 Astra／Sol／Luna 和 GPT-6.1 Sol，并非订阅账单。更新价格表后会从已有缓存重算。缺失日志、其他设备使用和未定价模型会影响结果；`--` 表示不可用，`+` 表示部分数据。
+账号归属按周重置时间匹配（允许 60 秒误差），不是可靠账号 ID；相同重置时间无法区分。费用是按 Token 价格折算的 API 等价美元，包含已定价的 GPT-6 Astra／Sol／Luna 和 GPT-6.1 Sol／Terra，并非订阅账单。更新价格表后会从已有缓存重算。缺失日志、其他设备使用和未定价模型会影响结果；`--` 表示不可用，`+` 表示部分数据。
 
 所选账号按已记录的额度增量、依回复费用权重分配；未定价记录使用 Token 权重，不填造美元单价。**账号额度对账**显示当前任务、范围外任务和未归属额度，三项合计对应账号已用，并标注已分配任务中的 Token 权重估算份额。缺少账号周期、用量或连续观测，以及首次观测前的消耗，仍保留为未归属。
 
